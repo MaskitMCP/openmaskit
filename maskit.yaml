@@ -1,0 +1,10 @@
+upstream:
+  transport: stdio
+  command: uvx
+  args: ["mcp-server-time"]
+
+web_port: 9473
+mcp_port: 9474
+store_path: "~/.maskit/store.db"
+
+rules: []

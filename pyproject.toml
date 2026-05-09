@@ -1,0 +1,35 @@
+[project]
+name = "maskit"
+version = "0.1.0"
+description = "MCP server wrapper that masks sensitive fields in tool responses"
+readme = "README.md"
+authors = [
+    { name = "Amin Malekloo", email = "amin.malekloo@yahoo.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.27.0",
+    "starlette>=0.40.0",
+    "uvicorn[standard]>=0.30.0",
+    "aiosqlite>=0.20.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
+    "anyio>=4.0",
+]
+
+[project.scripts]
+maskit = "maskit.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

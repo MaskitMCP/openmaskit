@@ -1,0 +1,12 @@
+upstream:
+  transport: http
+  url: "https://mcp.slack.com/mcp"
+  oauth:
+    client_id: "1601185624273.8899143856786"
+    callback_port: 3118
+
+web_port: 9473
+mcp_port: 9474
+store_path: "~/.maskit/slack-store.db"
+
+rules: []

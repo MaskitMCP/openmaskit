@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maskit Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+<div x-data="dashboard()" x-init="init()">
+    <header>
+        <h1>Maskit</h1>
+        <nav>
+            <a href="/" class="active">Dashboard</a>
+            <a href="/setup">Setup</a>
+        </nav>
+    </header>
+
+    <main>
+        <section class="stats">
+            <div class="stat-card">
+                <h3>Active Rules</h3>
+                <span class="stat-value" x-text="rules.length"></span>
+            </div>
+            <div class="stat-card">
+                <h3>Masked Values</h3>
+                <span class="stat-value" x-text="mappings.length"></span>
+            </div>
+            <div class="stat-card">
+                <h3>Traffic Events</h3>
+                <span class="stat-value" x-text="traffic.length"></span>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Active Rules</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tool</th>
+                        <th>Field Path</th>
+                        <th>Alias Prefix</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="rule in rules" :key="rule.id">
+                        <tr>
+                            <td x-text="rule.tool_name"></td>
+                            <td><code x-text="rule.field_path"></code></td>
+                            <td x-text="rule.alias_prefix || rule.field_path.split('.').pop()"></td>
+                            <td>
+                                <button class="btn-danger" @click="deleteRule(rule.id)">Delete</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Masked Mappings</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Alias</th>
+                        <th>Real Value</th>
+                        <th>Tool</th>
+                        <th>Field</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="m in mappings" :key="m.alias">
+                        <tr>
+                            <td><code x-text="m.alias"></code></td>
+                            <td class="blur" x-text="m.real_value"></td>
+                            <td x-text="m.tool_name"></td>
+                            <td x-text="m.field_path"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Live Traffic</h2>
+            <div class="traffic-log">
+                <template x-for="(entry, idx) in traffic.slice(-50).reverse()" :key="idx">
+                    <div class="traffic-entry" :class="entry.direction">
+                        <span class="direction" x-text="entry.direction === 'request' ? '→' : '←'"></span>
+                        <span class="method" x-text="entry.method"></span>
+                        <span class="detail" x-text="JSON.stringify(entry.data)"></span>
+                    </div>
+                </template>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+function dashboard() {
+    return {
+        rules: [],
+        mappings: [],
+        traffic: [],
+        ws: null,
+
+        async init() {
+            await this.loadRules();
+            await this.loadMappings();
+            this.connectWebSocket();
+            setInterval(() => this.loadMappings(), 5000);
+        },
+
+        async loadRules() {
+            const res = await fetch('/api/rules');
+            const data = await res.json();
+            this.rules = data.rules;
+        },
+
+        async loadMappings() {
+            const res = await fetch('/api/mappings');
+            const data = await res.json();
+            this.mappings = data.mappings;
+        },
+
+        async deleteRule(id) {
+            await fetch(`/api/rules/${id}/delete`, { method: 'DELETE' });
+            await this.loadRules();
+        },
+
+        connectWebSocket() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            this.ws = new WebSocket(`${proto}//${location.host}/ws/traffic`);
+            this.ws.onmessage = (event) => {
+                this.traffic.push(JSON.parse(event.data));
+                if (this.traffic.length > 200) {
+                    this.traffic = this.traffic.slice(-100);
+                }
+            };
+            this.ws.onclose = () => {
+                setTimeout(() => this.connectWebSocket(), 2000);
+            };
+        }
+    };
+}
+</script>
+</body>
+</html>
