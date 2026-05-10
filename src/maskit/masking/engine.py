@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
+from maskit.masking.mappers import ResponseMapper
 from maskit.masking.rules import MaskingRule, get_nested_value, set_nested_value
 from maskit.masking.store import MaskingStore
 
@@ -25,10 +27,16 @@ class MaskingEngine:
         self._reverse_cache: dict[str, dict[str, str]] = {}  # (field_path, real_value) -> alias
         self._pending_writes: list[tuple[str, str, str, str]] = []
         self._counters: dict[str, int] = {}
+        self._mappers: list[ResponseMapper] = []
+        self._compiled_patterns: dict[int, re.Pattern] = {}
 
     @property
     def rules(self) -> list[MaskingRule]:
         return self._rules
+
+    @property
+    def mappers(self) -> list[ResponseMapper]:
+        return self._mappers
 
     def set_rules(self, rules: list[MaskingRule]):
         self._rules = rules
@@ -47,6 +55,16 @@ class MaskingEngine:
                     self._counters.get(prefix, 0), int(parts[1])
                 )
 
+    async def load_mappers(self):
+        """Load response mappers from store and compile patterns."""
+        self._mappers = await self._store.get_mappers()
+        self._compiled_patterns = {}
+        for m in self._mappers:
+            try:
+                self._compiled_patterns[m.id] = re.compile(m.pattern)
+            except re.error as exc:
+                logger.warning("Invalid regex in mapper %d: %s", m.id, exc)
+
     async def flush_pending(self):
         """Write pending alias mappings to the database."""
         writes = self._pending_writes[:]
@@ -60,17 +78,25 @@ class MaskingEngine:
         applicable_rules = [
             r for r in self._rules if r.active and r.matches_tool(tool_name)
         ]
-        if not applicable_rules:
-            return result
+        if applicable_rules:
+            if "structuredContent" in result and isinstance(result["structuredContent"], dict):
+                result["structuredContent"] = self._mask_dict(
+                    result["structuredContent"], tool_name, applicable_rules
+                )
 
-        if "structuredContent" in result and isinstance(result["structuredContent"], dict):
-            result["structuredContent"] = self._mask_dict(
-                result["structuredContent"], tool_name, applicable_rules
-            )
+            if "content" in result and isinstance(result["content"], list):
+                result["content"] = [
+                    self._mask_content_block(block, tool_name, applicable_rules)
+                    for block in result["content"]
+                ]
 
-        if "content" in result and isinstance(result["content"], list):
+        applicable_mappers = sorted(
+            [m for m in self._mappers if m.active and m.matches_tool(tool_name)],
+            key=lambda m: m.order,
+        )
+        if applicable_mappers and "content" in result and isinstance(result["content"], list):
             result["content"] = [
-                self._mask_content_block(block, tool_name, applicable_rules)
+                self._apply_mappers_to_block(block, tool_name, applicable_mappers)
                 for block in result["content"]
             ]
 
@@ -154,3 +180,41 @@ class MaskingEngine:
         elif isinstance(data, list):
             return [self._unmask_recursive(item) for item in data]
         return data
+
+    # --- Response Mapper methods ---
+
+    def _apply_mappers_to_block(
+        self, block: dict[str, Any], tool_name: str, mappers: list[ResponseMapper]
+    ) -> dict[str, Any]:
+        if block.get("type") != "text":
+            return block
+        text = block.get("text", "")
+        if not text:
+            return block
+        for mapper in mappers:
+            if mapper.id in self._compiled_patterns:
+                text = self._apply_regex_mapper(text, tool_name, mapper)
+        block["text"] = text
+        return block
+
+    def _apply_regex_mapper(
+        self, text: str, tool_name: str, mapper: ResponseMapper
+    ) -> str:
+        compiled = self._compiled_patterns[mapper.id]
+
+        def replacer(match: re.Match) -> str:
+            if match.lastindex and match.lastindex >= 1:
+                captured = match.group(1)
+                alias = self._get_or_create_alias(
+                    captured, tool_name, f"mapper:{mapper.id}", mapper.alias_prefix
+                )
+                start, end = match.span(1)
+                full_start, _ = match.span(0)
+                return match.group(0)[: start - full_start] + alias + match.group(0)[end - full_start :]
+            else:
+                alias = self._get_or_create_alias(
+                    match.group(0), tool_name, f"mapper:{mapper.id}", mapper.alias_prefix
+                )
+                return alias
+
+        return compiled.sub(replacer, text)

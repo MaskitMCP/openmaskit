@@ -384,3 +384,85 @@ code {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.mapper-add-section {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #30363d;
+}
+
+.btn-mapper {
+    background: #2d1f6f30;
+    color: #d2a8ff;
+    border: 1px solid #2d1f6f50;
+}
+
+.btn-mapper:hover {
+    background: #2d1f6f50;
+}
+
+.mapper-form {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.mapper-actions {
+    display: flex;
+    gap: 0.8rem;
+    align-items: center;
+}
+
+.btn-save {
+    background: #238636;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.btn-save:hover {
+    background: #2ea043;
+}
+
+.mono-input {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.mapper-preview {
+    margin-top: 1rem;
+}
+
+.mapper-preview h4 {
+    font-size: 0.85rem;
+    color: #8b949e;
+    margin-bottom: 0.5rem;
+}
+
+.mapper-preview-text {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 1rem;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.mapper-matches {
+    margin-top: 0.8rem;
+}
+
+.mapper-matches h4 {
+    font-size: 0.85rem;
+    color: #8b949e;
+    margin-bottom: 0.5rem;
+}
+
+.mapper-matches table {
+    font-size: 0.85rem;
+}

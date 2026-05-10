@@ -7,6 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from maskit.masking.mappers import ResponseMapper
 from maskit.masking.rules import MaskingRule
 
 _SCHEMA = """
@@ -26,8 +27,20 @@ CREATE TABLE IF NOT EXISTS rules (
     active BOOLEAN NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS response_mappers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    mapper_type TEXT NOT NULL DEFAULT 'regex_replace',
+    pattern TEXT NOT NULL,
+    alias_prefix TEXT NOT NULL,
+    "order" INTEGER NOT NULL DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_mappings_real_value ON mappings(real_value);
 CREATE INDEX IF NOT EXISTS idx_rules_tool_name ON rules(tool_name);
+CREATE INDEX IF NOT EXISTS idx_response_mappers_tool ON response_mappers(tool_name);
 """
 
 
@@ -147,6 +160,56 @@ class MaskingStore:
         cursor = await self._db.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
         await self._db.commit()
         return cursor.rowcount > 0
+
+    # --- Mapper CRUD ---
+
+    async def add_mapper(self, mapper: ResponseMapper) -> int:
+        if mapper.order == 0:
+            async with self._db.execute(
+                'SELECT COALESCE(MAX("order"), 0) FROM response_mappers WHERE tool_name = ?',
+                (mapper.tool_name,),
+            ) as cursor:
+                row = await cursor.fetchone()
+                mapper.order = (row[0] if row else 0) + 1
+
+        cursor = await self._db.execute(
+            'INSERT INTO response_mappers (tool_name, mapper_type, pattern, alias_prefix, "order", active) '
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (mapper.tool_name, mapper.mapper_type, mapper.pattern, mapper.alias_prefix, mapper.order, mapper.active),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def get_mappers(self) -> list[ResponseMapper]:
+        async with self._db.execute(
+            'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active FROM response_mappers ORDER BY "order"'
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                ResponseMapper(
+                    id=r[0],
+                    tool_name=r[1],
+                    mapper_type=r[2],
+                    pattern=r[3],
+                    alias_prefix=r[4],
+                    order=r[5],
+                    active=bool(r[6]),
+                )
+                for r in rows
+            ]
+
+    async def delete_mapper(self, mapper_id: int) -> bool:
+        cursor = await self._db.execute("DELETE FROM response_mappers WHERE id = ?", (mapper_id,))
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def reorder_mappers(self, mapper_ids: list[int]) -> None:
+        for idx, mapper_id in enumerate(mapper_ids):
+            await self._db.execute(
+                'UPDATE response_mappers SET "order" = ? WHERE id = ?',
+                (idx, mapper_id),
+            )
+        await self._db.commit()
 
     async def close(self):
         await self._db.close()

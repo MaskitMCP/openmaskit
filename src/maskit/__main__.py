@@ -105,6 +105,7 @@ async def async_main():
 
     engine = MaskingEngine(rules, store)
     await engine.load_aliases()
+    await engine.load_mappers()
 
     state = ProxyState(engine=engine)
     shutdown_event = anyio.Event()

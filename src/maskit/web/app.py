@@ -20,6 +20,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(state: ProxyState, ds_read_send: MemoryObjectSendStream[SessionMessage | Exception]) -> Starlette:
+    from maskit.web.routes.mappers import (
+        mappers_create,
+        mappers_delete,
+        mappers_list,
+        mappers_preview,
+        mappers_reorder,
+    )
     from maskit.web.routes.rules import rules_create, rules_delete, rules_list
     from maskit.web.routes.setup import api_tools, api_tools_call, index_page, setup_page
     from maskit.web.routes.traffic import TrafficWebSocket, api_mappings
@@ -32,6 +39,11 @@ def create_app(state: ProxyState, ds_read_send: MemoryObjectSendStream[SessionMe
         Route("/api/rules", rules_list, methods=["GET"]),
         Route("/api/rules/create", rules_create, methods=["POST"]),
         Route("/api/rules/{rule_id:int}/delete", rules_delete, methods=["POST", "DELETE"]),
+        Route("/api/mappers", mappers_list, methods=["GET"]),
+        Route("/api/mappers/create", mappers_create, methods=["POST"]),
+        Route("/api/mappers/{mapper_id:int}/delete", mappers_delete, methods=["POST", "DELETE"]),
+        Route("/api/mappers/preview", mappers_preview, methods=["POST"]),
+        Route("/api/mappers/reorder", mappers_reorder, methods=["POST"]),
         Route("/api/mappings", api_mappings),
         WebSocketRoute("/ws/traffic", TrafficWebSocket),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static"),
