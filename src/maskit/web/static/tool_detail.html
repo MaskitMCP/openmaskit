@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maskit - Tool</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+<div x-data="toolDetail()" x-init="init()">
+    <header>
+        <h1>Maskit</h1>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/tools" class="active">Tools</a>
+        </nav>
+    </header>
+
+    <main>
+        <a href="/tools" class="back-link">&larr; Back to Tools</a>
+
+        <div class="tool-detail-header">
+            <h2 x-text="tool ? tool.name : 'Loading...'"></h2>
+            <p class="tool-desc" x-text="tool ? (tool.description || '') : ''"></p>
+        </div>
+
+        <!-- Try It Out -->
+        <section class="panel">
+            <h2>Try It Out</h2>
+            <div x-show="!tool || !tool.inputSchema || Object.keys(tool.inputSchema.properties || {}).length === 0">
+                <p class="muted">This tool has no input parameters.</p>
+                <button class="btn-primary" @click="callTool()" :disabled="tryLoading">
+                    <span x-text="tryLoading ? 'Calling...' : 'Call'"></span>
+                </button>
+            </div>
+            <div x-show="tool && tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0" class="try-form">
+                <template x-for="(prop, name) in (tool ? tool.inputSchema?.properties || {} : {})" :key="name">
+                    <label class="try-field">
+                        <span>
+                            <code x-text="name"></code>
+                            <span x-show="(tool.inputSchema?.required || []).includes(name)" class="required">*</span>
+                            <span class="field-type" x-text="prop.type || 'any'"></span>
+                        </span>
+                        <input
+                            x-show="prop.type !== 'object' && prop.type !== 'array'"
+                            :type="prop.type === 'number' || prop.type === 'integer' ? 'number' : 'text'"
+                            :placeholder="prop.description || ''"
+                            @input="setTryArg(name, $event.target.value, prop.type)"
+                        >
+                        <textarea
+                            x-show="prop.type === 'object' || prop.type === 'array'"
+                            :placeholder="prop.description || 'JSON'"
+                            rows="3"
+                            @input="setTryArg(name, $event.target.value, prop.type)"
+                        ></textarea>
+                    </label>
+                </template>
+                <div class="try-actions">
+                    <button class="btn-primary" @click="callTool()" :disabled="tryLoading">
+                        <span x-text="tryLoading ? 'Calling...' : 'Call'"></span>
+                    </button>
+                </div>
+            </div>
+            <div x-show="tryError" class="try-error">
+                <pre x-text="tryError"></pre>
+            </div>
+            <div x-show="tryResult" class="try-result">
+                <h4>Response</h4>
+                <pre x-text="tryResult"></pre>
+            </div>
+        </section>
+
+        <!-- Input Masking -->
+        <section class="panel">
+            <h2>Input Masking</h2>
+            <p class="section-hint">Mask specific input fields so the AI agent sees aliases instead of real values.</p>
+
+            <div x-show="toolRules.length > 0" style="margin-bottom: 1rem;">
+                <h3 class="subsection-title">Active Rules</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Field Path</th>
+                            <th>Alias Prefix</th>
+                            <th>Scope</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="rule in toolRules" :key="rule.id">
+                            <tr>
+                                <td><code x-text="rule.field_path"></code></td>
+                                <td x-text="rule.alias_prefix || rule.field_path.split('.').pop()"></td>
+                                <td>
+                                    <span x-show="rule.tool_name === '*'" class="badge-global">Global</span>
+                                    <span x-show="rule.tool_name !== '*'" class="badge-tool">This tool</span>
+                                </td>
+                                <td><button class="btn-danger" @click="deleteRule(rule.id)">Delete</button></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div x-show="tool && tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0">
+                <h3 class="subsection-title">Schema Fields</h3>
+                <p class="section-hint">Click "Mask" to add a rule for a field.</p>
+                <div class="schema-fields">
+                    <template x-for="(prop, name) in (tool ? tool.inputSchema?.properties || {} : {})" :key="name">
+                        <div class="field-mask-row">
+                            <code x-text="name"></code>
+                            <span class="field-type" x-text="prop.type || 'any'"></span>
+                            <span class="field-desc" x-text="prop.description || ''"></span>
+                            <button class="btn-small" @click="quickAddRule(name)" x-show="!hasRuleForField(name)">Mask</button>
+                            <span x-show="hasRuleForField(name)" class="muted">masked</span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <div class="manual-rule-form" style="margin-top: 1rem;">
+                <h3 class="subsection-title">Custom Field Path</h3>
+                <form @submit.prevent="addRule()" class="form-row">
+                    <label>
+                        Field Path
+                        <input type="text" x-model="newRule.field_path" placeholder="e.g. nested.field.path" required>
+                    </label>
+                    <label>
+                        Alias Prefix
+                        <input type="text" x-model="newRule.alias_prefix" placeholder="auto from field name">
+                    </label>
+                    <button type="submit" class="btn-primary">Add Rule</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Output Masking -->
+        <section class="panel">
+            <h2>Output Masking</h2>
+            <p class="section-hint">Apply regex patterns to mask sensitive values in tool responses.</p>
+
+            <div x-show="toolMappers.length > 0" style="margin-bottom: 1rem;">
+                <h3 class="subsection-title">Active Mappers</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pattern</th>
+                            <th>Alias Prefix</th>
+                            <th>Order</th>
+                            <th>Scope</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="mapper in toolMappers" :key="mapper.id">
+                            <tr>
+                                <td><code x-text="mapper.pattern"></code></td>
+                                <td x-text="mapper.alias_prefix"></td>
+                                <td x-text="mapper.order"></td>
+                                <td>
+                                    <span x-show="mapper.tool_name === '*'" class="badge-global">Global</span>
+                                    <span x-show="mapper.tool_name !== '*'" class="badge-tool">This tool</span>
+                                </td>
+                                <td><button class="btn-danger" @click="deleteMapper(mapper.id)">Delete</button></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div x-show="!tryResult" class="section-hint">
+                Call the tool above to see a response, then add output mappers based on the result.
+            </div>
+
+            <div x-show="tryResult">
+                <h3 class="subsection-title">Add Mapper</h3>
+                <div class="mapper-form">
+                    <label class="try-field">
+                        <span>Regex Pattern</span>
+                        <input type="text" x-model="newMapper.pattern" placeholder="\(([A-Z0-9]+)\)" class="mono-input">
+                    </label>
+                    <label class="try-field">
+                        <span>Alias Prefix</span>
+                        <input type="text" x-model="newMapper.alias_prefix" placeholder="channel">
+                    </label>
+                    <div class="mapper-actions">
+                        <button class="btn-primary" @click="previewMapper()" :disabled="mapperPreviewLoading">
+                            <span x-text="mapperPreviewLoading ? 'Loading...' : 'Preview'"></span>
+                        </button>
+                        <button x-show="mapperPreview" class="btn-save" @click="saveMapper()">Save Mapper</button>
+                    </div>
+
+                    <div x-show="mapperPreviewError" class="try-error">
+                        <pre x-text="mapperPreviewError"></pre>
+                    </div>
+
+                    <div x-show="mapperPreview" class="mapper-preview">
+                        <h4>Preview</h4>
+                        <pre class="mapper-preview-text" x-text="mapperPreview"></pre>
+                        <div x-show="mapperMatches && mapperMatches.length > 0" class="mapper-matches">
+                            <h4>Matches</h4>
+                            <table>
+                                <thead><tr><th>Original</th><th>Alias</th></tr></thead>
+                                <tbody>
+                                    <template x-for="m in (mapperMatches || [])" :key="m.original + m.alias">
+                                        <tr>
+                                            <td><code x-text="m.original"></code></td>
+                                            <td><code x-text="m.alias"></code></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+function toolDetail() {
+    return {
+        toolName: '',
+        tool: null,
+        rules: [],
+        mappers: [],
+        tryArgs: {},
+        tryLoading: false,
+        tryResult: null,
+        tryError: null,
+        newRule: { field_path: '', alias_prefix: '' },
+        newMapper: { pattern: '', alias_prefix: '' },
+        mapperPreview: null,
+        mapperPreviewError: null,
+        mapperPreviewLoading: false,
+        mapperMatches: [],
+
+        get toolRules() {
+            return this.rules.filter(r => r.tool_name === this.toolName || r.tool_name === '*');
+        },
+
+        get toolMappers() {
+            return this.mappers.filter(m => m.tool_name === this.toolName || m.tool_name === '*');
+        },
+
+        hasRuleForField(fieldName) {
+            return this.rules.some(r =>
+                (r.tool_name === this.toolName || r.tool_name === '*') && r.field_path === fieldName
+            );
+        },
+
+        async init() {
+            const pathParts = window.location.pathname.split('/tools/');
+            this.toolName = decodeURIComponent(pathParts[1] || '');
+            document.title = `Maskit - ${this.toolName}`;
+            await Promise.all([this.loadTool(), this.loadRules(), this.loadMappers()]);
+        },
+
+        async loadTool() {
+            const res = await fetch('/api/tools');
+            const data = await res.json();
+            this.tool = data.tools.find(t => t.name === this.toolName) || null;
+        },
+
+        async loadRules() {
+            const res = await fetch('/api/rules');
+            const data = await res.json();
+            this.rules = data.rules;
+        },
+
+        async loadMappers() {
+            const res = await fetch('/api/mappers');
+            const data = await res.json();
+            this.mappers = data.mappers;
+        },
+
+        setTryArg(fieldName, value, type) {
+            if (value === '') {
+                delete this.tryArgs[fieldName];
+            } else if (type === 'number' || type === 'integer') {
+                this.tryArgs[fieldName] = Number(value);
+            } else if (type === 'boolean') {
+                this.tryArgs[fieldName] = value === 'true';
+            } else if (type === 'object' || type === 'array') {
+                try { this.tryArgs[fieldName] = JSON.parse(value); }
+                catch { this.tryArgs[fieldName] = value; }
+            } else {
+                this.tryArgs[fieldName] = value;
+            }
+        },
+
+        async callTool() {
+            this.tryLoading = true;
+            this.tryResult = null;
+            this.tryError = null;
+            this.mapperPreview = null;
+            this.mapperPreviewError = null;
+            this.mapperMatches = [];
+            try {
+                const res = await fetch('/api/tools/call', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tool_name: this.toolName, arguments: this.tryArgs }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                    this.tryError = typeof data.error === 'string' ? data.error : JSON.stringify(data.error, null, 2);
+                } else {
+                    this.tryResult = JSON.stringify(data.result, null, 2);
+                }
+            } catch (e) {
+                this.tryError = e.message;
+            } finally {
+                this.tryLoading = false;
+            }
+        },
+
+        async quickAddRule(fieldName) {
+            await fetch('/api/rules/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool_name: this.toolName,
+                    field_path: fieldName,
+                    alias_prefix: '',
+                }),
+            });
+            await this.loadRules();
+        },
+
+        async addRule() {
+            if (!this.newRule.field_path) return;
+            await fetch('/api/rules/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool_name: this.toolName,
+                    field_path: this.newRule.field_path,
+                    alias_prefix: this.newRule.alias_prefix,
+                }),
+            });
+            this.newRule = { field_path: '', alias_prefix: '' };
+            await this.loadRules();
+        },
+
+        async deleteRule(id) {
+            await fetch(`/api/rules/${id}/delete`, { method: 'DELETE' });
+            await this.loadRules();
+        },
+
+        async previewMapper() {
+            if (!this.newMapper.pattern || !this.newMapper.alias_prefix) return;
+            this.mapperPreviewLoading = true;
+            this.mapperPreview = null;
+            this.mapperPreviewError = null;
+            this.mapperMatches = [];
+            try {
+                const res = await fetch('/api/mappers/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: this.tryResult || '',
+                        pattern: this.newMapper.pattern,
+                        alias_prefix: this.newMapper.alias_prefix,
+                    }),
+                });
+                const data = await res.json();
+                if (data.error) {
+                    this.mapperPreviewError = data.error;
+                } else {
+                    this.mapperPreview = data.result;
+                    this.mapperMatches = data.matches || [];
+                }
+            } catch (e) {
+                this.mapperPreviewError = e.message;
+            } finally {
+                this.mapperPreviewLoading = false;
+            }
+        },
+
+        async saveMapper() {
+            const res = await fetch('/api/mappers/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool_name: this.toolName,
+                    pattern: this.newMapper.pattern,
+                    alias_prefix: this.newMapper.alias_prefix,
+                }),
+            });
+            const data = await res.json();
+            if (!data.error) {
+                this.newMapper = { pattern: '', alias_prefix: '' };
+                this.mapperPreview = null;
+                this.mapperMatches = [];
+                await this.loadMappers();
+            }
+        },
+
+        async deleteMapper(id) {
+            await fetch(`/api/mappers/${id}/delete`, { method: 'DELETE' });
+            await this.loadMappers();
+        },
+    };
+}
+</script>
+</body>
+</html>

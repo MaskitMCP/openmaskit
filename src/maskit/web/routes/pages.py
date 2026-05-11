@@ -1,4 +1,4 @@
-"""Setup and tool schema routes."""
+"""Page and tool schema routes."""
 
 from __future__ import annotations
 
@@ -19,8 +19,12 @@ async def index_page(request: Request):
     return FileResponse(STATIC_DIR / "index.html")
 
 
-async def setup_page(request: Request):
-    return FileResponse(STATIC_DIR / "setup.html")
+async def tools_page(request: Request):
+    return FileResponse(STATIC_DIR / "tools.html")
+
+
+async def tool_detail_page(request: Request):
+    return FileResponse(STATIC_DIR / "tool_detail.html")
 
 
 async def api_tools(request: Request):

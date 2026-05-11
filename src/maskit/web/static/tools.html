@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maskit - Tools</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+<div x-data="toolsPage()" x-init="init()">
+    <header>
+        <h1>Maskit</h1>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/tools" class="active">Tools</a>
+        </nav>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Available Tools</h2>
+            <p x-show="tools.length === 0" class="muted">
+                No tools discovered yet. Tools will appear here once the upstream server responds.
+            </p>
+            <div class="tools-grid" x-show="tools.length > 0">
+                <template x-for="tool in tools" :key="tool.name">
+                    <a :href="'/tools/' + encodeURIComponent(tool.name)" class="tool-card-link">
+                        <h3 x-text="tool.name"></h3>
+                        <p x-text="tool.description || 'No description'"></p>
+                        <div class="tool-badges">
+                            <span x-show="toolRuleCount(tool.name) > 0" class="tool-badge">
+                                <span x-text="toolRuleCount(tool.name)"></span> rules
+                            </span>
+                            <span x-show="toolMapperCount(tool.name) > 0" class="tool-badge tool-badge-mapper">
+                                <span x-text="toolMapperCount(tool.name)"></span> mappers
+                            </span>
+                        </div>
+                    </a>
+                </template>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Global Rules (apply to all tools)</h2>
+
+            <div x-show="globalRules.length === 0 && globalMappers.length === 0" class="muted">
+                No global rules or mappers configured.
+            </div>
+
+            <div x-show="globalRules.length > 0">
+                <h3 class="subsection-title">Input Rules</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Field Path</th>
+                            <th>Alias Prefix</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="rule in globalRules" :key="rule.id">
+                            <tr>
+                                <td><code x-text="rule.field_path"></code></td>
+                                <td x-text="rule.alias_prefix || rule.field_path.split('.').pop()"></td>
+                                <td><button class="btn-danger" @click="deleteRule(rule.id)">Delete</button></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div x-show="globalMappers.length > 0" style="margin-top: 1rem;">
+                <h3 class="subsection-title">Output Mappers</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Pattern</th>
+                            <th>Alias Prefix</th>
+                            <th>Order</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="mapper in globalMappers" :key="mapper.id">
+                            <tr>
+                                <td><code x-text="mapper.pattern"></code></td>
+                                <td x-text="mapper.alias_prefix"></td>
+                                <td x-text="mapper.order"></td>
+                                <td><button class="btn-danger" @click="deleteMapper(mapper.id)">Delete</button></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="global-add-section">
+                <h3 class="subsection-title">Add Global Rule</h3>
+                <form @submit.prevent="addGlobalRule()" class="form-row">
+                    <label>
+                        Field Path
+                        <input type="text" x-model="newRule.field_path" placeholder="e.g. connection.host" required>
+                    </label>
+                    <label>
+                        Alias Prefix
+                        <input type="text" x-model="newRule.alias_prefix" placeholder="auto from field name">
+                    </label>
+                    <button type="submit" class="btn-primary">Add Rule</button>
+                </form>
+
+                <h3 class="subsection-title" style="margin-top: 1rem;">Add Global Mapper</h3>
+                <form @submit.prevent="addGlobalMapper()" class="form-row">
+                    <label>
+                        Regex Pattern
+                        <input type="text" x-model="newMapper.pattern" placeholder="C[A-Z0-9]{10}" class="mono-input" required>
+                    </label>
+                    <label>
+                        Alias Prefix
+                        <input type="text" x-model="newMapper.alias_prefix" placeholder="channel" required>
+                    </label>
+                    <button type="submit" class="btn-primary">Add Mapper</button>
+                </form>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+function toolsPage() {
+    return {
+        tools: [],
+        rules: [],
+        mappers: [],
+        newRule: { field_path: '', alias_prefix: '' },
+        newMapper: { pattern: '', alias_prefix: '' },
+
+        get globalRules() {
+            return this.rules.filter(r => r.tool_name === '*');
+        },
+
+        get globalMappers() {
+            return this.mappers.filter(m => m.tool_name === '*');
+        },
+
+        toolRuleCount(toolName) {
+            return this.rules.filter(r => r.tool_name === toolName).length;
+        },
+
+        toolMapperCount(toolName) {
+            return this.mappers.filter(m => m.tool_name === toolName).length;
+        },
+
+        async init() {
+            await Promise.all([this.loadTools(), this.loadRules(), this.loadMappers()]);
+        },
+
+        async loadTools() {
+            const res = await fetch('/api/tools');
+            const data = await res.json();
+            this.tools = data.tools;
+        },
+
+        async loadRules() {
+            const res = await fetch('/api/rules');
+            const data = await res.json();
+            this.rules = data.rules;
+        },
+
+        async loadMappers() {
+            const res = await fetch('/api/mappers');
+            const data = await res.json();
+            this.mappers = data.mappers;
+        },
+
+        async addGlobalRule() {
+            if (!this.newRule.field_path) return;
+            await fetch('/api/rules/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool_name: '*',
+                    field_path: this.newRule.field_path,
+                    alias_prefix: this.newRule.alias_prefix,
+                }),
+            });
+            this.newRule = { field_path: '', alias_prefix: '' };
+            await this.loadRules();
+        },
+
+        async addGlobalMapper() {
+            if (!this.newMapper.pattern || !this.newMapper.alias_prefix) return;
+            await fetch('/api/mappers/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool_name: '*',
+                    pattern: this.newMapper.pattern,
+                    alias_prefix: this.newMapper.alias_prefix,
+                }),
+            });
+            this.newMapper = { pattern: '', alias_prefix: '' };
+            await this.loadMappers();
+        },
+
+        async deleteRule(id) {
+            await fetch(`/api/rules/${id}/delete`, { method: 'DELETE' });
+            await this.loadRules();
+        },
+
+        async deleteMapper(id) {
+            await fetch(`/api/mappers/${id}/delete`, { method: 'DELETE' });
+            await this.loadMappers();
+        },
+    };
+}
+</script>
+</body>
+</html>

@@ -27,13 +27,13 @@ def create_app(state: ProxyState, ds_read_send: MemoryObjectSendStream[SessionMe
         mappers_preview,
         mappers_reorder,
     )
+    from maskit.web.routes.pages import api_tools, api_tools_call, index_page, tool_detail_page, tools_page
     from maskit.web.routes.rules import rules_create, rules_delete, rules_list
-    from maskit.web.routes.setup import api_tools, api_tools_call, index_page, setup_page
     from maskit.web.routes.traffic import TrafficWebSocket, api_mappings
 
     routes = [
         Route("/", index_page),
-        Route("/setup", setup_page),
+        Route("/tools", tools_page),
         Route("/api/tools", api_tools),
         Route("/api/tools/call", api_tools_call, methods=["POST"]),
         Route("/api/rules", rules_list, methods=["GET"]),
@@ -46,6 +46,7 @@ def create_app(state: ProxyState, ds_read_send: MemoryObjectSendStream[SessionMe
         Route("/api/mappers/reorder", mappers_reorder, methods=["POST"]),
         Route("/api/mappings", api_mappings),
         WebSocketRoute("/ws/traffic", TrafficWebSocket),
+        Route("/tools/{tool_name:path}", tool_detail_page),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static"),
     ]
 
