@@ -12,11 +12,13 @@ from maskit.masking.mappers import ResponseMapper
 
 async def mappers_list(request: Request):
     state = request.app.state.proxy_state
-    if not state.engine:
-        return JSONResponse({"mappers": []})
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     tool_name = request.query_params.get("tool_name")
-    mappers = state.engine.mappers
+    mappers = target.engine.mappers
     if tool_name:
         mappers = [m for m in mappers if m.matches_tool(tool_name)]
 
@@ -38,8 +40,10 @@ async def mappers_list(request: Request):
 
 async def mappers_create(request: Request):
     state = request.app.state.proxy_state
-    if not state.engine:
-        return JSONResponse({"error": "Engine not initialized"}, status_code=500)
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     body = await request.json()
     tool_name = body.get("tool_name", "*")
@@ -63,11 +67,11 @@ async def mappers_create(request: Request):
         alias_prefix=alias_prefix,
     )
 
-    mapper_id = await state.engine._store.add_mapper(mapper)
+    mapper_id = await target.engine._store.add_mapper(mapper, target_name=target_name)
     mapper.id = mapper_id
 
-    state.engine._mappers.append(mapper)
-    state.engine._compiled_patterns[mapper_id] = re.compile(pattern)
+    target.engine._mappers.append(mapper)
+    target.engine._compiled_patterns[mapper_id] = re.compile(pattern)
 
     return JSONResponse(
         {
@@ -85,16 +89,18 @@ async def mappers_create(request: Request):
 
 async def mappers_delete(request: Request):
     state = request.app.state.proxy_state
-    if not state.engine:
-        return JSONResponse({"error": "Engine not initialized"}, status_code=500)
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     mapper_id = int(request.path_params["mapper_id"])
-    deleted = await state.engine._store.delete_mapper(mapper_id)
+    deleted = await target.engine._store.delete_mapper(mapper_id)
     if not deleted:
         return JSONResponse({"error": "Mapper not found"}, status_code=404)
 
-    state.engine._mappers = [m for m in state.engine._mappers if m.id != mapper_id]
-    state.engine._compiled_patterns.pop(mapper_id, None)
+    target.engine._mappers = [m for m in target.engine._mappers if m.id != mapper_id]
+    target.engine._compiled_patterns.pop(mapper_id, None)
 
     return JSONResponse({"ok": True})
 
@@ -144,21 +150,23 @@ async def mappers_preview(request: Request):
 
 async def mappers_reorder(request: Request):
     state = request.app.state.proxy_state
-    if not state.engine:
-        return JSONResponse({"error": "Engine not initialized"}, status_code=500)
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     body = await request.json()
     mapper_ids = body.get("mapper_ids", [])
     if not mapper_ids:
         return JSONResponse({"error": "mapper_ids is required"}, status_code=400)
 
-    await state.engine._store.reorder_mappers(mapper_ids)
+    await target.engine._store.reorder_mappers(mapper_ids)
 
     for idx, mid in enumerate(mapper_ids):
-        for m in state.engine._mappers:
+        for m in target.engine._mappers:
             if m.id == mid:
                 m.order = idx
                 break
 
-    state.engine._mappers.sort(key=lambda m: m.order)
+    target.engine._mappers.sort(key=lambda m: m.order)
     return JSONResponse({"ok": True})

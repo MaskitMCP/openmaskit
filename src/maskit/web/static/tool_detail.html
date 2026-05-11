@@ -12,13 +12,16 @@
     <header>
         <h1>Maskit</h1>
         <nav>
-            <a href="/">Dashboard</a>
-            <a href="/tools" class="active">Tools</a>
+            <a href="/">Targets</a>
+            <span class="nav-sep">/</span>
+            <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools'" x-text="targetName"></a>
+            <span class="nav-sep">/</span>
+            <span class="nav-current" x-text="toolName"></span>
         </nav>
     </header>
 
     <main>
-        <a href="/tools" class="back-link">&larr; Back to Tools</a>
+        <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools'" class="back-link">&larr; Back to Tools</a>
 
         <div class="tool-detail-header">
             <h2 x-text="tool ? tool.name : 'Loading...'"></h2>
@@ -222,6 +225,7 @@
 <script>
 function toolDetail() {
     return {
+        targetName: '',
         toolName: '',
         tool: null,
         rules: [],
@@ -252,26 +256,33 @@ function toolDetail() {
         },
 
         async init() {
-            const pathParts = window.location.pathname.split('/tools/');
-            this.toolName = decodeURIComponent(pathParts[1] || '');
-            document.title = `Maskit - ${this.toolName}`;
+            // URL: /targets/<target>/tools/<tool_name>
+            const afterTargets = window.location.pathname.split('/targets/')[1];
+            const parts = afterTargets.split('/tools/');
+            this.targetName = decodeURIComponent(parts[0]);
+            this.toolName = decodeURIComponent(parts[1] || '');
+            document.title = `Maskit - ${this.targetName} - ${this.toolName}`;
             await Promise.all([this.loadTool(), this.loadRules(), this.loadMappers()]);
         },
 
+        apiBase() {
+            return `/api/targets/${encodeURIComponent(this.targetName)}`;
+        },
+
         async loadTool() {
-            const res = await fetch('/api/tools');
+            const res = await fetch(`${this.apiBase()}/tools`);
             const data = await res.json();
             this.tool = data.tools.find(t => t.name === this.toolName) || null;
         },
 
         async loadRules() {
-            const res = await fetch('/api/rules');
+            const res = await fetch(`${this.apiBase()}/rules`);
             const data = await res.json();
             this.rules = data.rules;
         },
 
         async loadMappers() {
-            const res = await fetch('/api/mappers');
+            const res = await fetch(`${this.apiBase()}/mappers`);
             const data = await res.json();
             this.mappers = data.mappers;
         },
@@ -299,7 +310,7 @@ function toolDetail() {
             this.mapperPreviewError = null;
             this.mapperMatches = [];
             try {
-                const res = await fetch('/api/tools/call', {
+                const res = await fetch(`${this.apiBase()}/tools/call`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ tool_name: this.toolName, arguments: this.tryArgs }),
@@ -318,7 +329,7 @@ function toolDetail() {
         },
 
         async quickAddRule(fieldName) {
-            await fetch('/api/rules/create', {
+            await fetch(`${this.apiBase()}/rules/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -332,7 +343,7 @@ function toolDetail() {
 
         async addRule() {
             if (!this.newRule.field_path) return;
-            await fetch('/api/rules/create', {
+            await fetch(`${this.apiBase()}/rules/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -346,7 +357,7 @@ function toolDetail() {
         },
 
         async deleteRule(id) {
-            await fetch(`/api/rules/${id}/delete`, { method: 'DELETE' });
+            await fetch(`${this.apiBase()}/rules/${id}/delete`, { method: 'DELETE' });
             await this.loadRules();
         },
 
@@ -357,7 +368,7 @@ function toolDetail() {
             this.mapperPreviewError = null;
             this.mapperMatches = [];
             try {
-                const res = await fetch('/api/mappers/preview', {
+                const res = await fetch(`${this.apiBase()}/mappers/preview`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -381,7 +392,7 @@ function toolDetail() {
         },
 
         async saveMapper() {
-            const res = await fetch('/api/mappers/create', {
+            const res = await fetch(`${this.apiBase()}/mappers/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -400,7 +411,7 @@ function toolDetail() {
         },
 
         async deleteMapper(id) {
-            await fetch(`/api/mappers/${id}/delete`, { method: 'DELETE' });
+            await fetch(`${this.apiBase()}/mappers/${id}/delete`, { method: 'DELETE' });
             await this.loadMappers();
         },
     };

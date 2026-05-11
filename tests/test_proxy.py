@@ -11,7 +11,7 @@ from mcp.types import JSONRPCMessage, JSONRPCRequest, JSONRPCResponse
 from maskit.masking.engine import MaskingEngine
 from maskit.masking.rules import MaskingRule
 from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, run_proxy
+from maskit.proxy.core import TargetState, run_proxy_for_target
 
 
 def make_request(method: str, params: dict | None = None, req_id: int = 1) -> SessionMessage:
@@ -65,60 +65,58 @@ async def store(tmp_path):
 
 @pytest.fixture
 async def engine(rules, store):
-    e = MaskingEngine(rules, store)
+    e = MaskingEngine(rules, store, target_name="test")
     await e.load_aliases()
     return e
+
+
+@pytest.fixture
+def target_state(engine):
+    ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](10)
+    target = TargetState(name="test", engine=engine, ds_read_send=ds_read_send, ds_read_recv=ds_read_recv)
+    return target
 
 
 class TestProxyRelay:
     @pytest.mark.anyio
     async def test_transparent_passthrough(self, engine):
         """Non-tool messages pass through unmodified after bootstrap."""
-        state = ProxyState(engine=engine)
-
         ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](10)
-        ds_write_send, ds_write_recv = anyio.create_memory_object_stream[SessionMessage](10)
         us_read_send, us_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](10)
         us_write_send, us_write_recv = anyio.create_memory_object_stream[SessionMessage](10)
+
+        target = TargetState(name="test", engine=engine, ds_read_send=ds_read_send, ds_read_recv=ds_read_recv)
 
         # Feed bootstrap responses
         await feed_bootstrap(us_read_send)
 
-        # Host sends initialize — since we already bootstrapped, it gets a synthesized response
-        init_req = make_request("initialize", {"capabilities": {}}, req_id=1)
-        await ds_read_send.send(init_req)
+        # Close streams to end the relay
         await ds_read_send.aclose()
         await us_read_send.aclose()
 
         async with anyio.create_task_group() as tg:
-            tg.start_soon(
-                run_proxy, ds_read_recv, ds_write_send, us_read_recv, us_write_send, state
-            )
+            tg.start_soon(run_proxy_for_target, target, us_read_recv, us_write_send)
 
-        # The initialize was NOT forwarded upstream (synthesized locally)
-        # The only messages upstream should be our bootstrap init + tools/list
+        # Bootstrap messages sent upstream: init, notifications/initialized, tools/list
         boot_init = await us_write_recv.receive()
         assert boot_init.message.root.method == "initialize"
-        # notifications/initialized
         boot_notif = await us_write_recv.receive()
         assert boot_notif.message.root.method == "notifications/initialized"
-        # tools/list
         boot_tools = await us_write_recv.receive()
         assert boot_tools.message.root.method == "tools/list"
 
-        # Host gets the synthesized response
-        response = await ds_write_recv.receive()
-        assert response.message.root.result["capabilities"]["tools"] == {}
+        # Tool schemas cached
+        assert len(target.tool_schemas) == 1
+        assert target.tool_schemas[0]["name"] == "get_db"
 
     @pytest.mark.anyio
     async def test_tool_call_masking(self, engine):
         """Tool call responses get masked, subsequent arguments get unmasked."""
-        state = ProxyState(engine=engine)
-
         ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](10)
-        ds_write_send, ds_write_recv = anyio.create_memory_object_stream[SessionMessage](10)
         us_read_send, us_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](10)
         us_write_send, us_write_recv = anyio.create_memory_object_stream[SessionMessage](10)
+
+        target = TargetState(name="test", engine=engine, ds_read_send=ds_read_send, ds_read_recv=ds_read_recv)
 
         # Feed bootstrap responses
         await feed_bootstrap(us_read_send)
@@ -146,13 +144,16 @@ class TestProxyRelay:
         await us_read_send.send(call_resp2)
         await us_read_send.aclose()
 
+        # We need to collect dispatched responses — register waiters for the request IDs
+        event5 = target.response_dispatcher.register(5)
+        event6 = target.response_dispatcher.register(6)
+
         async with anyio.create_task_group() as tg:
-            tg.start_soon(
-                run_proxy, ds_read_recv, ds_write_send, us_read_recv, us_write_send, state
-            )
+            tg.start_soon(run_proxy_for_target, target, us_read_recv, us_write_send)
 
         # First response to the agent should have masked host
-        resp1 = await ds_write_recv.receive()
+        resp1 = target.response_dispatcher.collect(5)
+        assert resp1 is not None
         content = json.loads(resp1.message.root.result["content"][0]["text"])
         assert content["host"] == "host_1"
         assert content["port"] == 5432
@@ -178,12 +179,11 @@ class TestProxyRelay:
     @pytest.mark.anyio
     async def test_tools_list_cached(self, engine):
         """tools/list responses get cached in state for the Web UI."""
-        state = ProxyState(engine=engine)
-
         ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](10)
-        ds_write_send, ds_write_recv = anyio.create_memory_object_stream[SessionMessage](10)
         us_read_send, us_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](10)
         us_write_send, us_write_recv = anyio.create_memory_object_stream[SessionMessage](10)
+
+        target = TargetState(name="test", engine=engine, ds_read_send=ds_read_send, ds_read_recv=ds_read_recv)
 
         # Feed bootstrap responses
         await feed_bootstrap(us_read_send)
@@ -193,9 +193,7 @@ class TestProxyRelay:
         await us_read_send.aclose()
 
         async with anyio.create_task_group() as tg:
-            tg.start_soon(
-                run_proxy, ds_read_recv, ds_write_send, us_read_recv, us_write_send, state
-            )
+            tg.start_soon(run_proxy_for_target, target, us_read_recv, us_write_send)
 
-        assert len(state.tool_schemas) == 1
-        assert state.tool_schemas[0]["name"] == "get_db"
+        assert len(target.tool_schemas) == 1
+        assert target.tool_schemas[0]["name"] == "get_db"

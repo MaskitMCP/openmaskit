@@ -6,7 +6,7 @@ import logging
 import os
 import signal
 import sys
-from io import TextIOWrapper
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 import anyio
@@ -14,56 +14,17 @@ import uvicorn
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from mcp.shared.message import SessionMessage
-from mcp.types import JSONRPCMessage
 
 from maskit.config import load_config
 from maskit.masking.engine import MaskingEngine
 from maskit.masking.rules import MaskingRule
 from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, run_proxy
+from maskit.proxy.core import ProxyState, TargetState, run_proxy_for_target
 from maskit.proxy.http_downstream import create_mcp_app
 from maskit.proxy.upstream import connect_upstream
 from maskit.web.app import create_app
 
 logger = logging.getLogger(__name__)
-
-
-async def _stdin_reader(
-    send_stream: MemoryObjectSendStream[SessionMessage | Exception],
-    shutdown_event: anyio.Event,
-):
-    stdin = anyio.wrap_file(
-        TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
-    )
-    try:
-        async with send_stream:
-            async for line in stdin:
-                if shutdown_event.is_set():
-                    break
-                try:
-                    message = JSONRPCMessage.model_validate_json(line)
-                except Exception as exc:
-                    await send_stream.send(exc)
-                    continue
-                await send_stream.send(SessionMessage(message))
-    except (anyio.ClosedResourceError, anyio.EndOfStream, OSError):
-        pass
-
-
-async def _stdout_writer(
-    recv_stream: MemoryObjectReceiveStream[SessionMessage],
-):
-    stdout = anyio.wrap_file(TextIOWrapper(sys.stdout.buffer, encoding="utf-8"))
-    try:
-        async with recv_stream:
-            async for session_message in recv_stream:
-                json_str = session_message.message.model_dump_json(
-                    by_alias=True, exclude_none=True
-                )
-                await stdout.write(json_str + "\n")
-                await stdout.flush()
-    except (anyio.ClosedResourceError, anyio.EndOfStream):
-        pass
 
 
 async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
@@ -92,33 +53,46 @@ async def async_main():
 
     store = await MaskingStore.create(config.store_path)
 
-    rules = [
-        MaskingRule(
-            tool_name=r.tool_name,
-            field_path=r.field_path,
-            alias_prefix=r.alias_prefix,
+    state = ProxyState()
+    state.store = store
+
+    # Create per-target state
+    for name, target_config in config.targets.items():
+        rules = [
+            MaskingRule(
+                tool_name=r.tool_name,
+                field_path=r.field_path,
+                alias_prefix=r.alias_prefix,
+            )
+            for r in target_config.rules
+        ]
+        db_rules = await store.get_rules(target_name=name)
+        rules.extend(db_rules)
+
+        engine = MaskingEngine(rules, store, target_name=name)
+        await engine.load_aliases()
+        await engine.load_mappers()
+
+        ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](32)
+
+        target_state = TargetState(
+            name=name,
+            engine=engine,
+            ds_read_send=ds_read_send,
+            ds_read_recv=ds_read_recv,
         )
-        for r in config.rules
-    ]
-    db_rules = await store.get_rules()
-    rules.extend(db_rules)
+        state.targets[name] = target_state
 
-    engine = MaskingEngine(rules, store)
-    await engine.load_aliases()
-    await engine.load_mappers()
-
-    state = ProxyState(engine=engine)
     shutdown_event = anyio.Event()
 
-    ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](32)
-    ds_write_send, ds_write_recv = anyio.create_memory_object_stream[SessionMessage](32)
-
-    print(f"Maskit proxy starting", file=sys.stderr)
+    print("Maskit proxy starting", file=sys.stderr)
     print(f"  Dashboard: http://127.0.0.1:{config.web_port}", file=sys.stderr)
-    print(f"  MCP endpoint: http://127.0.0.1:{config.mcp_port}/mcp", file=sys.stderr)
+    print("  MCP endpoints:", file=sys.stderr)
+    for name in state.target_names:
+        print(f"    {name}: http://127.0.0.1:{config.mcp_port}/{name}/mcp", file=sys.stderr)
 
-    web_app = create_app(state, ds_read_send.clone())
-    mcp_app = create_mcp_app(state, ds_read_send)
+    web_app = create_app(state)
+    mcp_app = create_mcp_app(state)
 
     uvicorn_config = uvicorn.Config(
         web_app,
@@ -141,7 +115,20 @@ async def async_main():
     mcp_server.install_signal_handlers = lambda: None
 
     try:
-        async with connect_upstream(config, errlog=sys.stderr) as (us_read, us_write):
+        async with AsyncExitStack() as stack:
+            # Connect all upstream targets
+            upstream_streams: dict[str, tuple[
+                MemoryObjectReceiveStream[SessionMessage | Exception],
+                MemoryObjectSendStream[SessionMessage],
+            ]] = {}
+
+            for name, target_state in state.targets.items():
+                target_config = config.targets[name]
+                us_read, us_write = await stack.enter_async_context(
+                    connect_upstream(target_config.upstream, config.store_path, errlog=sys.stderr)
+                )
+                upstream_streams[name] = (us_read, us_write)
+
             async with anyio.create_task_group() as tg:
 
                 async def _shutdown_on_signal():
@@ -151,25 +138,22 @@ async def async_main():
                             shutdown_event.set()
                             web_server.should_exit = True
                             mcp_server.should_exit = True
-                            try:
-                                os.close(sys.stdin.fileno())
-                            except OSError:
-                                pass
-                            await ds_read_send.aclose()
-                            await ds_write_send.aclose()
+                            for ts in state.targets.values():
+                                if ts.ds_read_send:
+                                    await ts.ds_read_send.aclose()
                             tg.cancel_scope.cancel()
                             break
 
                 tg.start_soon(_shutdown_on_signal)
-                tg.start_soon(_stdin_reader, ds_read_send.clone(), shutdown_event)
-                tg.start_soon(_stdout_writer, ds_write_recv)
-                tg.start_soon(_flush_loop, engine, shutdown_event)
+
+                for name, target_state in state.targets.items():
+                    us_read, us_write = upstream_streams[name]
+                    tg.start_soon(run_proxy_for_target, target_state, us_read, us_write)
+                    tg.start_soon(_flush_loop, target_state.engine, shutdown_event)
+
                 tg.start_soon(web_server.serve)
                 tg.start_soon(mcp_server.serve)
 
-                await run_proxy(ds_read_recv, ds_write_send, us_read, us_write, state)
-
-                tg.cancel_scope.cancel()
     except Exception as exc:
         print(f"Error: {type(exc).__name__}: {exc}", file=sys.stderr)
         import traceback

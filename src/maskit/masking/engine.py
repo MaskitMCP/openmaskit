@@ -20,9 +20,10 @@ class MaskingEngine:
     The cache is synced with the database periodically via flush_pending/load_aliases.
     """
 
-    def __init__(self, rules: list[MaskingRule], store: MaskingStore):
+    def __init__(self, rules: list[MaskingRule], store: MaskingStore, target_name: str = "default"):
         self._rules = rules
         self._store = store
+        self._target_name = target_name
         self._alias_cache: dict[str, str] = {}  # alias -> real_value
         self._reverse_cache: dict[str, dict[str, str]] = {}  # (field_path, real_value) -> alias
         self._pending_writes: list[tuple[str, str, str, str]] = []
@@ -43,7 +44,7 @@ class MaskingEngine:
 
     async def load_aliases(self):
         """Load all existing aliases into memory for fast lookup."""
-        self._alias_cache = await self._store.get_all_aliases()
+        self._alias_cache = await self._store.get_all_aliases(target_name=self._target_name)
         self._reverse_cache.clear()
         self._counters.clear()
         for alias, real_value in self._alias_cache.items():
@@ -57,7 +58,7 @@ class MaskingEngine:
 
     async def load_mappers(self):
         """Load response mappers from store and compile patterns."""
-        self._mappers = await self._store.get_mappers()
+        self._mappers = await self._store.get_mappers(target_name=self._target_name)
         self._compiled_patterns = {}
         for m in self._mappers:
             try:
@@ -71,7 +72,7 @@ class MaskingEngine:
         self._pending_writes.clear()
         for alias, real_value, tool_name, field_path in writes:
             prefix = alias.rsplit("_", 1)[0]
-            await self._store.get_or_create_alias(real_value, tool_name, field_path, prefix)
+            await self._store.get_or_create_alias(real_value, tool_name, field_path, prefix, self._target_name)
 
     def mask_response(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
         """Mask sensitive fields in a tool call response (synchronous, uses cache)."""

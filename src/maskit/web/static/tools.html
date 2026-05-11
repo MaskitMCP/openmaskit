@@ -12,12 +12,15 @@
     <header>
         <h1>Maskit</h1>
         <nav>
-            <a href="/">Dashboard</a>
-            <a href="/tools" class="active">Tools</a>
+            <a href="/">Targets</a>
+            <span class="nav-sep">/</span>
+            <span class="nav-current" x-text="targetName"></span>
         </nav>
     </header>
 
     <main>
+        <a href="/" class="back-link">&larr; Back to Targets</a>
+
         <section class="panel">
             <h2>Available Tools</h2>
             <p x-show="tools.length === 0" class="muted">
@@ -25,7 +28,7 @@
             </p>
             <div class="tools-grid" x-show="tools.length > 0">
                 <template x-for="tool in tools" :key="tool.name">
-                    <a :href="'/tools/' + encodeURIComponent(tool.name)" class="tool-card-link">
+                    <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools/' + encodeURIComponent(tool.name)" class="tool-card-link">
                         <h3 x-text="tool.name"></h3>
                         <p x-text="tool.description || 'No description'"></p>
                         <div class="tool-badges">
@@ -122,15 +125,57 @@
                 </form>
             </div>
         </section>
+
+        <section class="panel">
+            <h2>Masked Mappings</h2>
+            <div x-show="mappings.length === 0" class="muted">No masked values yet.</div>
+            <table x-show="mappings.length > 0">
+                <thead>
+                    <tr>
+                        <th>Alias</th>
+                        <th>Real Value</th>
+                        <th>Tool</th>
+                        <th>Field</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="m in mappings" :key="m.alias">
+                        <tr>
+                            <td><code x-text="m.alias"></code></td>
+                            <td class="blur" x-text="m.real_value"></td>
+                            <td x-text="m.tool_name"></td>
+                            <td x-text="m.field_path"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Live Traffic</h2>
+            <div class="traffic-log">
+                <template x-for="(entry, idx) in traffic.slice(-50).reverse()" :key="idx">
+                    <div class="traffic-entry" :class="entry.direction">
+                        <span class="direction" x-text="entry.direction === 'request' ? '→' : '←'"></span>
+                        <span class="method" x-text="entry.method"></span>
+                        <span class="detail" x-text="JSON.stringify(entry.data)"></span>
+                    </div>
+                </template>
+            </div>
+        </section>
     </main>
 </div>
 
 <script>
 function toolsPage() {
     return {
+        targetName: '',
         tools: [],
         rules: [],
         mappers: [],
+        mappings: [],
+        traffic: [],
+        ws: null,
         newRule: { field_path: '', alias_prefix: '' },
         newMapper: { pattern: '', alias_prefix: '' },
 
@@ -151,30 +196,45 @@ function toolsPage() {
         },
 
         async init() {
-            await Promise.all([this.loadTools(), this.loadRules(), this.loadMappers()]);
+            const parts = window.location.pathname.split('/targets/')[1];
+            this.targetName = decodeURIComponent(parts.split('/tools')[0]);
+            document.title = `Maskit - ${this.targetName}`;
+            await Promise.all([this.loadTools(), this.loadRules(), this.loadMappers(), this.loadMappings()]);
+            this.connectWebSocket();
+            setInterval(() => this.loadMappings(), 5000);
+        },
+
+        apiBase() {
+            return `/api/targets/${encodeURIComponent(this.targetName)}`;
         },
 
         async loadTools() {
-            const res = await fetch('/api/tools');
+            const res = await fetch(`${this.apiBase()}/tools`);
             const data = await res.json();
             this.tools = data.tools;
         },
 
         async loadRules() {
-            const res = await fetch('/api/rules');
+            const res = await fetch(`${this.apiBase()}/rules`);
             const data = await res.json();
             this.rules = data.rules;
         },
 
         async loadMappers() {
-            const res = await fetch('/api/mappers');
+            const res = await fetch(`${this.apiBase()}/mappers`);
             const data = await res.json();
             this.mappers = data.mappers;
         },
 
+        async loadMappings() {
+            const res = await fetch(`${this.apiBase()}/mappings`);
+            const data = await res.json();
+            this.mappings = data.mappings;
+        },
+
         async addGlobalRule() {
             if (!this.newRule.field_path) return;
-            await fetch('/api/rules/create', {
+            await fetch(`${this.apiBase()}/rules/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -189,7 +249,7 @@ function toolsPage() {
 
         async addGlobalMapper() {
             if (!this.newMapper.pattern || !this.newMapper.alias_prefix) return;
-            await fetch('/api/mappers/create', {
+            await fetch(`${this.apiBase()}/mappers/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -203,13 +263,27 @@ function toolsPage() {
         },
 
         async deleteRule(id) {
-            await fetch(`/api/rules/${id}/delete`, { method: 'DELETE' });
+            await fetch(`${this.apiBase()}/rules/${id}/delete`, { method: 'DELETE' });
             await this.loadRules();
         },
 
         async deleteMapper(id) {
-            await fetch(`/api/mappers/${id}/delete`, { method: 'DELETE' });
+            await fetch(`${this.apiBase()}/mappers/${id}/delete`, { method: 'DELETE' });
             await this.loadMappers();
+        },
+
+        connectWebSocket() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            this.ws = new WebSocket(`${proto}//${location.host}/ws/targets/${encodeURIComponent(this.targetName)}/traffic`);
+            this.ws.onmessage = (event) => {
+                this.traffic.push(JSON.parse(event.data));
+                if (this.traffic.length > 200) {
+                    this.traffic = this.traffic.slice(-100);
+                }
+            };
+            this.ws.onclose = () => {
+                setTimeout(() => this.connectWebSocket(), 2000);
+            };
         },
     };
 }

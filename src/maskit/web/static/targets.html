@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maskit - Targets</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+<div x-data="targetsPage()" x-init="init()">
+    <header>
+        <h1>Maskit</h1>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Targets</h2>
+            <p x-show="targets.length === 0" class="muted">
+                No targets configured. Add targets to your maskit.yaml to get started.
+            </p>
+            <div class="tools-grid" x-show="targets.length > 0">
+                <template x-for="target in targets" :key="target.name">
+                    <a :href="'/targets/' + encodeURIComponent(target.name) + '/tools'" class="tool-card-link">
+                        <h3 x-text="target.name"></h3>
+                        <p x-text="target.initialized ? 'Connected' : 'Connecting...'" :class="target.initialized ? 'status-ok' : 'status-pending'"></p>
+                        <div class="tool-badges">
+                            <span class="tool-badge">
+                                <span x-text="target.tool_count"></span> tools
+                            </span>
+                            <span x-show="target.rule_count > 0" class="tool-badge">
+                                <span x-text="target.rule_count"></span> rules
+                            </span>
+                            <span x-show="target.mapper_count > 0" class="tool-badge tool-badge-mapper">
+                                <span x-text="target.mapper_count"></span> mappers
+                            </span>
+                        </div>
+                    </a>
+                </template>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+function targetsPage() {
+    return {
+        targets: [],
+
+        async init() {
+            await this.loadTargets();
+        },
+
+        async loadTargets() {
+            const res = await fetch('/api/targets');
+            const data = await res.json();
+            this.targets = data.targets;
+        },
+    };
+}
+</script>
+</body>
+</html>

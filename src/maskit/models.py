@@ -27,9 +27,13 @@ class MaskingRuleConfig(BaseModel):
     alias_prefix: str | None = None
 
 
-class Config(BaseModel):
+class TargetConfig(BaseModel):
     upstream: UpstreamStdioConfig | UpstreamHttpConfig
+    rules: list[MaskingRuleConfig] = Field(default_factory=list)
+
+
+class MultiTargetConfig(BaseModel):
+    targets: dict[str, TargetConfig]
     web_port: int = 9473
     mcp_port: int = 9474
     store_path: str = "~/.maskit/store.db"
-    rules: list[MaskingRuleConfig] = Field(default_factory=list)

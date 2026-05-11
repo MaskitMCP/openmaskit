@@ -15,8 +15,8 @@ from mcp.types import JSONRPCMessage, JSONRPCRequest
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
-async def index_page(request: Request):
-    return FileResponse(STATIC_DIR / "index.html")
+async def targets_page(request: Request):
+    return FileResponse(STATIC_DIR / "targets.html")
 
 
 async def tools_page(request: Request):
@@ -27,14 +27,35 @@ async def tool_detail_page(request: Request):
     return FileResponse(STATIC_DIR / "tool_detail.html")
 
 
+async def api_targets(request: Request):
+    state = request.app.state.proxy_state
+    targets = []
+    for name, ts in state.targets.items():
+        targets.append({
+            "name": name,
+            "tool_count": len(ts.tool_schemas),
+            "rule_count": len(ts.engine.rules),
+            "mapper_count": len(ts.engine.mappers),
+            "initialized": ts.initialized,
+        })
+    return JSONResponse({"targets": targets})
+
+
 async def api_tools(request: Request):
     state = request.app.state.proxy_state
-    return JSONResponse({"tools": state.tool_schemas})
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
+    return JSONResponse({"tools": target.tool_schemas})
 
 
 async def api_tools_call(request: Request):
     state = request.app.state.proxy_state
-    ds_read_send = request.app.state.ds_read_send
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     body = await request.json()
     tool_name = body.get("tool_name", "")
@@ -53,17 +74,17 @@ async def api_tools_call(request: Request):
     )
     session_msg = SessionMessage(message=JSONRPCMessage(root=rpc_request))
 
-    event = state.response_dispatcher.register(request_id)
-    await ds_read_send.send(session_msg)
+    event = target.response_dispatcher.register(request_id)
+    await target.ds_read_send.send(session_msg)
 
     try:
         with anyio.fail_after(60):
             await event.wait()
     except TimeoutError:
-        state.response_dispatcher.collect(request_id)
+        target.response_dispatcher.collect(request_id)
         return JSONResponse({"error": "Timeout waiting for response"}, status_code=504)
 
-    response_msg = state.response_dispatcher.collect(request_id)
+    response_msg = target.response_dispatcher.collect(request_id)
     if response_msg is None:
         return JSONResponse({"error": "No response received"}, status_code=500)
 

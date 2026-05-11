@@ -10,9 +10,10 @@ from maskit.masking.rules import MaskingRule
 
 async def rules_list(request: Request):
     state = request.app.state.proxy_state
-    engine = state.engine
-    if not engine:
-        return JSONResponse({"rules": []})
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     rules = [
         {
@@ -22,16 +23,17 @@ async def rules_list(request: Request):
             "alias_prefix": r.alias_prefix,
             "active": r.active,
         }
-        for r in engine.rules
+        for r in target.engine.rules
     ]
     return JSONResponse({"rules": rules})
 
 
 async def rules_create(request: Request):
     state = request.app.state.proxy_state
-    engine = state.engine
-    if not engine:
-        return JSONResponse({"error": "Engine not initialized"}, status_code=500)
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     body = await request.json()
     tool_name = body.get("tool_name", "*")
@@ -47,9 +49,9 @@ async def rules_create(request: Request):
         alias_prefix=alias_prefix,
     )
 
-    rule_id = await engine._store.add_rule(rule)
+    rule_id = await target.engine._store.add_rule(rule, target_name=target_name)
     rule.id = rule_id
-    engine.rules.append(rule)
+    target.engine.rules.append(rule)
 
     return JSONResponse({
         "id": rule_id,
@@ -62,14 +64,15 @@ async def rules_create(request: Request):
 
 async def rules_delete(request: Request):
     state = request.app.state.proxy_state
-    engine = state.engine
-    if not engine:
-        return JSONResponse({"error": "Engine not initialized"}, status_code=500)
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
 
     rule_id = request.path_params["rule_id"]
-    deleted = await engine._store.delete_rule(rule_id)
+    deleted = await target.engine._store.delete_rule(rule_id)
 
     if deleted:
-        engine._rules = [r for r in engine._rules if r.id != rule_id]
+        target.engine._rules = [r for r in target.engine._rules if r.id != rule_id]
         return JSONResponse({"ok": True})
     return JSONResponse({"error": "Rule not found"}, status_code=404)

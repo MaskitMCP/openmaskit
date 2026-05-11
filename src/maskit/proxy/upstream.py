@@ -14,18 +14,17 @@ import uvicorn
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
-from maskit.models import Config, UpstreamHttpConfig, UpstreamStdioConfig
+from maskit.models import UpstreamHttpConfig, UpstreamStdioConfig
 
 
 @asynccontextmanager
 async def connect_upstream(
-    config: Config,
+    upstream: UpstreamStdioConfig | UpstreamHttpConfig,
+    store_path: str = "~/.maskit/store.db",
     errlog: TextIO = sys.stderr,
     extra_env: dict[str, str] | None = None,
 ):
     """Connect to the upstream MCP server. Yields (read_stream, write_stream)."""
-    upstream = config.upstream
-
     if isinstance(upstream, UpstreamStdioConfig):
         env = dict(upstream.env) if upstream.env else {}
         if extra_env:
@@ -43,9 +42,9 @@ async def connect_upstream(
         if upstream.oauth:
             from maskit.oauth.handler import create_oauth_provider
 
-            store_path = Path(config.store_path).expanduser().parent / "oauth_tokens.json"
+            oauth_store_path = Path(store_path).expanduser().parent / "oauth_tokens.json"
             provider, callback_server = create_oauth_provider(
-                upstream.url, upstream.oauth, store_path
+                upstream.url, upstream.oauth, oauth_store_path
             )
 
             # Start the callback server so it can receive the OAuth redirect

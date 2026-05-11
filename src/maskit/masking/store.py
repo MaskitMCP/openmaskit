@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS mappings (
     real_value TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     field_path TEXT NOT NULL,
+    target_name TEXT NOT NULL DEFAULT 'default',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -24,7 +25,8 @@ CREATE TABLE IF NOT EXISTS rules (
     tool_name TEXT NOT NULL,
     field_path TEXT NOT NULL,
     alias_prefix TEXT,
-    active BOOLEAN NOT NULL DEFAULT 1
+    active BOOLEAN NOT NULL DEFAULT 1,
+    target_name TEXT NOT NULL DEFAULT 'default'
 );
 
 CREATE TABLE IF NOT EXISTS response_mappers (
@@ -35,12 +37,16 @@ CREATE TABLE IF NOT EXISTS response_mappers (
     alias_prefix TEXT NOT NULL,
     "order" INTEGER NOT NULL DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT 1,
+    target_name TEXT NOT NULL DEFAULT 'default',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_mappings_real_value ON mappings(real_value);
+CREATE INDEX IF NOT EXISTS idx_mappings_target ON mappings(target_name);
 CREATE INDEX IF NOT EXISTS idx_rules_tool_name ON rules(tool_name);
+CREATE INDEX IF NOT EXISTS idx_rules_target ON rules(target_name);
 CREATE INDEX IF NOT EXISTS idx_response_mappers_tool ON response_mappers(tool_name);
+CREATE INDEX IF NOT EXISTS idx_response_mappers_target ON response_mappers(target_name);
 """
 
 
@@ -57,14 +63,45 @@ class MaskingStore:
         await db.executescript(_SCHEMA)
         await db.commit()
         store = cls(db)
+        await store._migrate()
         await store._load_counters()
         return store
 
-    async def _load_counters(self):
+    async def _migrate(self):
+        """Add target_name column to existing tables if missing."""
+        cursor = await self._db.execute("PRAGMA table_info(mappings)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "target_name" not in columns:
+            await self._db.execute(
+                "ALTER TABLE mappings ADD COLUMN target_name TEXT NOT NULL DEFAULT 'default'"
+            )
+            await self._db.execute(
+                "ALTER TABLE rules ADD COLUMN target_name TEXT NOT NULL DEFAULT 'default'"
+            )
+            await self._db.execute(
+                "ALTER TABLE response_mappers ADD COLUMN target_name TEXT NOT NULL DEFAULT 'default'"
+            )
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mappings_target ON mappings(target_name)"
+            )
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rules_target ON rules(target_name)"
+            )
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_response_mappers_target ON response_mappers(target_name)"
+            )
+            await self._db.commit()
+
+    async def _load_counters(self, target_name: str | None = None):
         """Load current max alias counters from existing mappings."""
-        async with self._db.execute(
-            "SELECT alias FROM mappings"
-        ) as cursor:
+        if target_name:
+            query = "SELECT alias FROM mappings WHERE target_name = ?"
+            params: tuple = (target_name,)
+        else:
+            query = "SELECT alias FROM mappings"
+            params = ()
+
+        async with self._db.execute(query, params) as cursor:
             async for (alias,) in cursor:
                 parts = alias.rsplit("_", 1)
                 if len(parts) == 2 and parts[1].isdigit():
@@ -75,12 +112,12 @@ class MaskingStore:
                     )
 
     async def get_or_create_alias(
-        self, real_value: str, tool_name: str, field_path: str, prefix: str
+        self, real_value: str, tool_name: str, field_path: str, prefix: str, target_name: str = "default"
     ) -> str:
         """Get existing alias for a real value, or create a new one."""
         async with self._db.execute(
-            "SELECT alias FROM mappings WHERE real_value = ? AND field_path = ?",
-            (real_value, field_path),
+            "SELECT alias FROM mappings WHERE real_value = ? AND field_path = ? AND target_name = ?",
+            (real_value, field_path, target_name),
         ) as cursor:
             row = await cursor.fetchone()
             if row:
@@ -92,8 +129,8 @@ class MaskingStore:
         alias = f"{prefix}_{counter}"
 
         await self._db.execute(
-            "INSERT INTO mappings (alias, real_value, tool_name, field_path) VALUES (?, ?, ?, ?)",
-            (alias, real_value, tool_name, field_path),
+            "INSERT INTO mappings (alias, real_value, tool_name, field_path, target_name) VALUES (?, ?, ?, ?, ?)",
+            (alias, real_value, tool_name, field_path, target_name),
         )
         await self._db.commit()
         return alias
@@ -106,11 +143,16 @@ class MaskingStore:
             row = await cursor.fetchone()
             return row[0] if row else None
 
-    async def get_all_mappings(self) -> list[dict]:
+    async def get_all_mappings(self, target_name: str | None = None) -> list[dict]:
         """Get all alias-to-value mappings."""
-        async with self._db.execute(
-            "SELECT alias, real_value, tool_name, field_path, created_at FROM mappings"
-        ) as cursor:
+        if target_name:
+            query = "SELECT alias, real_value, tool_name, field_path, created_at FROM mappings WHERE target_name = ?"
+            params: tuple = (target_name,)
+        else:
+            query = "SELECT alias, real_value, tool_name, field_path, created_at FROM mappings"
+            params = ()
+
+        async with self._db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             return [
                 {
@@ -123,27 +165,37 @@ class MaskingStore:
                 for r in rows
             ]
 
-    async def get_all_aliases(self) -> dict[str, str]:
+    async def get_all_aliases(self, target_name: str | None = None) -> dict[str, str]:
         """Get a dict of alias -> real_value for fast lookup."""
-        async with self._db.execute(
-            "SELECT alias, real_value FROM mappings"
-        ) as cursor:
+        if target_name:
+            query = "SELECT alias, real_value FROM mappings WHERE target_name = ?"
+            params: tuple = (target_name,)
+        else:
+            query = "SELECT alias, real_value FROM mappings"
+            params = ()
+
+        async with self._db.execute(query, params) as cursor:
             return {row[0]: row[1] async for row in cursor}
 
     # --- Rule CRUD ---
 
-    async def add_rule(self, rule: MaskingRule) -> int:
+    async def add_rule(self, rule: MaskingRule, target_name: str = "default") -> int:
         cursor = await self._db.execute(
-            "INSERT INTO rules (tool_name, field_path, alias_prefix, active) VALUES (?, ?, ?, ?)",
-            (rule.tool_name, rule.field_path, rule.alias_prefix, rule.active),
+            "INSERT INTO rules (tool_name, field_path, alias_prefix, active, target_name) VALUES (?, ?, ?, ?, ?)",
+            (rule.tool_name, rule.field_path, rule.alias_prefix, rule.active, target_name),
         )
         await self._db.commit()
         return cursor.lastrowid
 
-    async def get_rules(self) -> list[MaskingRule]:
-        async with self._db.execute(
-            "SELECT id, tool_name, field_path, alias_prefix, active FROM rules"
-        ) as cursor:
+    async def get_rules(self, target_name: str | None = None) -> list[MaskingRule]:
+        if target_name:
+            query = "SELECT id, tool_name, field_path, alias_prefix, active FROM rules WHERE target_name = ?"
+            params: tuple = (target_name,)
+        else:
+            query = "SELECT id, tool_name, field_path, alias_prefix, active FROM rules"
+            params = ()
+
+        async with self._db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             return [
                 MaskingRule(
@@ -163,27 +215,32 @@ class MaskingStore:
 
     # --- Mapper CRUD ---
 
-    async def add_mapper(self, mapper: ResponseMapper) -> int:
+    async def add_mapper(self, mapper: ResponseMapper, target_name: str = "default") -> int:
         if mapper.order == 0:
             async with self._db.execute(
-                'SELECT COALESCE(MAX("order"), 0) FROM response_mappers WHERE tool_name = ?',
-                (mapper.tool_name,),
+                'SELECT COALESCE(MAX("order"), 0) FROM response_mappers WHERE tool_name = ? AND target_name = ?',
+                (mapper.tool_name, target_name),
             ) as cursor:
                 row = await cursor.fetchone()
                 mapper.order = (row[0] if row else 0) + 1
 
         cursor = await self._db.execute(
-            'INSERT INTO response_mappers (tool_name, mapper_type, pattern, alias_prefix, "order", active) '
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (mapper.tool_name, mapper.mapper_type, mapper.pattern, mapper.alias_prefix, mapper.order, mapper.active),
+            'INSERT INTO response_mappers (tool_name, mapper_type, pattern, alias_prefix, "order", active, target_name) '
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (mapper.tool_name, mapper.mapper_type, mapper.pattern, mapper.alias_prefix, mapper.order, mapper.active, target_name),
         )
         await self._db.commit()
         return cursor.lastrowid
 
-    async def get_mappers(self) -> list[ResponseMapper]:
-        async with self._db.execute(
-            'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active FROM response_mappers ORDER BY "order"'
-        ) as cursor:
+    async def get_mappers(self, target_name: str | None = None) -> list[ResponseMapper]:
+        if target_name:
+            query = 'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active FROM response_mappers WHERE target_name = ? ORDER BY "order"'
+            params: tuple = (target_name,)
+        else:
+            query = 'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active FROM response_mappers ORDER BY "order"'
+            params = ()
+
+        async with self._db.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             return [
                 ResponseMapper(

@@ -154,6 +154,29 @@ nav a.active::after {
     border-radius: 1px;
 }
 
+.nav-sep {
+    color: var(--text-muted);
+    padding: 0.5rem 0.25rem;
+    font-size: 0.875rem;
+}
+
+.nav-current {
+    color: var(--text-primary);
+    padding: 0.5rem 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.status-ok {
+    color: var(--green);
+    font-size: 0.8rem;
+}
+
+.status-pending {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
 /* --- Main Layout --- */
 main {
     max-width: 1280px;
