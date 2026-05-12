@@ -102,6 +102,15 @@ header h1 {
     color: var(--accent);
     letter-spacing: -0.02em;
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.header-icon {
+    width: 1.4em;
+    height: 1.4em;
+    border-radius: 4px;
 }
 
 header h1::after {
@@ -519,6 +528,50 @@ code {
     border-color: var(--purple-border);
 }
 
+.tool-badge-hidden {
+    background: var(--red-dim);
+    color: var(--red);
+    border-color: var(--red-border);
+}
+
+/* --- Tool Card Wrapper (hide toggle) --- */
+.tool-card-wrapper {
+    position: relative;
+}
+
+.tool-card-wrapper.tool-card-hidden .tool-card-link {
+    opacity: 0.35;
+    filter: grayscale(0.6);
+}
+
+.tool-hide-btn {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.tool-hide-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-default);
+}
+
+.tool-card-wrapper.tool-card-hidden .tool-hide-btn {
+    color: var(--red);
+}
+
 /* --- Tool Detail Page --- */
 .back-link {
     display: inline-flex;
@@ -733,6 +786,27 @@ code {
     border-color: var(--red-border);
     color: var(--red);
     background: var(--red-dim);
+}
+
+/* --- Python repr detection banner --- */
+.python-repr-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    margin-bottom: 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid #f59e0b40;
+    background: #f59e0b12;
+    color: #fbbf24;
+    font-size: 0.78rem;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+.python-repr-banner .banner-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
 }
 
 /* --- Traffic Log --- */
@@ -1002,6 +1076,287 @@ code {
     th, td {
         padding: 0.5rem 0.6rem;
     }
+}
+
+/* --- Response Tabs & JSON Tree View --- */
+.response-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border-default);
+    margin-bottom: 0;
+}
+
+.response-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.6rem 1.2rem;
+    font-size: 0.85rem;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.response-tab:hover {
+    color: var(--text-secondary);
+}
+
+.response-tab-active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.response-panel {
+    border: 1px solid var(--border-default);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    background: var(--bg-input);
+    overflow: hidden;
+}
+
+.response-panel > pre {
+    margin: 0;
+    padding: 1rem 1.2rem;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+.json-tree {
+    padding: 0.75rem 1rem;
+    max-height: 500px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.8;
+}
+
+.tree-node {
+    white-space: nowrap;
+    position: relative;
+    padding: 0.1rem 0.4rem;
+    margin: 0 -0.4rem;
+    border-radius: 4px;
+    transition: background 0.1s;
+}
+
+.tree-node:hover {
+    background: var(--bg-hover);
+}
+
+.tree-node-masked {
+    background: rgba(45, 212, 191, 0.08);
+    border-left: 2px solid rgba(45, 212, 191, 0.5);
+}
+
+.tree-node-masked:hover {
+    background: rgba(45, 212, 191, 0.14);
+}
+
+/* --- Masked Field Tooltip --- */
+.masked-tooltip {
+    display: inline-flex;
+    align-items: center;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    color: #2dd4bf;
+    background: rgba(45, 212, 191, 0.08);
+    border: 1px solid rgba(45, 212, 191, 0.25);
+    border-radius: 4px;
+    padding: 0.15rem 0;
+    margin-left: 0;
+    backdrop-filter: blur(8px);
+    transition: max-width 0.2s ease, opacity 0.15s ease, padding 0.2s ease, margin 0.2s ease;
+    pointer-events: none;
+}
+
+.tree-node-masked:hover .masked-tooltip {
+    max-width: 320px;
+    opacity: 1;
+    padding: 0.15rem 0.5rem;
+    margin-left: 0.5rem;
+}
+
+.tree-toggle {
+    cursor: pointer;
+    color: var(--text-muted);
+    user-select: none;
+    display: inline-block;
+    width: 1.2rem;
+    text-align: center;
+    font-size: 0.6rem;
+    vertical-align: middle;
+    transition: color 0.1s;
+}
+
+.tree-toggle:hover {
+    color: var(--accent);
+}
+
+.tree-key {
+    color: var(--accent);
+}
+
+.tree-bracket {
+    color: var(--text-muted);
+}
+
+.tree-collapsed {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 0.75rem;
+}
+
+.tree-value-string {
+    color: var(--green);
+}
+
+.tree-value-number {
+    color: #f0a500;
+}
+
+.tree-value-boolean {
+    color: #c084fc;
+}
+
+.tree-value-null {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.tree-leaf {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.tree-action {
+    opacity: 0;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    margin-left: 0.75rem;
+    transition: opacity 0.15s, background 0.15s, transform 0.1s;
+    transform: translateX(-4px);
+}
+
+.tree-node:hover .tree-action {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.tree-action:hover {
+    background: var(--accent);
+    color: var(--bg-root);
+}
+
+/* --- Mapper Type Badges --- */
+.badge-type {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.badge-regex {
+    background: #7c3aed20;
+    color: #c084fc;
+    border: 1px solid #7c3aed40;
+}
+
+.badge-json {
+    background: #0d948020;
+    color: var(--green);
+    border: 1px solid #0d948040;
+}
+
+/* --- Inline Edit --- */
+.edit-input {
+    background: var(--bg-input);
+    border: 1px solid var(--border-focus);
+    border-radius: 4px;
+    color: var(--text-primary);
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    font-family: inherit;
+    width: auto;
+    min-width: 6rem;
+}
+
+.edit-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.actions-cell {
+    white-space: nowrap;
+}
+
+.action-buttons {
+    display: inline-flex;
+    gap: 0.4rem;
+}
+
+.btn-edit {
+    background: none;
+    border: 1px solid var(--border-default);
+    color: var(--text-secondary);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-edit:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn-save {
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.btn-save:hover {
+    background: var(--accent);
+    color: var(--bg-root);
+}
+
+.btn-cancel {
+    background: none;
+    border: 1px solid var(--border-default);
+    color: var(--text-muted);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.btn-cancel:hover {
+    color: var(--text-secondary);
+    border-color: var(--text-secondary);
 }
 
 /* --- Selection Styling --- */

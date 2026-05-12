@@ -18,8 +18,7 @@ class MaskingRule:
     def effective_prefix(self) -> str:
         if self.alias_prefix:
             return self.alias_prefix
-        # Use the last segment of the path as the prefix
-        return self.field_path.rsplit(".", maxsplit=1)[-1]
+        return "_masked_" + self.field_path.rsplit(".", maxsplit=1)[-1]
 
     def matches_tool(self, tool_name: str) -> bool:
         return self.tool_name == "*" or self.tool_name == tool_name

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -14,6 +14,7 @@ class ResponseMapper:
     order: int = 0
     active: bool = True
     id: int | None = None
+    config: dict | None = field(default=None)
 
     def matches_tool(self, tool_name: str) -> bool:
         return self.tool_name == "*" or self.tool_name == tool_name

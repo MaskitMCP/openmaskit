@@ -4,13 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Maskit - Tools</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="stylesheet" href="/static/style.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
 <div x-data="toolsPage()" x-init="init()">
     <header>
-        <h1>Maskit</h1>
+        <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
         <nav>
             <a href="/">Targets</a>
             <span class="nav-sep">/</span>
@@ -28,18 +29,35 @@
             </p>
             <div class="tools-grid" x-show="tools.length > 0">
                 <template x-for="tool in tools" :key="tool.name">
-                    <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools/' + encodeURIComponent(tool.name)" class="tool-card-link">
-                        <h3 x-text="tool.name"></h3>
-                        <p x-text="tool.description || 'No description'"></p>
-                        <div class="tool-badges">
-                            <span x-show="toolRuleCount(tool.name) > 0" class="tool-badge">
-                                <span x-text="toolRuleCount(tool.name)"></span> rules
-                            </span>
-                            <span x-show="toolMapperCount(tool.name) > 0" class="tool-badge tool-badge-mapper">
-                                <span x-text="toolMapperCount(tool.name)"></span> mappers
-                            </span>
-                        </div>
-                    </a>
+                    <div class="tool-card-wrapper" :class="{ 'tool-card-hidden': isHidden(tool.name) }">
+                        <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools/' + encodeURIComponent(tool.name)" class="tool-card-link">
+                            <h3 x-text="tool.name"></h3>
+                            <p x-text="tool.description || 'No description'"></p>
+                            <div class="tool-badges">
+                                <span x-show="isHidden(tool.name)" class="tool-badge tool-badge-hidden">Hidden</span>
+                                <span x-show="toolRuleCount(tool.name) > 0" class="tool-badge">
+                                    <span x-text="toolRuleCount(tool.name)"></span> rules
+                                </span>
+                                <span x-show="toolMapperCount(tool.name) > 0" class="tool-badge tool-badge-mapper">
+                                    <span x-text="toolMapperCount(tool.name)"></span> mappers
+                                </span>
+                            </div>
+                        </a>
+                        <button class="tool-hide-btn"
+                                @click="toggleHidden(tool.name, $event)"
+                                :title="isHidden(tool.name) ? 'Show tool to agent' : 'Hide tool from agent'">
+                            <svg x-show="!isHidden(tool.name)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                            <svg x-show="isHidden(tool.name)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
+                                <line x1="1" y1="1" x2="23" y2="23"/>
+                            </svg>
+                        </button>
+                    </div>
                 </template>
             </div>
         </section>
@@ -65,7 +83,7 @@
                         <template x-for="rule in globalRules" :key="rule.id">
                             <tr>
                                 <td><code x-text="rule.field_path"></code></td>
-                                <td x-text="rule.alias_prefix || rule.field_path.split('.').pop()"></td>
+                                <td x-text="rule.alias_prefix || ('_masked_' + rule.field_path.split('.').pop())"></td>
                                 <td><button class="btn-danger" @click="deleteRule(rule.id)">Delete</button></td>
                             </tr>
                         </template>
@@ -171,6 +189,7 @@ function toolsPage() {
     return {
         targetName: '',
         tools: [],
+        hiddenTools: [],
         rules: [],
         mappers: [],
         mappings: [],
@@ -195,6 +214,26 @@ function toolsPage() {
             return this.mappers.filter(m => m.tool_name === toolName).length;
         },
 
+        isHidden(toolName) {
+            return this.hiddenTools.includes(toolName);
+        },
+
+        async toggleHidden(toolName, event) {
+            event.preventDefault();
+            event.stopPropagation();
+            const nowHidden = !this.isHidden(toolName);
+            await fetch(`${this.apiBase()}/hidden_tools/toggle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tool_name: toolName, hidden: nowHidden }),
+            });
+            if (nowHidden) {
+                this.hiddenTools.push(toolName);
+            } else {
+                this.hiddenTools = this.hiddenTools.filter(n => n !== toolName);
+            }
+        },
+
         async init() {
             const parts = window.location.pathname.split('/targets/')[1];
             this.targetName = decodeURIComponent(parts.split('/tools')[0]);
@@ -212,6 +251,7 @@ function toolsPage() {
             const res = await fetch(`${this.apiBase()}/tools`);
             const data = await res.json();
             this.tools = data.tools;
+            this.hiddenTools = data.hidden_tools || [];
         },
 
         async loadRules() {

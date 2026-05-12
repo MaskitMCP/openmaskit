@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from maskit.masking.mappers import ResponseMapper
+from maskit.masking.parsing import try_parse_structured
+
+
+def _validate_dot_path(path: str) -> bool:
+    if not path:
+        return False
+    parts = path.split(".")
+    return all(part and part.replace("_", "").isalnum() for part in parts)
 
 
 async def mappers_list(request: Request):
@@ -32,6 +41,7 @@ async def mappers_list(request: Request):
                 "alias_prefix": m.alias_prefix,
                 "order": m.order,
                 "active": m.active,
+                "config": m.config,
             }
             for m in mappers
         ]
@@ -47,31 +57,43 @@ async def mappers_create(request: Request):
 
     body = await request.json()
     tool_name = body.get("tool_name", "*")
+    mapper_type = body.get("mapper_type", "regex_replace")
     pattern = body.get("pattern", "")
     alias_prefix = body.get("alias_prefix", "")
+    config = body.get("config")
 
     if not pattern:
         return JSONResponse({"error": "pattern is required"}, status_code=400)
-    if not alias_prefix:
-        return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
 
-    try:
-        re.compile(pattern)
-    except re.error as exc:
-        return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+    if mapper_type == "regex_replace":
+        if not alias_prefix:
+            return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+    elif mapper_type == "json_field_mask":
+        if not alias_prefix:
+            return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
+        if not _validate_dot_path(pattern):
+            return JSONResponse({"error": "Invalid dot-notation path"}, status_code=400)
+    else:
+        return JSONResponse({"error": f"Unknown mapper_type: {mapper_type}"}, status_code=400)
 
     mapper = ResponseMapper(
         tool_name=tool_name,
-        mapper_type="regex_replace",
+        mapper_type=mapper_type,
         pattern=pattern,
         alias_prefix=alias_prefix,
+        config=config,
     )
 
     mapper_id = await target.engine._store.add_mapper(mapper, target_name=target_name)
     mapper.id = mapper_id
 
     target.engine._mappers.append(mapper)
-    target.engine._compiled_patterns[mapper_id] = re.compile(pattern)
+    if mapper_type == "regex_replace":
+        target.engine._compiled_patterns[mapper_id] = re.compile(pattern)
 
     return JSONResponse(
         {
@@ -82,9 +104,52 @@ async def mappers_create(request: Request):
             "alias_prefix": mapper.alias_prefix,
             "order": mapper.order,
             "active": mapper.active,
+            "config": mapper.config,
         },
         status_code=201,
     )
+
+
+async def mappers_update(request: Request):
+    state = request.app.state.proxy_state
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
+
+    mapper_id = int(request.path_params["mapper_id"])
+    body = await request.json()
+    pattern = body.get("pattern", "")
+    alias_prefix = body.get("alias_prefix", "")
+
+    if not pattern:
+        return JSONResponse({"error": "pattern is required"}, status_code=400)
+    if not alias_prefix:
+        return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
+
+    mapper = next((m for m in target.engine._mappers if m.id == mapper_id), None)
+    if mapper is None:
+        return JSONResponse({"error": "Mapper not found"}, status_code=404)
+
+    if mapper.mapper_type == "regex_replace":
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+    elif mapper.mapper_type == "json_field_mask":
+        if not _validate_dot_path(pattern):
+            return JSONResponse({"error": "Invalid dot-notation path"}, status_code=400)
+
+    updated = await target.engine._store.update_mapper(mapper_id, pattern, alias_prefix)
+    if not updated:
+        return JSONResponse({"error": "Mapper not found"}, status_code=404)
+
+    mapper.pattern = pattern
+    mapper.alias_prefix = alias_prefix
+    if mapper.mapper_type == "regex_replace":
+        target.engine._compiled_patterns[mapper_id] = re.compile(pattern)
+
+    return JSONResponse({"ok": True})
 
 
 async def mappers_delete(request: Request):
@@ -170,3 +235,97 @@ async def mappers_reorder(request: Request):
 
     target.engine._mappers.sort(key=lambda m: m.order)
     return JSONResponse({"ok": True})
+
+
+async def mappers_preview_json(request: Request):
+    body = await request.json()
+    text = body.get("text", "")
+    path = body.get("path", "")
+    alias_prefix = body.get("alias_prefix", "value")
+
+    if not path:
+        return JSONResponse({"error": "path is required"}, status_code=400)
+    if not _validate_dot_path(path):
+        return JSONResponse({"error": "Invalid dot-notation path"}, status_code=400)
+
+    parse_result = try_parse_structured(text)
+    if parse_result is None:
+        return JSONResponse({"error": "Text is not valid JSON or Python repr"}, status_code=400)
+
+    data = parse_result.data
+    counter = [0]
+    seen: dict[str, str] = {}
+    matches: list[dict] = []
+
+    def mask_value(value: str) -> str:
+        if value not in seen:
+            counter[0] += 1
+            seen[value] = f"{alias_prefix}_{counter[0]}"
+            matches.append({"original": value, "alias": seen[value]})
+        return seen[value]
+
+    def walk(data, path_parts: list[str]) -> bool:
+        if not path_parts:
+            return False
+
+        if isinstance(data, list):
+            any_masked = False
+            for item in data:
+                if walk(item, path_parts):
+                    any_masked = True
+            return any_masked
+
+        if not isinstance(data, dict):
+            return False
+
+        key = path_parts[0]
+        remaining = path_parts[1:]
+
+        if key not in data:
+            return False
+
+        value = data[key]
+
+        if not remaining:
+            if isinstance(value, str):
+                data[key] = mask_value(value)
+                return True
+            elif isinstance(value, (int, float, bool)):
+                data[key] = mask_value(str(value))
+                return True
+            elif isinstance(value, list):
+                any_masked = False
+                for i, item in enumerate(value):
+                    if isinstance(item, str):
+                        value[i] = mask_value(item)
+                        any_masked = True
+                return any_masked
+            return False
+
+        if isinstance(value, list):
+            any_masked = False
+            for item in value:
+                if walk(item, remaining):
+                    any_masked = True
+            return any_masked
+        elif isinstance(value, dict):
+            return walk(value, remaining)
+        return False
+
+    walk(data, path.split("."))
+    return JSONResponse({"result": json.dumps(data, indent=2), "matches": matches, "format": parse_result.format})
+
+
+async def parse_text(request: Request):
+    """Parse text as JSON or Python repr and return the structured data."""
+    body = await request.json()
+    text = body.get("text", "")
+
+    if not text:
+        return JSONResponse({"parsed": None, "format": None})
+
+    result = try_parse_structured(text)
+    if result is None:
+        return JSONResponse({"parsed": None, "format": None})
+
+    return JSONResponse({"parsed": result.data, "format": result.format})

@@ -1,9 +1,13 @@
 """Tests for the masking engine."""
 
+import ast
+import json
+
 import pytest
 import pytest_asyncio
 
 from maskit.masking.engine import MaskingEngine
+from maskit.masking.mappers import ResponseMapper
 from maskit.masking.rules import MaskingRule, get_nested_value, set_nested_value
 from maskit.masking.store import MaskingStore
 
@@ -160,3 +164,63 @@ class TestMaskingEngine:
         masked = engine.mask_response("unknown_tool", result)
         # Only wildcard rule for api_key applies, but field isn't api_key
         assert masked["structuredContent"]["unrelated_field"] == "value"
+
+
+class TestPythonReprMasking:
+    @pytest.mark.anyio
+    async def test_mask_python_repr_text_content(self, engine):
+        result = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "{'host': 'prod-db.example.com', 'port': 5432}",
+                }
+            ]
+        }
+        masked = engine.mask_response("get_connection", result)
+        parsed = ast.literal_eval(masked["content"][0]["text"])
+        assert parsed["host"] == "host_1"
+        assert parsed["port"] == 5432
+
+    @pytest.mark.anyio
+    async def test_json_field_mask_on_python_repr(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="host", alias_prefix="server",
+        )
+        engine._mappers = [mapper]
+
+        result = {"content": [{"type": "text", "text": "{'host': 'internal.server.net', 'port': 3306}"}]}
+        masked = engine.mask_response("test_tool", result)
+        data = ast.literal_eval(masked["content"][0]["text"])
+        assert data["host"] == "server_1"
+
+    @pytest.mark.anyio
+    async def test_python_booleans_and_none_passthrough(self, engine):
+        result = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "{'host': 'my-host.net', 'active': True, 'deleted': None}",
+                }
+            ]
+        }
+        masked = engine.mask_response("get_connection", result)
+        parsed = ast.literal_eval(masked["content"][0]["text"])
+        assert parsed["host"] == "host_1"
+        assert parsed["active"] is True
+        assert parsed["deleted"] is None
+
+    @pytest.mark.anyio
+    async def test_json_input_stays_json(self, engine):
+        result = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": '{"host": "prod-db.example.com", "port": 5432}',
+                }
+            ]
+        }
+        masked = engine.mask_response("get_connection", result)
+        parsed = json.loads(masked["content"][0]["text"])
+        assert parsed["host"] == "host_1"

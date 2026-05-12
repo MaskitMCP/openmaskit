@@ -18,9 +18,10 @@ AI Host (Claude Code, etc.)
 Real MCP Server
 ```
 
-- Tool responses are intercepted and matched against masking rules
+- Tool responses are intercepted and matched against masking rules and response mappers
 - Matched field values are replaced with stable aliases (same value always gets the same alias)
 - When the agent passes an alias back in a tool call, Maskit swaps in the real value before forwarding
+- Tools can be hidden per-target, blocking agent access entirely
 
 ## Install
 
@@ -72,22 +73,57 @@ uv run maskit              # uses ./maskit.yaml
 uv run maskit config.yaml  # custom path
 ```
 
-3. Connect your AI agent to Maskit's MCP endpoint:
+3. Connect your AI agent to Maskit's MCP endpoint (per target):
 
 ```bash
-claude mcp add --scope project maskit --transport http http://localhost:9474/mcp
+claude mcp add --scope project maskit-time --transport http http://localhost:9474/time/mcp
+claude mcp add --scope project maskit-slack --transport http http://localhost:9474/slack/mcp
 ```
 
 ## Web Dashboard
 
 Open `http://127.0.0.1:9473` to:
 
-- Browse tool schemas from the upstream server
-- Create and manage masking rules interactively
+- Browse and manage multiple upstream targets
+- Browse tool schemas from upstream servers
+- Hide tools from the agent (blocked calls return an error)
+- Create and manage masking rules (field-path-based)
+- Create and manage response mappers (regex or JSON field mask)
 - Try out tools directly from the UI
 - View live traffic and current alias mappings
 
 ## Configuration
+
+Maskit supports multiple upstream targets in a single config:
+
+```yaml
+targets:
+  time:
+    upstream:
+      transport: stdio
+      command: uvx
+      args: ["mcp-server-time"]
+    rules: []
+
+  slack:
+    upstream:
+      transport: http
+      url: "https://mcp.slack.com/mcp"
+      oauth:
+        client_id: "your-client-id"
+        callback_port: 3118
+    rules:
+      - tool_name: "send_message"
+        field_path: "channel_id"
+
+web_port: 9473
+mcp_port: 9474
+store_path: "~/.maskit/store.db"
+```
+
+Each target gets its own MCP endpoint at `http://localhost:{mcp_port}/{target_name}/mcp`.
+
+Or a single upstream (legacy format):
 
 | Field | Description |
 |-------|-------------|

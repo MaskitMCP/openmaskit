@@ -10,7 +10,15 @@ import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from mcp.shared.message import SessionMessage
-from mcp.types import JSONRPCMessage, JSONRPCNotification, JSONRPCRequest, JSONRPCResponse
+from mcp.types import (
+    METHOD_NOT_FOUND,
+    ErrorData,
+    JSONRPCError,
+    JSONRPCMessage,
+    JSONRPCNotification,
+    JSONRPCRequest,
+    JSONRPCResponse,
+)
 
 if TYPE_CHECKING:
     from maskit.masking.engine import MaskingEngine
@@ -53,6 +61,7 @@ class TargetState:
     name: str
     engine: MaskingEngine
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
+    hidden_tools: set[str] = field(default_factory=set)
     traffic_log: list[dict[str, Any]] = field(default_factory=list)
     response_dispatcher: ResponseDispatcher = field(default_factory=ResponseDispatcher)
     pending_tool_calls: dict[str | int, str] = field(default_factory=dict)
@@ -201,7 +210,8 @@ async def _relay_downstream_to_upstream(
                 continue
 
             modified = _intercept_request(msg, target)
-            await us_write.send(modified)
+            if modified is not None:
+                await us_write.send(modified)
     except (anyio.ClosedResourceError, anyio.EndOfStream):
         pass
 
@@ -233,8 +243,11 @@ async def _relay_upstream_to_downstream(
         pass
 
 
-def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessage:
-    """Intercept downstream requests, unmask tool call arguments."""
+def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessage | None:
+    """Intercept downstream requests, unmask tool call arguments.
+
+    Returns None if the message should not be forwarded upstream (e.g. blocked tool).
+    """
     root = msg.message.root
 
     if not isinstance(root, JSONRPCRequest):
@@ -249,6 +262,18 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
         target.pending_requests[root.id] = "tools/list"
     elif method == "tools/call" and params:
         tool_name = params.get("name", "")
+
+        if tool_name in target.hidden_tools:
+            logger.info("[%s] Blocked call to hidden tool: %s", target.name, tool_name)
+            target.log_traffic("blocked", "tools/call", {"tool": tool_name})
+            error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
+                jsonrpc="2.0",
+                id=root.id,
+                error=ErrorData(code=METHOD_NOT_FOUND, message=f"Tool not found: {tool_name}"),
+            )))
+            target.response_dispatcher.dispatch(root.id, error_response)
+            return None
+
         target.pending_tool_calls[root.id] = tool_name
         target.log_traffic("request", method, {"tool": tool_name})
 
@@ -300,7 +325,9 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
             tools = result.get("tools", [])
             if tools and isinstance(tools, list):
                 target.cache_tool_schemas(tools)
-                target.log_traffic("response", "tools/list", {"count": len(tools)})
+                if target.hidden_tools:
+                    result["tools"] = [t for t in tools if t.get("name") not in target.hidden_tools]
+                target.log_traffic("response", "tools/list", {"count": len(result["tools"])})
         return msg
 
     # Check if this is a response to a tools/call request

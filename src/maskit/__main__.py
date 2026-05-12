@@ -73,11 +73,14 @@ async def async_main():
         await engine.load_aliases()
         await engine.load_mappers()
 
+        hidden = await store.get_hidden_tools(target_name=name)
+
         ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](32)
 
         target_state = TargetState(
             name=name,
             engine=engine,
+            hidden_tools=set(hidden),
             ds_read_send=ds_read_send,
             ds_read_recv=ds_read_recv,
         )

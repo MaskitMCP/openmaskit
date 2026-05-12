@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -38,7 +39,16 @@ CREATE TABLE IF NOT EXISTS response_mappers (
     "order" INTEGER NOT NULL DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT 1,
     target_name TEXT NOT NULL DEFAULT 'default',
+    config TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hidden_tools (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    target_name TEXT NOT NULL DEFAULT 'default',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tool_name, target_name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_mappings_real_value ON mappings(real_value);
@@ -47,6 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_rules_tool_name ON rules(tool_name);
 CREATE INDEX IF NOT EXISTS idx_rules_target ON rules(target_name);
 CREATE INDEX IF NOT EXISTS idx_response_mappers_tool ON response_mappers(tool_name);
 CREATE INDEX IF NOT EXISTS idx_response_mappers_target ON response_mappers(target_name);
+CREATE INDEX IF NOT EXISTS idx_hidden_tools_target ON hidden_tools(target_name);
 """
 
 
@@ -68,7 +79,7 @@ class MaskingStore:
         return store
 
     async def _migrate(self):
-        """Add target_name column to existing tables if missing."""
+        """Add target_name and config columns to existing tables if missing."""
         cursor = await self._db.execute("PRAGMA table_info(mappings)")
         columns = {row[1] for row in await cursor.fetchall()}
         if "target_name" not in columns:
@@ -89,6 +100,14 @@ class MaskingStore:
             )
             await self._db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_response_mappers_target ON response_mappers(target_name)"
+            )
+            await self._db.commit()
+
+        cursor = await self._db.execute("PRAGMA table_info(response_mappers)")
+        mapper_columns = {row[1] for row in await cursor.fetchall()}
+        if "config" not in mapper_columns:
+            await self._db.execute(
+                "ALTER TABLE response_mappers ADD COLUMN config TEXT DEFAULT NULL"
             )
             await self._db.commit()
 
@@ -208,6 +227,14 @@ class MaskingStore:
                 for r in rows
             ]
 
+    async def update_rule(self, rule_id: int, alias_prefix: str) -> bool:
+        cursor = await self._db.execute(
+            "UPDATE rules SET alias_prefix = ? WHERE id = ?",
+            (alias_prefix, rule_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
     async def delete_rule(self, rule_id: int) -> bool:
         cursor = await self._db.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
         await self._db.commit()
@@ -224,20 +251,21 @@ class MaskingStore:
                 row = await cursor.fetchone()
                 mapper.order = (row[0] if row else 0) + 1
 
+        config_json = json.dumps(mapper.config) if mapper.config else None
         cursor = await self._db.execute(
-            'INSERT INTO response_mappers (tool_name, mapper_type, pattern, alias_prefix, "order", active, target_name) '
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (mapper.tool_name, mapper.mapper_type, mapper.pattern, mapper.alias_prefix, mapper.order, mapper.active, target_name),
+            'INSERT INTO response_mappers (tool_name, mapper_type, pattern, alias_prefix, "order", active, target_name, config) '
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (mapper.tool_name, mapper.mapper_type, mapper.pattern, mapper.alias_prefix, mapper.order, mapper.active, target_name, config_json),
         )
         await self._db.commit()
         return cursor.lastrowid
 
     async def get_mappers(self, target_name: str | None = None) -> list[ResponseMapper]:
         if target_name:
-            query = 'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active FROM response_mappers WHERE target_name = ? ORDER BY "order"'
+            query = 'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active, config FROM response_mappers WHERE target_name = ? ORDER BY "order"'
             params: tuple = (target_name,)
         else:
-            query = 'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active FROM response_mappers ORDER BY "order"'
+            query = 'SELECT id, tool_name, mapper_type, pattern, alias_prefix, "order", active, config FROM response_mappers ORDER BY "order"'
             params = ()
 
         async with self._db.execute(query, params) as cursor:
@@ -251,9 +279,18 @@ class MaskingStore:
                     alias_prefix=r[4],
                     order=r[5],
                     active=bool(r[6]),
+                    config=json.loads(r[7]) if r[7] else None,
                 )
                 for r in rows
             ]
+
+    async def update_mapper(self, mapper_id: int, pattern: str, alias_prefix: str) -> bool:
+        cursor = await self._db.execute(
+            "UPDATE response_mappers SET pattern = ?, alias_prefix = ? WHERE id = ?",
+            (pattern, alias_prefix, mapper_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
 
     async def delete_mapper(self, mapper_id: int) -> bool:
         cursor = await self._db.execute("DELETE FROM response_mappers WHERE id = ?", (mapper_id,))
@@ -267,6 +304,32 @@ class MaskingStore:
                 (idx, mapper_id),
             )
         await self._db.commit()
+
+    # --- Hidden Tools ---
+
+    async def get_hidden_tools(self, target_name: str = "default") -> list[str]:
+        async with self._db.execute(
+            "SELECT tool_name FROM hidden_tools WHERE target_name = ?",
+            (target_name,),
+        ) as cursor:
+            return [row[0] async for row in cursor]
+
+    async def hide_tool(self, tool_name: str, target_name: str = "default") -> bool:
+        await self._db.execute(
+            "INSERT OR IGNORE INTO hidden_tools (tool_name, target_name) VALUES (?, ?)",
+            (tool_name, target_name),
+        )
+        changed = self._db.total_changes
+        await self._db.commit()
+        return changed > 0
+
+    async def unhide_tool(self, tool_name: str, target_name: str = "default") -> bool:
+        cursor = await self._db.execute(
+            "DELETE FROM hidden_tools WHERE tool_name = ? AND target_name = ?",
+            (tool_name, target_name),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
 
     async def close(self):
         await self._db.close()

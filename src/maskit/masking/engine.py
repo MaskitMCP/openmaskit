@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from maskit.masking.mappers import ResponseMapper
+from maskit.masking.parsing import serialize, try_parse_structured
 from maskit.masking.rules import MaskingRule, get_nested_value, set_nested_value
 from maskit.masking.store import MaskingStore
 
@@ -61,10 +62,11 @@ class MaskingEngine:
         self._mappers = await self._store.get_mappers(target_name=self._target_name)
         self._compiled_patterns = {}
         for m in self._mappers:
-            try:
-                self._compiled_patterns[m.id] = re.compile(m.pattern)
-            except re.error as exc:
-                logger.warning("Invalid regex in mapper %d: %s", m.id, exc)
+            if m.mapper_type == "regex_replace":
+                try:
+                    self._compiled_patterns[m.id] = re.compile(m.pattern)
+                except re.error as exc:
+                    logger.warning("Invalid regex in mapper %d: %s", m.id, exc)
 
     async def flush_pending(self):
         """Write pending alias mappings to the database."""
@@ -148,15 +150,11 @@ class MaskingEngine:
         if not text:
             return block
 
-        # Try parsing as JSON
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                masked = self._mask_dict(parsed, tool_name, rules)
-                block["text"] = json.dumps(masked)
-                return block
-        except (json.JSONDecodeError, ValueError):
-            pass
+        parse_result = try_parse_structured(text)
+        if parse_result is not None and isinstance(parse_result.data, dict):
+            masked = self._mask_dict(parse_result.data, tool_name, rules)
+            block["text"] = serialize(masked, parse_result.format)
+            return block
 
         # For plain text, replace known real values with their aliases
         for rule in rules:
@@ -193,8 +191,11 @@ class MaskingEngine:
         if not text:
             return block
         for mapper in mappers:
-            if mapper.id in self._compiled_patterns:
-                text = self._apply_regex_mapper(text, tool_name, mapper)
+            if mapper.mapper_type == "regex_replace":
+                if mapper.id in self._compiled_patterns:
+                    text = self._apply_regex_mapper(text, tool_name, mapper)
+            elif mapper.mapper_type == "json_field_mask":
+                text = self._apply_json_field_mask(text, tool_name, mapper)
         block["text"] = text
         return block
 
@@ -219,3 +220,72 @@ class MaskingEngine:
                 return alias
 
         return compiled.sub(replacer, text)
+
+    def _apply_json_field_mask(
+        self, text: str, tool_name: str, mapper: ResponseMapper
+    ) -> str:
+        parse_result = try_parse_structured(text)
+        if parse_result is None:
+            return text
+
+        data = parse_result.data
+        path_parts = mapper.pattern.split(".")
+        if self._mask_at_json_path(data, path_parts, tool_name, mapper):
+            return serialize(data, parse_result.format)
+        return text
+
+    def _mask_at_json_path(
+        self, data: Any, path_parts: list[str], tool_name: str, mapper: ResponseMapper
+    ) -> bool:
+        if not path_parts:
+            return False
+
+        if isinstance(data, list):
+            any_masked = False
+            for item in data:
+                if self._mask_at_json_path(item, path_parts, tool_name, mapper):
+                    any_masked = True
+            return any_masked
+
+        if not isinstance(data, dict):
+            return False
+
+        current_key = path_parts[0]
+        remaining = path_parts[1:]
+
+        if current_key not in data:
+            return False
+
+        value = data[current_key]
+
+        if not remaining:
+            if isinstance(value, str):
+                data[current_key] = self._get_or_create_alias(
+                    value, tool_name, f"mapper:{mapper.id}:{mapper.pattern}", mapper.alias_prefix
+                )
+                return True
+            elif isinstance(value, (int, float, bool)):
+                data[current_key] = self._get_or_create_alias(
+                    str(value), tool_name, f"mapper:{mapper.id}:{mapper.pattern}", mapper.alias_prefix
+                )
+                return True
+            elif isinstance(value, list):
+                any_masked = False
+                for i, item in enumerate(value):
+                    if isinstance(item, str):
+                        value[i] = self._get_or_create_alias(
+                            item, tool_name, f"mapper:{mapper.id}:{mapper.pattern}", mapper.alias_prefix
+                        )
+                        any_masked = True
+                return any_masked
+            return False
+
+        if isinstance(value, list):
+            any_masked = False
+            for item in value:
+                if self._mask_at_json_path(item, remaining, tool_name, mapper):
+                    any_masked = True
+            return any_masked
+        elif isinstance(value, dict):
+            return self._mask_at_json_path(value, remaining, tool_name, mapper)
+        return False

@@ -16,12 +16,16 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(state: ProxyState) -> Starlette:
+    from maskit.web.routes.hidden_tools import hidden_tools_list, hidden_tools_toggle
     from maskit.web.routes.mappers import (
         mappers_create,
         mappers_delete,
         mappers_list,
         mappers_preview,
+        mappers_preview_json,
         mappers_reorder,
+        mappers_update,
+        parse_text,
     )
     from maskit.web.routes.pages import (
         api_targets,
@@ -31,7 +35,7 @@ def create_app(state: ProxyState) -> Starlette:
         tool_detail_page,
         tools_page,
     )
-    from maskit.web.routes.rules import rules_create, rules_delete, rules_list
+    from maskit.web.routes.rules import rules_create, rules_delete, rules_list, rules_update
     from maskit.web.routes.traffic import TrafficWebSocket, api_mappings
 
     routes = [
@@ -42,12 +46,18 @@ def create_app(state: ProxyState) -> Starlette:
         Route("/api/targets/{target_name}/tools/call", api_tools_call, methods=["POST"]),
         Route("/api/targets/{target_name}/rules", rules_list, methods=["GET"]),
         Route("/api/targets/{target_name}/rules/create", rules_create, methods=["POST"]),
+        Route("/api/targets/{target_name}/rules/{rule_id:int}/update", rules_update, methods=["POST"]),
         Route("/api/targets/{target_name}/rules/{rule_id:int}/delete", rules_delete, methods=["POST", "DELETE"]),
         Route("/api/targets/{target_name}/mappers", mappers_list, methods=["GET"]),
         Route("/api/targets/{target_name}/mappers/create", mappers_create, methods=["POST"]),
+        Route("/api/targets/{target_name}/mappers/{mapper_id:int}/update", mappers_update, methods=["POST"]),
         Route("/api/targets/{target_name}/mappers/{mapper_id:int}/delete", mappers_delete, methods=["POST", "DELETE"]),
         Route("/api/targets/{target_name}/mappers/preview", mappers_preview, methods=["POST"]),
+        Route("/api/targets/{target_name}/mappers/preview_json", mappers_preview_json, methods=["POST"]),
         Route("/api/targets/{target_name}/mappers/reorder", mappers_reorder, methods=["POST"]),
+        Route("/api/targets/{target_name}/parse_text", parse_text, methods=["POST"]),
+        Route("/api/targets/{target_name}/hidden_tools", hidden_tools_list, methods=["GET"]),
+        Route("/api/targets/{target_name}/hidden_tools/toggle", hidden_tools_toggle, methods=["POST"]),
         Route("/api/targets/{target_name}/mappings", api_mappings),
         WebSocketRoute("/ws/targets/{target_name}/traffic", TrafficWebSocket),
         Route("/targets/{target_name}/tools/{tool_name:path}", tool_detail_page),

@@ -4,13 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Maskit - Tool</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="stylesheet" href="/static/style.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
 <div x-data="toolDetail()" x-init="init()">
     <header>
-        <h1>Maskit</h1>
+        <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
         <nav>
             <a href="/">Targets</a>
             <span class="nav-sep">/</span>
@@ -69,8 +70,53 @@
                 <pre x-text="tryError"></pre>
             </div>
             <div x-show="tryResult" class="try-result">
-                <h4>Response</h4>
-                <pre x-text="tryResult"></pre>
+                <div class="response-tabs">
+                    <button class="response-tab" :class="{'response-tab-active': responseView === 'raw'}" @click="responseView = 'raw'">Raw</button>
+                    <button x-show="jsonTree !== null" class="response-tab" :class="{'response-tab-active': responseView === 'tree'}" @click="responseView = 'tree'">Tree</button>
+                </div>
+                <div x-show="pythonReprDetected && responseView === 'tree'" class="python-repr-banner">
+                    <span class="banner-icon">&#9888;</span>
+                    This response contains Python-style output (not JSON). It has been parsed for the tree view. Masking will normalize to JSON format.
+                </div>
+                <div class="response-panel">
+                    <pre x-show="responseView === 'raw'" x-text="tryResult"></pre>
+                    <div x-show="responseView === 'tree' && jsonTree !== null" class="json-tree">
+                        <template x-for="(node, idx) in treeNodes" :key="idx">
+                            <div class="tree-node" :class="{'tree-node-masked': node.masked}" :style="'padding-left: ' + (node.depth * 1.2) + 'rem'" @mouseenter="hoverPath = node.path" @mouseleave="hoverPath = null">
+                                <template x-if="node.type === 'object_start'">
+                                    <span>
+                                        <span class="tree-toggle" @click="toggleExpand(node.path)" x-text="treeExpanded[node.path] === false ? '▶' : '▼'"></span>
+                                        <span x-show="node.key" class="tree-key" x-text="node.key + ': '"></span>
+                                        <span class="tree-bracket">{</span>
+                                        <span x-show="treeExpanded[node.path] === false" class="tree-collapsed" x-text="'...' + node.count + ' keys}'"></span>
+                                    </span>
+                                </template>
+                                <template x-if="node.type === 'object_end'">
+                                    <span x-show="treeExpanded[node.path] !== false" class="tree-bracket">}</span>
+                                </template>
+                                <template x-if="node.type === 'array_start'">
+                                    <span>
+                                        <span class="tree-toggle" @click="toggleExpand(node.path)" x-text="treeExpanded[node.path] === false ? '▶' : '▼'"></span>
+                                        <span x-show="node.key" class="tree-key" x-text="node.key + ': '"></span>
+                                        <span class="tree-bracket">[</span>
+                                        <span x-show="treeExpanded[node.path] === false" class="tree-collapsed" x-text="'...' + node.count + ' items]'"></span>
+                                    </span>
+                                </template>
+                                <template x-if="node.type === 'array_end'">
+                                    <span x-show="treeExpanded[node.path] !== false" class="tree-bracket">]</span>
+                                </template>
+                                <template x-if="node.type === 'leaf'">
+                                    <span class="tree-leaf">
+                                        <span x-show="node.key" class="tree-key" x-text="node.key + ': '"></span>
+                                        <span class="tree-value" :class="'tree-value-' + node.valueType" x-text="node.display"></span>
+                                        <span x-show="node.masked" class="masked-tooltip" x-text="'was: ' + node.originalValue"></span>
+                                        <button x-show="!node.masked" class="tree-action" @click="maskFromTree(node)" title="Mask this field">Mask</button>
+                                    </span>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -94,12 +140,28 @@
                         <template x-for="rule in toolRules" :key="rule.id">
                             <tr>
                                 <td><code x-text="rule.field_path"></code></td>
-                                <td x-text="rule.alias_prefix || rule.field_path.split('.').pop()"></td>
+                                <td>
+                                    <span x-show="editingRule?.id !== rule.id" x-text="rule.alias_prefix || ('_masked_' + rule.field_path.split('.').pop())"></span>
+                                    <input x-show="editingRule?.id === rule.id" type="text" class="edit-input" x-model="editingRule.alias_prefix" @keydown.enter="saveEditRule()" @keydown.escape="cancelEditRule()">
+                                </td>
                                 <td>
                                     <span x-show="rule.tool_name === '*'" class="badge-global">Global</span>
                                     <span x-show="rule.tool_name !== '*'" class="badge-tool">This tool</span>
                                 </td>
-                                <td><button class="btn-danger" @click="deleteRule(rule.id)">Delete</button></td>
+                                <td class="actions-cell">
+                                    <template x-if="editingRule?.id !== rule.id">
+                                        <span class="action-buttons">
+                                            <button class="btn-edit" @click="startEditRule(rule)">Edit</button>
+                                            <button class="btn-danger" @click="deleteRule(rule.id)">Delete</button>
+                                        </span>
+                                    </template>
+                                    <template x-if="editingRule?.id === rule.id">
+                                        <span class="action-buttons">
+                                            <button class="btn-save" @click="saveEditRule()">Save</button>
+                                            <button class="btn-cancel" @click="cancelEditRule()">Cancel</button>
+                                        </span>
+                                    </template>
+                                </td>
                             </tr>
                         </template>
                     </tbody>
@@ -148,9 +210,9 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Pattern</th>
+                            <th>Type</th>
+                            <th>Pattern / Path</th>
                             <th>Alias Prefix</th>
-                            <th>Order</th>
                             <th>Scope</th>
                             <th></th>
                         </tr>
@@ -158,14 +220,36 @@
                     <tbody>
                         <template x-for="mapper in toolMappers" :key="mapper.id">
                             <tr>
-                                <td><code x-text="mapper.pattern"></code></td>
-                                <td x-text="mapper.alias_prefix"></td>
-                                <td x-text="mapper.order"></td>
+                                <td>
+                                    <span x-show="mapper.mapper_type === 'regex_replace'" class="badge-type badge-regex">Regex</span>
+                                    <span x-show="mapper.mapper_type === 'json_field_mask'" class="badge-type badge-json">JSON Field</span>
+                                </td>
+                                <td>
+                                    <code x-show="editingMapper?.id !== mapper.id" x-text="mapper.pattern"></code>
+                                    <input x-show="editingMapper?.id === mapper.id" type="text" class="edit-input mono-input" x-model="editingMapper.pattern" @keydown.escape="cancelEditMapper()">
+                                </td>
+                                <td>
+                                    <span x-show="editingMapper?.id !== mapper.id" x-text="mapper.alias_prefix"></span>
+                                    <input x-show="editingMapper?.id === mapper.id" type="text" class="edit-input" x-model="editingMapper.alias_prefix" @keydown.enter="saveEditMapper()" @keydown.escape="cancelEditMapper()">
+                                </td>
                                 <td>
                                     <span x-show="mapper.tool_name === '*'" class="badge-global">Global</span>
                                     <span x-show="mapper.tool_name !== '*'" class="badge-tool">This tool</span>
                                 </td>
-                                <td><button class="btn-danger" @click="deleteMapper(mapper.id)">Delete</button></td>
+                                <td class="actions-cell">
+                                    <template x-if="editingMapper?.id !== mapper.id">
+                                        <span class="action-buttons">
+                                            <button class="btn-edit" @click="startEditMapper(mapper)">Edit</button>
+                                            <button class="btn-danger" @click="deleteMapper(mapper.id)">Delete</button>
+                                        </span>
+                                    </template>
+                                    <template x-if="editingMapper?.id === mapper.id">
+                                        <span class="action-buttons">
+                                            <button class="btn-save" @click="saveEditMapper()">Save</button>
+                                            <button class="btn-cancel" @click="cancelEditMapper()">Cancel</button>
+                                        </span>
+                                    </template>
+                                </td>
                             </tr>
                         </template>
                     </tbody>
@@ -234,6 +318,14 @@ function toolDetail() {
         tryLoading: false,
         tryResult: null,
         tryError: null,
+        jsonTree: null,
+        treeExpanded: {},
+        hoverPath: null,
+        responseView: 'raw',
+        pythonReprDetected: false,
+        aliasMap: {},
+        editingRule: null,
+        editingMapper: null,
         newRule: { field_path: '', alias_prefix: '' },
         newMapper: { pattern: '', alias_prefix: '' },
         mapperPreview: null,
@@ -306,6 +398,11 @@ function toolDetail() {
             this.tryLoading = true;
             this.tryResult = null;
             this.tryError = null;
+            this.jsonTree = null;
+            this.treeExpanded = {};
+            this.responseView = 'raw';
+            this.pythonReprDetected = false;
+            this.aliasMap = {};
             this.mapperPreview = null;
             this.mapperPreviewError = null;
             this.mapperMatches = [];
@@ -320,11 +417,115 @@ function toolDetail() {
                     this.tryError = typeof data.error === 'string' ? data.error : JSON.stringify(data.error, null, 2);
                 } else {
                     this.tryResult = JSON.stringify(data.result, null, 2);
+                    this.aliasMap = data.aliases || {};
+                    this.jsonTree = null;
+                    const textBlock = data.result?.content?.find(b => b.type === 'text');
+                    if (textBlock?.text) {
+                        try {
+                            this.jsonTree = JSON.parse(textBlock.text);
+                            this.responseView = 'tree';
+                        } catch {
+                            const parseRes = await fetch(`${this.apiBase()}/parse_text`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ text: textBlock.text }),
+                            });
+                            const parseData = await parseRes.json();
+                            if (parseData.parsed !== null) {
+                                this.jsonTree = parseData.parsed;
+                                this.responseView = 'tree';
+                                this.pythonReprDetected = (parseData.format === 'python_repr');
+                            }
+                        }
+                    }
                 }
             } catch (e) {
                 this.tryError = e.message;
             } finally {
                 this.tryLoading = false;
+            }
+        },
+
+        get treeNodes() {
+            if (!this.jsonTree) return [];
+            const nodes = this.flattenTree(this.jsonTree, '', '', 0);
+            for (const node of nodes) {
+                if (node.type === 'leaf' && typeof node.value === 'string' && this.aliasMap[node.value]) {
+                    node.masked = true;
+                    node.originalValue = this.aliasMap[node.value];
+                }
+            }
+            return nodes;
+        },
+
+        flattenTree(data, path, key, depth) {
+            const nodes = [];
+            if (data === null) {
+                nodes.push({ type: 'leaf', path, key, value: null, display: 'null', valueType: 'null', depth });
+            } else if (Array.isArray(data)) {
+                nodes.push({ type: 'array_start', path, key, depth, count: data.length });
+                if (this.treeExpanded[path] !== false) {
+                    data.forEach((item, i) => {
+                        const childPath = path ? `${path}[${i}]` : `[${i}]`;
+                        if (item !== null && typeof item === 'object') {
+                            nodes.push(...this.flattenTree(item, childPath, `${i}`, depth + 1));
+                        } else {
+                            const vt = item === null ? 'null' : typeof item;
+                            const disp = typeof item === 'string' ? `"${item}"` : String(item);
+                            nodes.push({ type: 'leaf', path: childPath, key: String(i), value: item, display: disp, valueType: vt, depth: depth + 1 });
+                        }
+                    });
+                }
+                nodes.push({ type: 'array_end', path, depth });
+            } else if (typeof data === 'object') {
+                nodes.push({ type: 'object_start', path, key, depth, count: Object.keys(data).length });
+                if (this.treeExpanded[path] !== false) {
+                    for (const [k, v] of Object.entries(data)) {
+                        const childPath = path ? `${path}.${k}` : k;
+                        if (v !== null && typeof v === 'object') {
+                            nodes.push(...this.flattenTree(v, childPath, k, depth + 1));
+                        } else {
+                            const vt = v === null ? 'null' : typeof v;
+                            const disp = typeof v === 'string' ? `"${v}"` : String(v);
+                            nodes.push({ type: 'leaf', path: childPath, key: k, value: v, display: disp, valueType: vt, depth: depth + 1 });
+                        }
+                    }
+                }
+                nodes.push({ type: 'object_end', path, depth });
+            } else {
+                const vt = typeof data;
+                const disp = typeof data === 'string' ? `"${data}"` : String(data);
+                nodes.push({ type: 'leaf', path, key, value: data, display: disp, valueType: vt, depth });
+            }
+            return nodes;
+        },
+
+        toggleExpand(path) {
+            this.treeExpanded[path] = this.treeExpanded[path] === false ? true : false;
+        },
+
+        maskFromTree(node) {
+            const dotPath = node.path.replace(/\[\d+\]/g, '').replace(/^\./, '');
+            const parts = dotPath.split('.');
+            const prefix = '_masked_' + (parts[parts.length - 1] || 'value');
+            this.createJsonFieldMapper(dotPath, prefix);
+        },
+
+        async createJsonFieldMapper(path, aliasPrefix) {
+            const res = await fetch(`${this.apiBase()}/mappers/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tool_name: this.toolName,
+                    mapper_type: 'json_field_mask',
+                    pattern: path,
+                    alias_prefix: aliasPrefix,
+                }),
+            });
+            const data = await res.json();
+            await this.loadMappers();
+            if (data.id) {
+                this.editingMapper = { id: data.id, pattern: path, alias_prefix: aliasPrefix };
             }
         },
 
@@ -353,6 +554,25 @@ function toolDetail() {
                 }),
             });
             this.newRule = { field_path: '', alias_prefix: '' };
+            await this.loadRules();
+        },
+
+        startEditRule(rule) {
+            this.editingRule = { id: rule.id, alias_prefix: rule.alias_prefix || '' };
+        },
+
+        cancelEditRule() {
+            this.editingRule = null;
+        },
+
+        async saveEditRule() {
+            if (!this.editingRule) return;
+            await fetch(`${this.apiBase()}/rules/${this.editingRule.id}/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ alias_prefix: this.editingRule.alias_prefix }),
+            });
+            this.editingRule = null;
             await this.loadRules();
         },
 
@@ -406,6 +626,28 @@ function toolDetail() {
                 this.newMapper = { pattern: '', alias_prefix: '' };
                 this.mapperPreview = null;
                 this.mapperMatches = [];
+                await this.loadMappers();
+            }
+        },
+
+        startEditMapper(mapper) {
+            this.editingMapper = { id: mapper.id, pattern: mapper.pattern, alias_prefix: mapper.alias_prefix };
+        },
+
+        cancelEditMapper() {
+            this.editingMapper = null;
+        },
+
+        async saveEditMapper() {
+            if (!this.editingMapper) return;
+            const res = await fetch(`${this.apiBase()}/mappers/${this.editingMapper.id}/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pattern: this.editingMapper.pattern, alias_prefix: this.editingMapper.alias_prefix }),
+            });
+            const data = await res.json();
+            if (!data.error) {
+                this.editingMapper = null;
                 await this.loadMappers();
             }
         },

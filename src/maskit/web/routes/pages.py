@@ -47,7 +47,10 @@ async def api_tools(request: Request):
     target = state.get_target(target_name)
     if target is None:
         return JSONResponse({"error": "Target not found"}, status_code=404)
-    return JSONResponse({"tools": target.tool_schemas})
+    return JSONResponse({
+        "tools": target.tool_schemas,
+        "hidden_tools": list(target.hidden_tools),
+    })
 
 
 async def api_tools_call(request: Request):
@@ -90,7 +93,8 @@ async def api_tools_call(request: Request):
 
     root = response_msg.message.root
     if hasattr(root, "result"):
-        return JSONResponse({"result": root.result})
+        alias_map = {alias: real for alias, real in target.engine._alias_cache.items()}
+        return JSONResponse({"result": root.result, "aliases": alias_map})
     if hasattr(root, "error"):
         return JSONResponse({"error": root.error}, status_code=400)
     return JSONResponse({"error": "Unexpected response"}, status_code=500)

@@ -177,6 +177,104 @@ class TestMapperNonTextBlock:
         assert masked["content"][0]["data"] == "C06GXQV5S58"
 
 
+class TestJsonFieldMask:
+    async def test_simple_field(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="host", alias_prefix="host",
+        )
+        engine._mappers = [mapper]
+
+        result = {"content": [{"type": "text", "text": '{"host": "prod-db.internal.net", "port": 5432}'}]}
+        masked = engine.mask_response("test_tool", result)
+        import json
+        data = json.loads(masked["content"][0]["text"])
+        assert data["host"] == "host_1"
+        assert data["port"] == 5432
+
+    async def test_nested_field(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="connection.host", alias_prefix="host",
+        )
+        engine._mappers = [mapper]
+
+        result = {"content": [{"type": "text", "text": '{"connection": {"host": "10.0.0.1", "port": 3306}}'}]}
+        masked = engine.mask_response("test_tool", result)
+        import json
+        data = json.loads(masked["content"][0]["text"])
+        assert data["connection"]["host"] == "host_1"
+        assert data["connection"]["port"] == 3306
+
+    async def test_array_auto_recurse(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="users.email", alias_prefix="email",
+        )
+        engine._mappers = [mapper]
+
+        import json
+        text = json.dumps({"users": [{"email": "alice@corp.com", "name": "Alice"}, {"email": "bob@corp.com", "name": "Bob"}]})
+        result = {"content": [{"type": "text", "text": text}]}
+        masked = engine.mask_response("test_tool", result)
+        data = json.loads(masked["content"][0]["text"])
+        assert data["users"][0]["email"] == "email_1"
+        assert data["users"][0]["name"] == "Alice"
+        assert data["users"][1]["email"] == "email_2"
+        assert data["users"][1]["name"] == "Bob"
+
+    async def test_non_json_passthrough(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="host", alias_prefix="host",
+        )
+        engine._mappers = [mapper]
+
+        result = {"content": [{"type": "text", "text": "not json at all"}]}
+        masked = engine.mask_response("test_tool", result)
+        assert masked["content"][0]["text"] == "not json at all"
+
+    async def test_missing_path_unchanged(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="nonexistent.field", alias_prefix="val",
+        )
+        engine._mappers = [mapper]
+
+        result = {"content": [{"type": "text", "text": '{"other": "data"}'}]}
+        masked = engine.mask_response("test_tool", result)
+        assert masked["content"][0]["text"] == '{"other": "data"}'
+
+    async def test_numeric_value_masked(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="secret_port", alias_prefix="port",
+        )
+        engine._mappers = [mapper]
+
+        result = {"content": [{"type": "text", "text": '{"secret_port": 5432}'}]}
+        masked = engine.mask_response("test_tool", result)
+        import json
+        data = json.loads(masked["content"][0]["text"])
+        assert data["secret_port"] == "port_1"
+
+    async def test_same_value_same_alias(self, engine):
+        mapper = ResponseMapper(
+            id=1, tool_name="*", mapper_type="json_field_mask",
+            pattern="items.host", alias_prefix="host",
+        )
+        engine._mappers = [mapper]
+
+        import json
+        text = json.dumps({"items": [{"host": "same.host.com"}, {"host": "same.host.com"}, {"host": "other.host.com"}]})
+        result = {"content": [{"type": "text", "text": text}]}
+        masked = engine.mask_response("test_tool", result)
+        data = json.loads(masked["content"][0]["text"])
+        assert data["items"][0]["host"] == "host_1"
+        assert data["items"][1]["host"] == "host_1"
+        assert data["items"][2]["host"] == "host_2"
+
+
 class TestStoreMapperCRUD:
     async def test_add_and_get(self, store):
         mapper = ResponseMapper(

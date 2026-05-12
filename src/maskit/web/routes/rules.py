@@ -62,6 +62,29 @@ async def rules_create(request: Request):
     }, status_code=201)
 
 
+async def rules_update(request: Request):
+    state = request.app.state.proxy_state
+    target_name = request.path_params["target_name"]
+    target = state.get_target(target_name)
+    if target is None:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
+
+    rule_id = int(request.path_params["rule_id"])
+    body = await request.json()
+    alias_prefix = body.get("alias_prefix", "")
+
+    updated = await target.engine._store.update_rule(rule_id, alias_prefix)
+    if not updated:
+        return JSONResponse({"error": "Rule not found"}, status_code=404)
+
+    for r in target.engine._rules:
+        if r.id == rule_id:
+            r.alias_prefix = alias_prefix
+            break
+
+    return JSONResponse({"ok": True})
+
+
 async def rules_delete(request: Request):
     state = request.app.state.proxy_state
     target_name = request.path_params["target_name"]
