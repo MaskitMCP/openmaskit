@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS hidden_tools (
     UNIQUE(tool_name, target_name)
 );
 
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    config TEXT NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT 1,
+    installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_active ON mcp_servers(active);
 CREATE INDEX IF NOT EXISTS idx_mappings_real_value ON mappings(real_value);
 CREATE INDEX IF NOT EXISTS idx_mappings_target ON mappings(target_name);
 CREATE INDEX IF NOT EXISTS idx_rules_tool_name ON rules(tool_name);
@@ -330,6 +339,81 @@ class MaskingStore:
         )
         await self._db.commit()
         return cursor.rowcount > 0
+
+    # --- Marketplace Servers ---
+
+    async def install_server(self, server_id: str, name: str, config: dict) -> None:
+        config_json = json.dumps(config)
+        await self._db.execute(
+            "INSERT OR REPLACE INTO mcp_servers (id, name, config, active) VALUES (?, ?, ?, 1)",
+            (server_id, name, config_json),
+        )
+        await self._db.commit()
+
+    async def deactivate_server(self, server_id: str) -> bool:
+        cursor = await self._db.execute(
+            "UPDATE mcp_servers SET active = 0 WHERE id = ?", (server_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def activate_server(self, server_id: str) -> bool:
+        cursor = await self._db.execute(
+            "UPDATE mcp_servers SET active = 1 WHERE id = ?", (server_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def update_server(self, server_id: str, name: str, config: dict) -> bool:
+        config_json = json.dumps(config)
+        cursor = await self._db.execute(
+            "UPDATE mcp_servers SET name = ?, config = ? WHERE id = ?",
+            (name, config_json, server_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def uninstall_server(self, server_id: str) -> bool:
+        cursor = await self._db.execute(
+            "DELETE FROM mcp_servers WHERE id = ?", (server_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def get_installed_servers(self, active_only: bool = False) -> list[dict]:
+        if active_only:
+            query = "SELECT id, name, config, active, installed_at FROM mcp_servers WHERE active = 1"
+        else:
+            query = "SELECT id, name, config, active, installed_at FROM mcp_servers"
+
+        async with self._db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "config": json.loads(r[2]),
+                    "active": bool(r[3]),
+                    "installed_at": r[4],
+                }
+                for r in rows
+            ]
+
+    async def get_server(self, server_id: str) -> dict | None:
+        async with self._db.execute(
+            "SELECT id, name, config, active, installed_at FROM mcp_servers WHERE id = ?",
+            (server_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "name": row[1],
+                "config": json.loads(row[2]),
+                "active": bool(row[3]),
+                "installed_at": row[4],
+            }
 
     async def close(self):
         await self._db.close()

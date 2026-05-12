@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maskit - Marketplace</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+<div x-data="marketplacePage()" x-init="init()">
+    <header>
+        <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
+        <nav>
+            <a href="/">Targets</a>
+            <a href="/marketplace" class="active">Marketplace</a>
+        </nav>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Marketplace</h2>
+            <p class="section-hint">Browse and install MCP servers. Installed servers appear as targets automatically.</p>
+
+            <div class="marketplace-search">
+                <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                </svg>
+                <input type="text"
+                       class="search-input"
+                       placeholder="Search servers by name, description, or tag..."
+                       x-model="search"
+                       @input="filterServers()">
+            </div>
+
+            <div x-show="loading" class="loading-overlay">
+                <span class="spinner"></span> Loading marketplace...
+            </div>
+
+            <div class="tools-grid" x-show="!loading && filteredServers.length > 0">
+                <template x-for="server in filteredServers" :key="server.id">
+                    <div class="marketplace-card" :class="{ 'marketplace-card-active': server.active && server.connected }">
+                        <div class="marketplace-card-header">
+                            <div class="marketplace-card-icon" :data-icon="server.icon">
+                                <svg x-show="server.icon === 'messaging'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                <svg x-show="server.icon === 'code'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                                <svg x-show="server.icon === 'database'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                <svg x-show="server.icon === 'document'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                <svg x-show="server.icon === 'task'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                                <svg x-show="server.icon === 'monitoring'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                <svg x-show="server.icon === 'cloud'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
+                                <svg x-show="server.icon === 'container'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 3h-8l-2 4h12z"/></svg>
+                            </div>
+                            <span x-show="server.official" class="badge-official" title="Official MCP Server">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                Official
+                            </span>
+                        </div>
+
+                        <h3 x-text="server.name"></h3>
+                        <p class="marketplace-card-desc" x-text="server.description"></p>
+
+                        <div class="marketplace-card-tags">
+                            <template x-for="tag in server.tags.slice(0, 3)" :key="tag">
+                                <span class="marketplace-tag" x-text="tag"></span>
+                            </template>
+                        </div>
+
+                        <div class="marketplace-card-footer">
+                            <span x-show="server.active && server.connected" class="marketplace-status marketplace-status-connected">
+                                <span class="status-dot"></span> Connected
+                            </span>
+                            <span x-show="server.installed && !server.active" class="marketplace-status marketplace-status-inactive">
+                                Inactive
+                            </span>
+
+                            <button x-show="!server.installed"
+                                    class="btn-primary btn-install"
+                                    :disabled="server.installing"
+                                    @click="installServer(server)">
+                                <span x-show="!server.installing">Install</span>
+                                <span x-show="server.installing" class="spinner spinner-sm"></span>
+                            </button>
+
+                            <button x-show="server.installed && server.active"
+                                    class="btn-danger"
+                                    @click="deactivateServer(server)">
+                                Deactivate
+                            </button>
+
+                            <button x-show="server.installed && !server.active"
+                                    class="btn-activate"
+                                    :disabled="server.installing"
+                                    @click="activateServer(server)">
+                                <span x-show="!server.installing">Activate</span>
+                                <span x-show="server.installing" class="spinner spinner-sm"></span>
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <p x-show="!loading && filteredServers.length === 0 && search" class="muted">
+                No servers match your search.
+            </p>
+        </section>
+    </main>
+
+    <!-- Config Modal (inline within same x-data scope) -->
+    <div x-show="modal.visible" class="modal-backdrop" @keydown.escape.window="modalCancel()" style="display: none;">
+        <div class="modal" @click.outside="modalCancel()">
+            <h3>Configuration Required</h3>
+            <template x-if="modal.oauthVars.length > 0">
+                <div>
+                    <p class="modal-desc">OAuth credentials (register an app on the provider's developer portal):</p>
+                    <template x-for="varName in modal.oauthVars" :key="'oauth_' + varName">
+                        <label class="modal-field">
+                            <span x-text="varName" class="modal-var-name"></span>
+                            <input :type="varName.includes('secret') ? 'password' : 'text'"
+                                   :placeholder="'Enter ' + varName"
+                                   x-model="modal.oauthValues[varName]" required>
+                        </label>
+                    </template>
+                </div>
+            </template>
+            <template x-if="modal.envVars.length > 0">
+                <div>
+                    <p class="modal-desc">Environment variables:</p>
+                    <template x-for="varName in modal.envVars" :key="'env_' + varName">
+                        <label class="modal-field">
+                            <span x-text="varName" class="modal-var-name"></span>
+                            <input type="text" :placeholder="'Enter ' + varName" x-model="modal.envValues[varName]" required>
+                        </label>
+                    </template>
+                </div>
+            </template>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" @click="modalCancel()">Cancel</button>
+                <button type="button" class="btn-primary" @click="modalSubmit()">Install</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast-container">
+        <template x-for="t in toasts" :key="t.id">
+            <div class="toast" :class="'toast-' + t.type" x-text="t.msg"
+                 x-init="setTimeout(() => toasts = toasts.filter(x => x.id !== t.id), 3000)"></div>
+        </template>
+    </div>
+</div>
+
+<script>
+function marketplacePage() {
+    let _modalResolve = null;
+
+    return {
+        servers: [],
+        filteredServers: [],
+        search: '',
+        loading: true,
+        toasts: [],
+
+        modal: {
+            visible: false,
+            envVars: [],
+            oauthVars: [],
+            envValues: {},
+            oauthValues: {},
+        },
+
+        showToast(msg, type = 'success') {
+            this.toasts.push({ id: Date.now(), msg, type });
+        },
+
+        openModal(envVars, oauthVars) {
+            this.modal.envVars = envVars || [];
+            this.modal.oauthVars = oauthVars || [];
+            this.modal.envValues = {};
+            this.modal.oauthValues = {};
+            this.modal.envVars.forEach(v => this.modal.envValues[v] = '');
+            this.modal.oauthVars.forEach(v => this.modal.oauthValues[v] = '');
+            this.modal.visible = true;
+            return new Promise((resolve) => { _modalResolve = resolve; });
+        },
+
+        modalSubmit() {
+            this.modal.visible = false;
+            if (_modalResolve) _modalResolve({ envValues: this.modal.envValues, oauthValues: this.modal.oauthValues });
+            _modalResolve = null;
+        },
+
+        modalCancel() {
+            this.modal.visible = false;
+            if (_modalResolve) _modalResolve(null);
+            _modalResolve = null;
+        },
+
+        async init() {
+            try {
+                await this.loadCatalog();
+            } catch (e) {
+                this.showToast('Failed to load marketplace', 'error');
+            }
+            this.loading = false;
+        },
+
+        async loadCatalog() {
+            const res = await fetch('/api/marketplace');
+            if (!res.ok) throw new Error('Failed to load marketplace');
+            const data = await res.json();
+            this.servers = data.servers.map(s => ({ ...s, installing: false }));
+            this.filterServers();
+        },
+
+        filterServers() {
+            const q = this.search.toLowerCase().trim();
+            if (!q) {
+                this.filteredServers = [...this.servers];
+                return;
+            }
+            this.filteredServers = this.servers.filter(s =>
+                s.name.toLowerCase().includes(q) ||
+                s.description.toLowerCase().includes(q) ||
+                (s.tags || []).some(t => t.toLowerCase().includes(q))
+            );
+        },
+
+        async installServer(server) {
+            let envVars = {};
+            let oauthVars = {};
+            const needsEnv = server.env_vars && server.env_vars.length > 0;
+            const needsOauth = server.oauth_vars && server.oauth_vars.length > 0;
+
+            if (needsEnv || needsOauth) {
+                const result = await this.openModal(
+                    needsEnv ? server.env_vars : [],
+                    needsOauth ? server.oauth_vars : []
+                );
+                if (!result) return;
+                envVars = result.envValues;
+                oauthVars = result.oauthValues;
+            }
+
+            server.installing = true;
+            try {
+                const res = await fetch('/api/marketplace/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_id: server.id, env_vars: envVars, oauth_vars: oauthVars }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    this.showToast(data.error || 'Install failed', 'error');
+                } else {
+                    server.installed = true;
+                    server.active = true;
+                    server.connected = data.connected;
+                    if (data.connected) {
+                        this.showToast(`${server.name} installed and connected`);
+                    } else {
+                        this.showToast(`${server.name} installed but failed to connect: ${data.error || 'unknown error'}`, 'error');
+                    }
+                }
+            } catch (e) {
+                this.showToast('Network error: ' + e.message, 'error');
+            }
+            server.installing = false;
+        },
+
+        async deactivateServer(server) {
+            if (!confirm(`Deactivate ${server.name}? This will disconnect the server.`)) return;
+            try {
+                const res = await fetch('/api/marketplace/deactivate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_id: server.id }),
+                });
+                if (res.ok) {
+                    server.active = false;
+                    server.connected = false;
+                    this.showToast(`${server.name} deactivated`);
+                } else {
+                    const data = await res.json();
+                    this.showToast(data.error || 'Deactivation failed', 'error');
+                }
+            } catch (e) {
+                this.showToast('Network error: ' + e.message, 'error');
+            }
+        },
+
+        async activateServer(server) {
+            server.installing = true;
+            try {
+                const res = await fetch('/api/marketplace/activate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_id: server.id }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    server.active = true;
+                    server.connected = data.connected;
+                    this.showToast(`${server.name} activated`);
+                } else {
+                    this.showToast(data.error || 'Activation failed', 'error');
+                }
+            } catch (e) {
+                this.showToast('Network error: ' + e.message, 'error');
+            }
+            server.installing = false;
+        },
+    };
+}
+</script>
+</body>
+</html>

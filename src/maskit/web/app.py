@@ -16,6 +16,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(state: ProxyState) -> Starlette:
+    from maskit.web.routes.custom_targets import (
+        custom_target_create,
+        custom_target_delete,
+        custom_target_get,
+        custom_target_update,
+    )
     from maskit.web.routes.hidden_tools import hidden_tools_list, hidden_tools_toggle
     from maskit.web.routes.mappers import (
         mappers_create,
@@ -26,6 +32,13 @@ def create_app(state: ProxyState) -> Starlette:
         mappers_reorder,
         mappers_update,
         parse_text,
+    )
+    from maskit.web.routes.marketplace import (
+        marketplace_activate,
+        marketplace_deactivate,
+        marketplace_install,
+        marketplace_list,
+        marketplace_page,
     )
     from maskit.web.routes.pages import (
         api_targets,
@@ -40,7 +53,16 @@ def create_app(state: ProxyState) -> Starlette:
 
     routes = [
         Route("/", targets_page),
+        Route("/marketplace", marketplace_page),
+        Route("/api/marketplace", marketplace_list),
+        Route("/api/marketplace/install", marketplace_install, methods=["POST"]),
+        Route("/api/marketplace/deactivate", marketplace_deactivate, methods=["POST"]),
+        Route("/api/marketplace/activate", marketplace_activate, methods=["POST"]),
         Route("/targets/{target_name}/tools", tools_page),
+        Route("/api/targets/custom", custom_target_create, methods=["POST"]),
+        Route("/api/targets/custom/{target_id}", custom_target_get, methods=["GET"]),
+        Route("/api/targets/custom/{target_id}/update", custom_target_update, methods=["POST"]),
+        Route("/api/targets/custom/{target_id}/delete", custom_target_delete, methods=["POST"]),
         Route("/api/targets", api_targets),
         Route("/api/targets/{target_name}/tools", api_tools),
         Route("/api/targets/{target_name}/tools/call", api_tools_call, methods=["POST"]),

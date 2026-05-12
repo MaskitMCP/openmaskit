@@ -97,6 +97,9 @@ class ProxyState:
     def __init__(self):
         self.targets: dict[str, TargetState] = {}
         self.store: MaskingStore | None = None
+        self.target_manager: Any | None = None
+        self.callback_server: Any | None = None
+        self.config_target_ids: set[str] = set()
 
     def get_target(self, name: str) -> TargetState | None:
         return self.targets.get(name)
@@ -193,15 +196,16 @@ async def run_proxy_for_target(
     us_write: MemoryObjectSendStream[SessionMessage],
 ):
     """Run the proxy relay for a single target."""
-    try:
-        logger.info("[%s] Bootstrapping upstream session...", target.name)
-        with anyio.fail_after(30):
-            await _bootstrap_upstream(us_read, us_write, target)
-        logger.info("[%s] Bootstrap complete — %d tools cached", target.name, len(target.tool_schemas))
-    except TimeoutError:
-        logger.warning("[%s] Timed out bootstrapping upstream — tools will appear after first client connects", target.name)
-    except Exception as exc:
-        logger.error("[%s] Bootstrap failed: %s", target.name, exc, exc_info=True)
+    if not target.initialized:
+        try:
+            logger.info("[%s] Bootstrapping upstream session...", target.name)
+            with anyio.fail_after(30):
+                await _bootstrap_upstream(us_read, us_write, target)
+            logger.info("[%s] Bootstrap complete — %d tools cached", target.name, len(target.tool_schemas))
+        except TimeoutError:
+            logger.warning("[%s] Timed out bootstrapping upstream — tools will appear after first client connects", target.name)
+        except Exception as exc:
+            logger.error("[%s] Bootstrap failed: %s", target.name, exc, exc_info=True)
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(_relay_downstream_to_upstream, target, us_write)

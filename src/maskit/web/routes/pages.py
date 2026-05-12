@@ -31,12 +31,14 @@ async def api_targets(request: Request):
     state = request.app.state.proxy_state
     targets = []
     for name, ts in state.targets.items():
+        editable = name not in state.config_target_ids
         targets.append({
             "name": name,
             "tool_count": len(ts.tool_schemas),
             "rule_count": len(ts.engine.rules),
             "mapper_count": len(ts.engine.mappers),
             "initialized": ts.initialized,
+            "editable": editable,
         })
     return JSONResponse({"targets": targets})
 

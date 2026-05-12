@@ -4,8 +4,9 @@ from pydantic import BaseModel, Field
 
 
 class HttpOAuthConfig(BaseModel):
-    client_id: str
-    callback_port: int = 3118
+    client_id: str | None = None
+    client_secret: str | None = None
+    scope: str | None = None
 
 
 class UpstreamStdioConfig(BaseModel):
