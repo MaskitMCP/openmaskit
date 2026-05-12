@@ -1,6 +1,14 @@
-# Maskit
+<p align="center">
+  <img src="assets/icon.png" alt="Maskit" width="120">
+</p>
 
-An MCP proxy that masks sensitive data in tool responses before they reach your AI agent, and unmasks them transparently when the agent uses those values in subsequent tool calls.
+<h1 align="center">Maskit</h1>
+
+<p align="center">
+  <em>Drop-in MCP proxy that keeps your secrets out of the context window.</em>
+</p>
+
+---
 
 ## Why
 
