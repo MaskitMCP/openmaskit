@@ -32,10 +32,16 @@ async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
     while not shutdown_event.is_set():
         await anyio.sleep(1.0)
         if engine._pending_writes:
-            await engine.flush_pending()
+            try:
+                await engine.flush_pending()
+            except Exception:
+                logger.exception("Failed to flush aliases to database")
     # Final flush on shutdown
     if engine._pending_writes:
-        await engine.flush_pending()
+        try:
+            await engine.flush_pending()
+        except Exception:
+            logger.exception("Failed final flush of aliases to database")
 
 
 async def async_main():

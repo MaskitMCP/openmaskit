@@ -47,10 +47,11 @@ async def api_tools(request: Request):
     target = state.get_target(target_name)
     if target is None:
         return JSONResponse({"error": "Target not found"}, status_code=404)
-    return JSONResponse({
-        "tools": target.tool_schemas,
-        "hidden_tools": list(target.hidden_tools),
-    })
+    include_hidden = request.query_params.get("include_hidden") == "1"
+    response = {"tools": target.tool_schemas}
+    if include_hidden:
+        response["hidden_tools"] = list(target.hidden_tools)
+    return JSONResponse(response)
 
 
 async def api_tools_call(request: Request):
@@ -77,6 +78,7 @@ async def api_tools_call(request: Request):
     )
     session_msg = SessionMessage(message=JSONRPCMessage(root=rpc_request))
 
+    snapshot_len = len(target.engine._pending_writes)
     event = target.response_dispatcher.register(request_id)
     await target.ds_read_send.send(session_msg)
 
@@ -93,8 +95,10 @@ async def api_tools_call(request: Request):
 
     root = response_msg.message.root
     if hasattr(root, "result"):
-        alias_map = {alias: real for alias, real in target.engine._alias_cache.items()}
-        return JSONResponse({"result": root.result, "aliases": alias_map})
+        new_aliases = {}
+        for alias, real_value, _, _ in target.engine._pending_writes[snapshot_len:]:
+            new_aliases[alias] = real_value
+        return JSONResponse({"result": root.result, "aliases": new_aliases})
     if hasattr(root, "error"):
         return JSONResponse({"error": root.error}, status_code=400)
     return JSONResponse({"error": "Unexpected response"}, status_code=500)

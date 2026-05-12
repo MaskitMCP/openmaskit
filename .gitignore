@@ -13,3 +13,7 @@ wheels/
 .DS_Store
 */.DS_Store
 ./mask*.yaml
+
+# Jetbrains related files
+.idea
+.bsp

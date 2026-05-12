@@ -170,7 +170,10 @@ class MaskingEngine:
         if isinstance(data, str):
             if data in self._alias_cache:
                 return self._alias_cache[data]
-            for alias, real_value in self._alias_cache.items():
+            # Sort by length descending to prevent partial matches (cred_10 before cred_1)
+            for alias, real_value in sorted(
+                self._alias_cache.items(), key=lambda x: len(x[0]), reverse=True
+            ):
                 if alias in data:
                     data = data.replace(alias, real_value)
             return data

@@ -157,7 +157,7 @@
                                     </template>
                                     <template x-if="editingRule?.id === rule.id">
                                         <span class="action-buttons">
-                                            <button class="btn-save" @click="saveEditRule()">Save</button>
+                                            <button class="btn-save-inline" @click="saveEditRule()">Save</button>
                                             <button class="btn-cancel" @click="cancelEditRule()">Cancel</button>
                                         </span>
                                     </template>
@@ -245,7 +245,7 @@
                                     </template>
                                     <template x-if="editingMapper?.id === mapper.id">
                                         <span class="action-buttons">
-                                            <button class="btn-save" @click="saveEditMapper()">Save</button>
+                                            <button class="btn-save-inline" @click="saveEditMapper()">Save</button>
                                             <button class="btn-cancel" @click="cancelEditMapper()">Cancel</button>
                                         </span>
                                     </template>
@@ -275,7 +275,7 @@
                         <button class="btn-primary" @click="previewMapper()" :disabled="mapperPreviewLoading">
                             <span x-text="mapperPreviewLoading ? 'Loading...' : 'Preview'"></span>
                         </button>
-                        <button x-show="mapperPreview" class="btn-save" @click="saveMapper()">Save Mapper</button>
+                        <button x-show="mapperPreview" class="btn-save-inline" @click="saveMapper()">Save Mapper</button>
                     </div>
 
                     <div x-show="mapperPreviewError" class="try-error">
@@ -577,6 +577,7 @@ function toolDetail() {
         },
 
         async deleteRule(id) {
+            if (!confirm('Delete this rule?')) return;
             await fetch(`${this.apiBase()}/rules/${id}/delete`, { method: 'DELETE' });
             await this.loadRules();
         },
@@ -653,6 +654,7 @@ function toolDetail() {
         },
 
         async deleteMapper(id) {
+            if (!confirm('Delete this mapper?')) return;
             await fetch(`${this.apiBase()}/mappers/${id}/delete`, { method: 'DELETE' });
             await this.loadMappers();
         },

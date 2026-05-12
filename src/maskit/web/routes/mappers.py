@@ -11,12 +11,27 @@ from starlette.responses import JSONResponse
 from maskit.masking.mappers import ResponseMapper
 from maskit.masking.parsing import try_parse_structured
 
+MAX_PATTERN_LENGTH = 500
+MAX_NAME_LENGTH = 256
+MAX_PREFIX_LENGTH = 64
+
+_REDOS_PATTERN = re.compile(r"(\(.+[+*]\))[+*]")
+
 
 def _validate_dot_path(path: str) -> bool:
     if not path:
         return False
     parts = path.split(".")
     return all(part and part.replace("_", "").isalnum() for part in parts)
+
+
+def _check_regex_safety(pattern: str) -> str | None:
+    """Return an error message if the pattern looks unsafe, else None."""
+    if len(pattern) > MAX_PATTERN_LENGTH:
+        return f"Pattern too long (max {MAX_PATTERN_LENGTH} chars)"
+    if _REDOS_PATTERN.search(pattern):
+        return "Pattern contains nested quantifiers (potential ReDoS)"
+    return None
 
 
 async def mappers_list(request: Request):
@@ -62,12 +77,19 @@ async def mappers_create(request: Request):
     alias_prefix = body.get("alias_prefix", "")
     config = body.get("config")
 
+    if len(tool_name) > MAX_NAME_LENGTH:
+        return JSONResponse({"error": f"tool_name too long (max {MAX_NAME_LENGTH})"}, status_code=400)
+    if len(alias_prefix) > MAX_PREFIX_LENGTH:
+        return JSONResponse({"error": f"alias_prefix too long (max {MAX_PREFIX_LENGTH})"}, status_code=400)
     if not pattern:
         return JSONResponse({"error": "pattern is required"}, status_code=400)
 
     if mapper_type == "regex_replace":
         if not alias_prefix:
             return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
+        safety_err = _check_regex_safety(pattern)
+        if safety_err:
+            return JSONResponse({"error": safety_err}, status_code=400)
         try:
             re.compile(pattern)
         except re.error as exc:
@@ -75,6 +97,8 @@ async def mappers_create(request: Request):
     elif mapper_type == "json_field_mask":
         if not alias_prefix:
             return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
+        if len(pattern) > MAX_PATTERN_LENGTH:
+            return JSONResponse({"error": f"Pattern too long (max {MAX_PATTERN_LENGTH})"}, status_code=400)
         if not _validate_dot_path(pattern):
             return JSONResponse({"error": "Invalid dot-notation path"}, status_code=400)
     else:
@@ -117,7 +141,10 @@ async def mappers_update(request: Request):
     if target is None:
         return JSONResponse({"error": "Target not found"}, status_code=404)
 
-    mapper_id = int(request.path_params["mapper_id"])
+    try:
+        mapper_id = int(request.path_params["mapper_id"])
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid mapper_id"}, status_code=400)
     body = await request.json()
     pattern = body.get("pattern", "")
     alias_prefix = body.get("alias_prefix", "")
@@ -126,12 +153,17 @@ async def mappers_update(request: Request):
         return JSONResponse({"error": "pattern is required"}, status_code=400)
     if not alias_prefix:
         return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
+    if len(alias_prefix) > MAX_PREFIX_LENGTH:
+        return JSONResponse({"error": f"alias_prefix too long (max {MAX_PREFIX_LENGTH})"}, status_code=400)
 
     mapper = next((m for m in target.engine._mappers if m.id == mapper_id), None)
     if mapper is None:
         return JSONResponse({"error": "Mapper not found"}, status_code=404)
 
     if mapper.mapper_type == "regex_replace":
+        safety_err = _check_regex_safety(pattern)
+        if safety_err:
+            return JSONResponse({"error": safety_err}, status_code=400)
         try:
             re.compile(pattern)
         except re.error as exc:
@@ -159,7 +191,10 @@ async def mappers_delete(request: Request):
     if target is None:
         return JSONResponse({"error": "Target not found"}, status_code=404)
 
-    mapper_id = int(request.path_params["mapper_id"])
+    try:
+        mapper_id = int(request.path_params["mapper_id"])
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid mapper_id"}, status_code=400)
     deleted = await target.engine._store.delete_mapper(mapper_id)
     if not deleted:
         return JSONResponse({"error": "Mapper not found"}, status_code=404)

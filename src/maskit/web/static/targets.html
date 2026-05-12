@@ -17,7 +17,10 @@
     <main>
         <section class="panel">
             <h2>Targets</h2>
-            <p x-show="targets.length === 0" class="muted">
+            <div x-show="loading" class="loading-overlay">
+                <span class="spinner"></span> Loading...
+            </div>
+            <p x-show="!loading && targets.length === 0" class="muted">
                 No targets configured. Add targets to your maskit.yaml to get started.
             </p>
             <div class="tools-grid" x-show="targets.length > 0">
@@ -47,13 +50,18 @@
 function targetsPage() {
     return {
         targets: [],
+        loading: true,
 
         async init() {
-            await this.loadTargets();
+            try {
+                await this.loadTargets();
+            } catch {}
+            this.loading = false;
         },
 
         async loadTargets() {
             const res = await fetch('/api/targets');
+            if (!res.ok) throw new Error('Failed to load targets');
             const data = await res.json();
             this.targets = data.targets;
         },

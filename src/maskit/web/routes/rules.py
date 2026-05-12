@@ -7,6 +7,10 @@ from starlette.responses import JSONResponse
 
 from maskit.masking.rules import MaskingRule
 
+MAX_NAME_LENGTH = 256
+MAX_PATH_LENGTH = 256
+MAX_PREFIX_LENGTH = 64
+
 
 async def rules_list(request: Request):
     state = request.app.state.proxy_state
@@ -42,6 +46,12 @@ async def rules_create(request: Request):
 
     if not field_path:
         return JSONResponse({"error": "field_path is required"}, status_code=400)
+    if len(tool_name) > MAX_NAME_LENGTH:
+        return JSONResponse({"error": f"tool_name too long (max {MAX_NAME_LENGTH})"}, status_code=400)
+    if len(field_path) > MAX_PATH_LENGTH:
+        return JSONResponse({"error": f"field_path too long (max {MAX_PATH_LENGTH})"}, status_code=400)
+    if alias_prefix and len(alias_prefix) > MAX_PREFIX_LENGTH:
+        return JSONResponse({"error": f"alias_prefix too long (max {MAX_PREFIX_LENGTH})"}, status_code=400)
 
     rule = MaskingRule(
         tool_name=tool_name,
@@ -69,7 +79,10 @@ async def rules_update(request: Request):
     if target is None:
         return JSONResponse({"error": "Target not found"}, status_code=404)
 
-    rule_id = int(request.path_params["rule_id"])
+    try:
+        rule_id = int(request.path_params["rule_id"])
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid rule_id"}, status_code=400)
     body = await request.json()
     alias_prefix = body.get("alias_prefix", "")
 
@@ -92,7 +105,10 @@ async def rules_delete(request: Request):
     if target is None:
         return JSONResponse({"error": "Target not found"}, status_code=404)
 
-    rule_id = request.path_params["rule_id"]
+    try:
+        rule_id = int(request.path_params["rule_id"])
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid rule_id"}, status_code=400)
     deleted = await target.engine._store.delete_rule(rule_id)
 
     if deleted:

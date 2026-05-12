@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -30,17 +31,20 @@ logger = logging.getLogger(__name__)
 class ResponseDispatcher:
     """Routes proxy responses back to HTTP downstream waiters by request ID."""
 
+    _WAITER_TTL = 120.0
+
     def __init__(self):
-        self._waiters: dict[str | int, tuple[anyio.Event, list[SessionMessage]]] = {}
+        self._waiters: dict[str | int, tuple[anyio.Event, list[SessionMessage], float]] = {}
 
     def register(self, request_id: str | int) -> anyio.Event:
+        self._evict_stale()
         event = anyio.Event()
-        self._waiters[request_id] = (event, [])
+        self._waiters[request_id] = (event, [], time.time())
         return event
 
     def dispatch(self, request_id: str | int, msg: SessionMessage) -> bool:
         if request_id in self._waiters:
-            event, results = self._waiters[request_id]
+            event, results, _ = self._waiters[request_id]
             results.append(msg)
             event.set()
             return True
@@ -49,9 +53,15 @@ class ResponseDispatcher:
     def collect(self, request_id: str | int) -> SessionMessage | None:
         waiter = self._waiters.pop(request_id, None)
         if waiter:
-            _, results = waiter
+            _, results, _ = waiter
             return results[0] if results else None
         return None
+
+    def _evict_stale(self):
+        now = time.time()
+        stale = [rid for rid, (_, _, ts) in self._waiters.items() if now - ts > self._WAITER_TTL]
+        for rid in stale:
+            self._waiters.pop(rid, None)
 
 
 @dataclass

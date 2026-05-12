@@ -224,3 +224,55 @@ class TestPythonReprMasking:
         masked = engine.mask_response("get_connection", result)
         parsed = json.loads(masked["content"][0]["text"])
         assert parsed["host"] == "host_1"
+
+    @pytest.mark.anyio
+    async def test_overlapping_alias_names_unmask_correctly(self, engine):
+        """Aliases like cred_1 and cred_10 should not collide during unmasking."""
+        result1 = {
+            "content": [{"type": "text", "text": '{"host": "first.example.com"}'}]
+        }
+        result2 = {
+            "content": [{"type": "text", "text": '{"host": "second.example.com"}'}]
+        }
+        # Create host_1 and host_2 (or more) aliases
+        for i in range(11):
+            r = {
+                "content": [
+                    {"type": "text", "text": json.dumps({"host": f"host{i}.example.com"})}
+                ]
+            }
+            engine.mask_response("get_connection", r)
+
+        # Now host_1 through host_11 exist as aliases. Unmask host_10 correctly.
+        args = {"host": "host_10"}
+        unmasked = engine.unmask_arguments("get_connection", args)
+        assert unmasked["host"] == "host9.example.com"
+
+        # Ensure host_1 unmasks to its own value, not partial match of host_10
+        args2 = {"host": "host_1"}
+        unmasked2 = engine.unmask_arguments("get_connection", args2)
+        assert unmasked2["host"] == "host0.example.com"
+
+    @pytest.mark.anyio
+    async def test_unmask_alias_embedded_in_string(self, engine):
+        """Aliases embedded in longer strings should unmask correctly."""
+        result = {
+            "content": [{"type": "text", "text": '{"host": "prod-db.internal.net"}'}]
+        }
+        engine.mask_response("get_connection", result)
+        # host_1 = prod-db.internal.net
+        args = {"query": "SELECT * FROM host_1:5432/mydb"}
+        unmasked = engine.unmask_arguments("get_connection", args)
+        assert unmasked["query"] == "SELECT * FROM prod-db.internal.net:5432/mydb"
+
+    @pytest.mark.anyio
+    async def test_empty_text_block_unchanged(self, engine):
+        result = {"content": [{"type": "text", "text": ""}]}
+        masked = engine.mask_response("get_connection", result)
+        assert masked["content"][0]["text"] == ""
+
+    @pytest.mark.anyio
+    async def test_non_text_block_unchanged(self, engine):
+        result = {"content": [{"type": "image", "data": "base64stuff"}]}
+        masked = engine.mask_response("get_connection", result)
+        assert masked["content"][0] == {"type": "image", "data": "base64stuff"}
