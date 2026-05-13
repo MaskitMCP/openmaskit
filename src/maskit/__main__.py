@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 from contextlib import AsyncExitStack
@@ -59,6 +60,7 @@ async def async_main():
         config_path = Path(sys.argv[1])
 
     config = load_config(config_path)
+    bind_host = os.environ.get("MASKIT_HOST", "127.0.0.1")
 
     store = await MaskingStore.create(config.store_path)
 
@@ -145,7 +147,7 @@ async def async_main():
     callback_app = callback_server.create_app()
     callback_uvicorn_config = uvicorn.Config(
         callback_app,
-        host="127.0.0.1",
+        host=bind_host,
         port=OAUTH_CALLBACK_PORT,
         log_level="warning",
         log_config=None,
@@ -155,18 +157,18 @@ async def async_main():
     state.callback_server = callback_server
 
     print("Maskit proxy starting", file=sys.stderr)
-    print(f"  Dashboard: http://127.0.0.1:{config.web_port}", file=sys.stderr)
-    print(f"  OAuth callback: http://127.0.0.1:{OAUTH_CALLBACK_PORT}/callback", file=sys.stderr)
+    print(f"  Dashboard: http://{bind_host}:{config.web_port}", file=sys.stderr)
+    print(f"  OAuth callback: http://{bind_host}:{OAUTH_CALLBACK_PORT}/callback", file=sys.stderr)
     print("  MCP servers:", file=sys.stderr)
     for name in state.target_names:
-        print(f"    {name}: http://127.0.0.1:{config.mcp_port}/{name}/mcp", file=sys.stderr)
+        print(f"    {name}: http://{bind_host}:{config.mcp_port}/{name}/mcp", file=sys.stderr)
 
     web_app = create_app(state)
     mcp_app = create_mcp_app(state)
 
     uvicorn_config = uvicorn.Config(
         web_app,
-        host="127.0.0.1",
+        host=bind_host,
         port=config.web_port,
         log_level="warning",
         log_config=None,
@@ -176,7 +178,7 @@ async def async_main():
 
     mcp_uvicorn_config = uvicorn.Config(
         mcp_app,
-        host="127.0.0.1",
+        host=bind_host,
         port=config.mcp_port,
         log_level="warning",
         log_config=None,

@@ -121,6 +121,10 @@ Handles hot-adding and removing MCP server targets at runtime. Holds references 
 
 Shared OAuth 2.1 callback server running on port 3118. Used by HTTP upstream targets that require OAuth (e.g., Slack). The callback server is started once in `__main__.py` and shared across all targets. OAuth tokens are stored per-server at `{store_dir}/oauth/{server_id}.json`.
 
+### Bind host
+
+All servers (web, MCP, OAuth callback) bind to the address in `MASKIT_HOST` env var (default `127.0.0.1`). The Dockerfile sets this to `0.0.0.0` so the container is accessible from the host.
+
 ## Configuration
 
 `maskit.yaml` at project root. Upstream supports `stdio` transport (spawns child process) and `http` transport (connects to remote MCP server with optional OAuth 2.1). If no config file exists, Maskit starts with no pre-configured targets (marketplace/custom targets can still be added via UI).

@@ -95,6 +95,28 @@ claude mcp add --scope project maskit-time --transport http http://localhost:947
 claude mcp add --scope project maskit-slack --transport http http://localhost:9474/slack/mcp
 ```
 
+## Docker
+
+```bash
+docker build -t maskit .
+docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 maskit
+```
+
+Mount a config file if needed:
+
+```bash
+docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 \
+  -v ./maskit.yaml:/app/maskit.yaml \
+  maskit
+```
+
+Ports:
+- **9473** — Web dashboard
+- **9474** — MCP endpoint (where AI agents connect)
+- **3131** — OAuth callback (for servers requiring OAuth)
+
+The container binds to `0.0.0.0` by default. Set `MASKIT_HOST` to override.
+
 ## Marketplace
 
 The dashboard includes a marketplace for installing pre-configured MCP servers with one click. Browse the catalog, provide any required credentials, and the server is connected immediately — no config file edits needed.
