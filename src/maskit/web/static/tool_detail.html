@@ -94,7 +94,7 @@
                     <pre x-show="responseView === 'raw'" x-text="tryResult"></pre>
                     <div x-show="responseView === 'tree' && jsonTree !== null" class="json-tree">
                         <template x-for="(node, idx) in treeNodes" :key="idx">
-                            <div class="tree-node" :class="{'tree-node-masked': node.masked}" :style="'padding-left: ' + (node.depth * 1.2) + 'rem'" @mouseenter="hoverPath = node.path" @mouseleave="hoverPath = null">
+                            <div class="tree-node" :class="{'tree-node-masked': node.masked, 'tree-node-pending-mask': node.pendingMask}" :style="'padding-left: ' + (node.depth * 1.2) + 'rem'" @mouseenter="hoverPath = node.path" @mouseleave="hoverPath = null">
                                 <template x-if="node.type === 'object_start'">
                                     <span>
                                         <span class="tree-toggle" @click="toggleExpand(node.path)" x-text="treeExpanded[node.path] === false ? '▶' : '▼'"></span>
@@ -122,7 +122,8 @@
                                         <span x-show="node.key" class="tree-key" x-text="node.key + ': '"></span>
                                         <span class="tree-value" :class="'tree-value-' + node.valueType" x-text="node.display"></span>
                                         <span x-show="node.masked" class="masked-tooltip" x-text="'was: ' + node.originalValue"></span>
-                                        <button x-show="!node.masked" class="tree-action" @click="maskFromTree(node)" title="Mask this field">Mask</button>
+                                        <span x-show="node.pendingMask" class="pending-mask-tooltip">will be masked</span>
+                                        <button x-show="!node.masked && !node.pendingMask" class="tree-action" @click="maskFromTree(node)" title="Mask this field">Mask</button>
                                     </span>
                                 </template>
                             </div>
@@ -294,7 +295,7 @@
                         <input type="text" x-model="newMapper.alias_prefix" placeholder="channel">
                     </label>
                     <div class="mapper-actions">
-                        <button class="btn-primary" @click="previewMapper()" :disabled="mapperPreviewLoading">
+                        <button class="btn-primary" @click="previewMapper()" :disabled="mapperPreviewLoading || !newMapper.pattern || !newMapper.alias_prefix">
                             <span x-text="mapperPreviewLoading ? 'Loading...' : 'Preview'"></span>
                         </button>
                         <button x-show="mapperPreview" class="btn-save-inline" @click="saveMapper()">Save Mapper</button>
@@ -362,7 +363,12 @@
                 <form @submit.prevent="addGuardrail()" class="form-row">
                     <label>
                         Argument
-                        <input type="text" x-model="newGuardrail.argument_name" placeholder="* (all)" style="width:80px;">
+                        <select x-model="newGuardrail.argument_name" style="width:120px;">
+                            <option value="*">* (all)</option>
+                            <template x-for="name in Object.keys(tool?.inputSchema?.properties || {})" :key="name">
+                                <option :value="name" x-text="name"></option>
+                            </template>
+                        </select>
                     </label>
                     <label>
                         Match
@@ -378,7 +384,7 @@
                     </label>
                     <label>
                         Message
-                        <input type="text" x-model="newGuardrail.message" placeholder="Blocked by guardrail">
+                        <input type="text" x-model="newGuardrail.message" placeholder="Dropping tables not allowed">
                     </label>
                     <button type="submit" class="btn-primary">Add Guardrail</button>
                 </form>
@@ -424,7 +430,12 @@
                 <form @submit.prevent="addInjection()" class="form-row">
                     <label>
                         Argument Name
-                        <input type="text" x-model="newInjection.argument_name" placeholder="e.g. read_only" required>
+                        <select x-model="newInjection.argument_name" required>
+                            <option value="" disabled>Select field...</option>
+                            <template x-for="name in Object.keys(tool?.inputSchema?.properties || {})" :key="name">
+                                <option :value="name" x-text="name"></option>
+                            </template>
+                        </select>
                     </label>
                     <label>
                         Value (JSON)
@@ -471,6 +482,7 @@ function toolDetail() {
         responseView: 'raw',
         pythonReprDetected: false,
         aliasMap: {},
+        maskedPaths: [],
         editingRule: null,
         editingMapper: null,
         newRule: { field_path: '', alias_prefix: '', action: 'mask' },
@@ -628,6 +640,12 @@ function toolDetail() {
                     node.masked = true;
                     node.originalValue = this.aliasMap[node.value];
                 }
+                if (node.type === 'leaf' && !node.masked && node.value !== null) {
+                    const dotPath = node.path.replace(/\[\d+\]/g, '').replace(/^\./, '');
+                    if (this.maskedPaths.includes(dotPath) || this.toolMappers.some(m => m.mapper_type === 'json_field_mask' && m.pattern === dotPath)) {
+                        node.pendingMask = true;
+                    }
+                }
             }
             return nodes;
         },
@@ -680,6 +698,7 @@ function toolDetail() {
 
         maskFromTree(node) {
             const dotPath = node.path.replace(/\[\d+\]/g, '').replace(/^\./, '');
+            this.maskedPaths.push(dotPath);
             const parts = dotPath.split('.');
             const prefix = '_masked_' + (parts[parts.length - 1] || 'value');
             this.createJsonFieldMapper(dotPath, prefix);
@@ -878,7 +897,7 @@ function toolDetail() {
                         argument_name: this.newGuardrail.argument_name || '*',
                         match_type: this.newGuardrail.match_type,
                         pattern: this.newGuardrail.pattern,
-                        message: this.newGuardrail.message || 'Blocked by guardrail',
+                        message: this.newGuardrail.message ? 'Blocked by guardrail: ' + this.newGuardrail.message : 'Blocked by guardrail',
                     }),
                 });
                 if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Failed to add guardrail', 'error'); return; }

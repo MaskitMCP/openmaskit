@@ -781,6 +781,8 @@ code {
 
 .try-actions {
     margin-top: 0.5rem;
+    display: flex;
+    justify-content: flex-end;
 }
 
 .try-result,
@@ -1389,6 +1391,24 @@ code {
 
 .tree-node-masked:hover {
     background: var(--teal-border);
+}
+
+.tree-node-pending-mask {
+    background: var(--orange-dim);
+    border-left: 2px solid var(--orange-border);
+}
+
+.tree-node-pending-mask:hover {
+    background: var(--orange-border);
+}
+
+.pending-mask-tooltip {
+    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    color: var(--orange);
+    opacity: 0.8;
+    margin-left: 0.5rem;
+    font-style: italic;
 }
 
 /* --- Masked Field Tooltip --- */
@@ -2010,6 +2030,35 @@ code {
     transform: translateY(0) scale(0.97);
 }
 
+.fab-connect {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1.3rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--teal-border);
+    background: var(--teal-dim);
+    color: var(--teal);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(45, 212, 191, 0.15);
+    transition: all var(--transition-base);
+}
+
+.fab-connect:hover {
+    background: var(--teal);
+    color: var(--bg-root);
+    border-color: var(--teal);
+    box-shadow: 0 6px 28px rgba(45, 212, 191, 0.3);
+    transform: translateY(-2px);
+}
+
+.fab-connect:active {
+    transform: translateY(0) scale(0.97);
+}
+
 /* Empty state */
 .targets-empty {
     display: flex;
@@ -2110,6 +2159,7 @@ code {
     padding: 1.25rem 1.5rem;
     text-decoration: none;
     color: inherit;
+    cursor: pointer;
     transition: background var(--transition-fast);
 }
 

@@ -43,7 +43,9 @@
 
             <div class="tools-grid" x-show="!loading && filteredServers.length > 0">
                 <template x-for="server in filteredServers" :key="server.id">
-                    <div class="marketplace-card" :class="{ 'marketplace-card-active': server.active && server.connected }">
+                    <div class="marketplace-card" :class="{ 'marketplace-card-active': server.active && server.connected }"
+                         @click="if (server.active && server.connected) window.location.href = '/targets/' + encodeURIComponent(server.id) + '/tools'"
+                         :style="(server.active && server.connected) ? 'cursor: pointer' : ''">
                         <div class="marketplace-card-header">
                             <div class="marketplace-card-icon" :data-icon="server.icon">
                                 <svg x-show="server.icon === 'messaging'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -81,21 +83,21 @@
                             <button x-show="!server.installed"
                                     class="btn-primary btn-install"
                                     :disabled="server.installing"
-                                    @click="installServer(server)">
+                                    @click.stop="installServer(server)">
                                 <span x-show="!server.installing">Install</span>
                                 <span x-show="server.installing" class="spinner spinner-sm"></span>
                             </button>
 
                             <button x-show="server.installed && server.active"
                                     class="btn-danger"
-                                    @click="deactivateServer(server)">
+                                    @click.stop="deactivateServer(server)">
                                 Deactivate
                             </button>
 
                             <button x-show="server.installed && !server.active"
                                     class="btn-activate"
                                     :disabled="server.installing"
-                                    @click="activateServer(server)">
+                                    @click.stop="activateServer(server)">
                                 <span x-show="!server.installing">Activate</span>
                                 <span x-show="server.installing" class="spinner spinner-sm"></span>
                             </button>

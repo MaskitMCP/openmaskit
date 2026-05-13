@@ -205,12 +205,11 @@ async def async_main():
                 elif name in marketplace_configs:
                     try:
                         upstream_cfg = _build_upstream_config(marketplace_configs[name])
-                        with anyio.fail_after(15):
-                            us_read, us_write = await stack.enter_async_context(
-                                connect_upstream(upstream_cfg, config.store_path,
-                                               errlog=sys.stderr, server_id=name,
-                                               callback_server=callback_server)
-                            )
+                        us_read, us_write = await stack.enter_async_context(
+                            connect_upstream(upstream_cfg, config.store_path,
+                                           errlog=sys.stderr, server_id=name,
+                                           callback_server=callback_server)
+                        )
                         upstream_streams[name] = (us_read, us_write)
                     except Exception as exc:
                         logger.warning("Failed to connect marketplace server %s: %s", name, exc)
