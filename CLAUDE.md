@@ -98,14 +98,45 @@ SQLite database (default `~/.maskit/store.db`) with tables:
 - `hidden_tools` — tools hidden per server (blocked from agent access)
 - `guardrails` — argument validation rules that block tool calls matching dangerous patterns
 - `injections` — argument injection rules that inject/override values before forwarding
+- `mcp_servers` — marketplace and custom servers (id, name, config JSON, active flag). Used for both marketplace installs and custom targets added via the UI
+
+### Marketplace
+
+The marketplace allows users to install pre-configured MCP servers from a catalog (`marketplace.json` at repo root). Installed servers are persisted in the `mcp_servers` SQLite table and connected at runtime via `TargetManager`.
+
+- Catalog entries define transport, command/URL, required env vars, and optional OAuth vars
+- On install, the user provides credentials via a modal; the config is saved and the server is hot-connected
+- Servers can be deactivated (disconnected but config retained) and reactivated without re-entering credentials
+- Active marketplace servers are automatically reconnected on startup (`__main__.py` loads them from DB)
+
+### Custom targets (runtime)
+
+Users can add arbitrary MCP servers via the dashboard (Servers page → "Add Server"). These are also stored in the `mcp_servers` SQLite table and managed by `TargetManager`. Same hot-add/remove lifecycle as marketplace servers.
+
+### TargetManager (`proxy/manager.py`)
+
+Handles hot-adding and removing MCP server targets at runtime. Holds references to the shared task group and exit stack so it can spawn proxy loops and connect upstream without restarting. Called by both marketplace and custom target API routes.
+
+### OAuth handler (`oauth/handler.py`)
+
+Shared OAuth 2.1 callback server running on port 3118. Used by HTTP upstream targets that require OAuth (e.g., Slack). The callback server is started once in `__main__.py` and shared across all targets. OAuth tokens are stored per-server at `{store_dir}/oauth/{server_id}.json`.
 
 ## Configuration
 
-`maskit.yaml` at project root. Upstream supports `stdio` transport (spawns child process) and `http` transport (connects to remote MCP server with optional OAuth 2.1).
+`maskit.yaml` at project root. Upstream supports `stdio` transport (spawns child process) and `http` transport (connects to remote MCP server with optional OAuth 2.1). If no config file exists, Maskit starts with no pre-configured targets (marketplace/custom targets can still be added via UI).
 
-## Web UI API
+## Web UI
 
-All API routes are scoped per server: `/api/targets/{target_name}/...`
+### Pages
+
+- `/` — Servers page: lists all connected targets (config, marketplace, custom), add/remove custom servers
+- `/marketplace` — Browse and install servers from the catalog
+- `/targets/{name}/tools` — Tool list for a specific server, connect agent button
+- `/targets/{name}/tools/{tool}` — Tool detail: schema, try it out, masking rules, mappers, guardrails, injections
+
+### API routes
+
+All target-scoped routes: `/api/targets/{target_name}/...`
 
 - `GET /api/targets/{target_name}/tools` — cached tool schemas
 - `POST /api/targets/{target_name}/tools/call` — invoke a tool through the proxy (used by "Try it out")
@@ -116,3 +147,16 @@ All API routes are scoped per server: `/api/targets/{target_name}/...`
 - `GET /api/targets/{target_name}/mappings` — current alias mappings
 - `GET/POST /api/targets/{target_name}/hidden_tools` — hide/unhide tools from the agent
 - `WS /ws/traffic` — live traffic stream
+
+Marketplace routes:
+
+- `GET /api/marketplace` — catalog with install/active status
+- `POST /api/marketplace/install` — install a server from catalog
+- `POST /api/marketplace/activate` — reactivate a previously installed server
+- `POST /api/marketplace/deactivate` — disconnect and deactivate
+
+Custom target routes:
+
+- `GET /api/custom-targets` — list custom targets
+- `POST /api/custom-targets` — add a new custom target
+- `DELETE /api/custom-targets/{id}` — remove a custom target

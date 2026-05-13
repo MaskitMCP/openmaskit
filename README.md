@@ -38,6 +38,8 @@ Real MCP Server
 
 ```bash
 # Requires Python 3.10+
+git clone https://github.com/AminMal/maskit.git
+cd maskit
 uv sync
 ```
 
@@ -80,9 +82,11 @@ rules: []
 2. Run:
 
 ```bash
-uv run maskit              # uses ./maskit.yaml
-uv run maskit config.yaml  # custom path
+maskit                     # uses ./maskit.yaml (or starts empty if no config)
+maskit config.yaml         # custom path
 ```
+
+You can also run without a config file — just start `maskit` and add servers through the marketplace or custom servers UI.
 
 3. Connect your AI agent to Maskit's MCP endpoint (per server):
 
@@ -91,11 +95,23 @@ claude mcp add --scope project maskit-time --transport http http://localhost:947
 claude mcp add --scope project maskit-slack --transport http http://localhost:9474/slack/mcp
 ```
 
+## Marketplace
+
+The dashboard includes a marketplace for installing pre-configured MCP servers with one click. Browse the catalog, provide any required credentials, and the server is connected immediately — no config file edits needed.
+
+Installed servers can be deactivated (paused) and reactivated without re-entering credentials.
+
+## Custom Servers
+
+You can also add arbitrary MCP servers at runtime through the dashboard. Specify a name, transport (stdio or http), command/URL, and optional environment variables. Custom servers are persisted and reconnected on restart.
+
 ## Web Dashboard
 
 Open `http://127.0.0.1:9473` to:
 
 - Browse and manage multiple upstream MCP servers
+- Install servers from the marketplace catalog
+- Add custom servers at runtime (no config file needed)
 - Browse tool schemas from upstream servers
 - Hide tools from the agent (blocked calls return an error)
 - Create and manage masking rules (mask or strip fields)
@@ -196,6 +212,17 @@ Injections silently inject or override argument values:
 | `argument_name` | Argument key to set |
 | `value` | JSON-encoded value (e.g. `"true"`, `"100"`, `"\"hello\""`) |
 | `mode` | `set` (always override, default), `default` (only if absent), `append` |
+
+### Response Mappers
+
+Response mappers provide pattern-based masking on tool output text. Two types:
+
+| Type | Description |
+|------|-------------|
+| `regex_replace` | Apply a regex to the text response; matching groups are replaced with aliases |
+| `json_field_mask` | Target a specific dot-notation path in parsed JSON/repr output |
+
+Mappers are created per-tool via the dashboard and apply to all future responses from that tool.
 
 ## Development
 
