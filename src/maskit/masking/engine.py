@@ -173,7 +173,7 @@ class MaskingEngine:
         if guardrail.match_type == "equals":
             return value == guardrail.pattern
         elif guardrail.match_type == "contains":
-            return guardrail.pattern in value
+            return guardrail.pattern.casefold() in value.casefold()
         elif guardrail.match_type == "regex":
             compiled = self._compiled_guardrails.get(guardrail.id)
             if compiled:
