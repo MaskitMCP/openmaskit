@@ -64,6 +64,7 @@ async def async_main():
 
     state = ProxyState()
     state.store = store
+    state.mcp_port = config.mcp_port
 
     # Create per-target state
     for name, target_config in config.targets.items():

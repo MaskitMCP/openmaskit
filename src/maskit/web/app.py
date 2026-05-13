@@ -41,6 +41,7 @@ def create_app(state: ProxyState) -> Starlette:
         marketplace_page,
     )
     from maskit.web.routes.pages import (
+        api_config,
         api_targets,
         api_tools,
         api_tools_call,
@@ -71,6 +72,7 @@ def create_app(state: ProxyState) -> Starlette:
         Route("/api/marketplace/deactivate", marketplace_deactivate, methods=["POST"]),
         Route("/api/marketplace/activate", marketplace_activate, methods=["POST"]),
         Route("/targets/{target_name}/tools", tools_page),
+        Route("/api/config", api_config),
         Route("/api/targets/custom", custom_target_create, methods=["POST"]),
         Route("/api/targets/custom/{target_id}", custom_target_get, methods=["GET"]),
         Route("/api/targets/custom/{target_id}/update", custom_target_update, methods=["POST"]),

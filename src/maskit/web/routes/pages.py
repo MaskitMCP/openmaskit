@@ -27,6 +27,11 @@ async def tool_detail_page(request: Request):
     return FileResponse(STATIC_DIR / "tool_detail.html")
 
 
+async def api_config(request: Request):
+    state = request.app.state.proxy_state
+    return JSONResponse({"mcp_port": state.mcp_port})
+
+
 async def api_targets(request: Request):
     state = request.app.state.proxy_state
     targets = []

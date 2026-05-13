@@ -31,18 +31,22 @@ async def TrafficWebSocket(websocket: WebSocket):
         await websocket.close(code=4004)
         return
 
-    last_len = len(target.traffic_log)
+    # Send current entries as initial state
+    for entry in target.traffic_log:
+        await websocket.send_text(json.dumps({"type": "new", "entry": entry}))
+
+    last_event_idx = len(target.traffic_events)
     try:
         while True:
             await anyio.sleep(0.5)
-            current_len = len(target.traffic_log)
-            if current_len > last_len:
-                new_count = current_len - last_len
-                new_entries = list(target.traffic_log)[-new_count:]
-                for entry in new_entries:
-                    await websocket.send_text(json.dumps(entry))
-                last_len = current_len
-            elif current_len < last_len:
-                last_len = current_len
+            current_len = len(target.traffic_events)
+            if current_len > last_event_idx:
+                new_count = current_len - last_event_idx
+                new_events = list(target.traffic_events)[-new_count:]
+                for event in new_events:
+                    await websocket.send_text(json.dumps(event))
+                last_event_idx = current_len
+            elif current_len < last_event_idx:
+                last_event_idx = current_len
     except (WebSocketDisconnect, anyio.ClosedResourceError):
         pass

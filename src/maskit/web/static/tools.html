@@ -24,7 +24,15 @@
     </header>
 
     <main>
-        <a href="/" class="back-link">&larr; Back to Servers</a>
+        <div class="page-title-row">
+            <a href="/" class="back-link">&larr; Back to Servers</a>
+            <button class="btn-add-target" @click="openIntegration()" title="Connect an AI agent to this server">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                <span>Connect Agent</span>
+            </button>
+        </div>
 
         <section class="panel">
             <h2>Available Tools</h2>
@@ -47,6 +55,9 @@
                                 </span>
                                 <span x-show="toolMapperCount(tool.name) > 0" class="tool-badge tool-badge-mapper">
                                     <span x-text="toolMapperCount(tool.name)"></span> mappers
+                                </span>
+                                <span x-show="toolGuardrailCount(tool.name) > 0" class="tool-badge tool-badge-guardrail">
+                                    <span x-text="toolGuardrailCount(tool.name)"></span> guardrails
                                 </span>
                             </div>
                         </a>
@@ -176,20 +187,125 @@
             </table>
         </section>
 
-        <section class="panel">
+        <section class="panel traffic-panel">
             <h2>Live Traffic</h2>
             <p x-show="traffic.length === 0" class="muted">No traffic yet. Call a tool to see requests and responses here.</p>
-            <div class="traffic-log" x-show="traffic.length > 0">
-                <template x-for="(entry, idx) in traffic.slice(-50).reverse()" :key="idx">
-                    <div class="traffic-entry" :class="entry.direction">
-                        <span class="direction" x-text="entry.direction === 'request' ? '→' : '←'"></span>
-                        <span class="method" x-text="entry.method"></span>
-                        <span class="detail" x-text="JSON.stringify(entry.data)"></span>
-                    </div>
-                </template>
+            <div class="traffic-split" x-show="traffic.length > 0">
+                <div class="traffic-list">
+                    <template x-for="entry in traffic.slice().reverse()" :key="entry.id">
+                        <div class="traffic-row"
+                             :class="{
+                                 'traffic-row-selected': selectedEntry && selectedEntry.id === entry.id,
+                                 'traffic-row-blocked': entry.status === 'blocked',
+                                 'traffic-row-pending': entry.status === 'pending'
+                             }"
+                             @click="selectedEntry = entry">
+                            <span class="traffic-icon" x-text="entryIcon(entry)"></span>
+                            <span class="traffic-tool" x-text="entry.tool_name || 'tools/list'"></span>
+                            <span class="traffic-duration" x-show="entry.duration_ms != null" x-text="Math.round(entry.duration_ms) + 'ms'"></span>
+                            <span class="traffic-time" x-text="formatTime(entry.timestamp)"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="traffic-detail" x-show="selectedEntry"
+                     x-transition:enter="detail-enter"
+                     x-transition:enter-start="detail-enter-from"
+                     x-transition:enter-end="detail-enter-to">
+                    <template x-if="selectedEntry">
+                        <div>
+                            <div class="detail-header">
+                                <h3 x-text="selectedEntry.tool_name || 'tools/list'"></h3>
+                                <button class="detail-close" @click="selectedEntry = null">&times;</button>
+                            </div>
+
+                            <div class="detail-meta">
+                                <span class="detail-badge" :class="'badge-' + selectedEntry.status" x-text="selectedEntry.status"></span>
+                                <span x-show="selectedEntry.duration_ms != null" class="detail-duration" x-text="selectedEntry.duration_ms.toFixed(1) + ' ms'"></span>
+                                <span class="detail-time" x-text="new Date(selectedEntry.timestamp * 1000).toLocaleTimeString()"></span>
+                            </div>
+
+                            <div x-show="selectedEntry.reason" class="detail-section detail-blocked-reason">
+                                <h4>Blocked</h4>
+                                <p x-text="selectedEntry.reason"></p>
+                            </div>
+
+                            <div x-show="selectedEntry.masked_args" class="detail-section">
+                                <h4>Arguments (as sent by agent)</h4>
+                                <pre class="detail-code" x-text="JSON.stringify(selectedEntry.masked_args, null, 2)"></pre>
+                            </div>
+
+                            <div x-show="selectedEntry.unmasked_fields && selectedEntry.unmasked_fields.length > 0" class="detail-section">
+                                <h4>Fields Unmasked</h4>
+                                <ul class="detail-field-list">
+                                    <template x-for="f in selectedEntry.unmasked_fields" :key="f">
+                                        <li x-text="f"></li>
+                                    </template>
+                                </ul>
+                            </div>
+
+                            <div x-show="selectedEntry.masked_response_fields && selectedEntry.masked_response_fields.length > 0" class="detail-section">
+                                <h4>Fields Masked in Response</h4>
+                                <ul class="detail-field-list">
+                                    <template x-for="f in selectedEntry.masked_response_fields" :key="f">
+                                        <li x-text="f"></li>
+                                    </template>
+                                </ul>
+                            </div>
+
+                            <div x-show="selectedEntry.response_preview" class="detail-section">
+                                <h4>Response (from server)</h4>
+                                <pre class="detail-code detail-preview" x-text="selectedEntry.response_preview"></pre>
+                            </div>
+
+                            <div x-show="selectedEntry.masked_preview && selectedEntry.masked_preview !== selectedEntry.response_preview" class="detail-section">
+                                <h4>Response (sent to agent)</h4>
+                                <pre class="detail-code detail-preview" x-text="selectedEntry.masked_preview"></pre>
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </div>
         </section>
     </main>
+
+    <!-- Integration Helper Modal -->
+    <div x-show="integration.visible" class="modal-backdrop" @keydown.escape.window="closeIntegration()"
+         x-transition:enter="modal-enter" x-transition:enter-start="modal-enter-from" x-transition:enter-end="modal-enter-to"
+         x-transition:leave="modal-leave" x-transition:leave-start="modal-leave-from" x-transition:leave-end="modal-leave-to"
+         style="display: none;">
+        <div class="modal modal-target modal-integration" @click.outside="closeIntegration()">
+            <div class="modal-header-bar">
+                <h3>Connect to <span x-text="targetName"></span></h3>
+                <button class="modal-close-btn" @click="closeIntegration()" title="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <div class="integration-agents">
+                    <template x-for="a in agents" :key="a.id">
+                        <button class="integration-agent-btn" :class="{ active: integration.agent === a.id }"
+                                @click="integration.agent = a.id; integration.copied = false; integration.mode = hasCli() ? 'cli' : 'json'"
+                                x-text="a.label"></button>
+                    </template>
+                </div>
+
+                <div class="response-tabs" style="margin-bottom: 0;">
+                    <button x-show="hasCli()" class="response-tab" :class="{'response-tab-active': integration.mode === 'cli'}" @click="integration.mode = 'cli'; integration.copied = false">CLI</button>
+                    <button class="response-tab" :class="{'response-tab-active': integration.mode === 'json'}" @click="integration.mode = 'json'; integration.copied = false">JSON</button>
+                </div>
+
+                <div class="integration-snippet" style="border-top-left-radius: 0; border-top-right-radius: 0;">
+                    <button class="integration-copy-btn" :class="{ copied: integration.copied }" @click="copySnippet()"
+                            x-text="integration.copied ? 'Copied!' : 'Copy'"></button>
+                    <pre x-text="integration.mode === 'cli' ? getCliSnippet() : getSnippet()"></pre>
+                </div>
+
+                <p x-show="integration.mode === 'json'" class="integration-note" x-html="getNote()"></p>
+            </div>
+        </div>
+    </div>
 
     <!-- Toast -->
     <div class="toast-container">
@@ -208,14 +324,35 @@ function toolsPage() {
         hiddenTools: [],
         rules: [],
         mappers: [],
+        guardrails: [],
         mappings: [],
         traffic: [],
+        selectedEntry: null,
         loading: true,
         ws: null,
         _mappingsInterval: null,
+        _mcpPortCache: null,
         newRule: { field_path: '', alias_prefix: '' },
         newMapper: { pattern: '', alias_prefix: '' },
         toasts: [],
+
+        agents: [
+            { id: 'claude-code', label: 'Claude Code' },
+            { id: 'cursor', label: 'Cursor' },
+            { id: 'vscode', label: 'VS Code' },
+            { id: 'windsurf', label: 'Windsurf' },
+            { id: 'jetbrains', label: 'JetBrains' },
+            { id: 'codex', label: 'Codex' },
+            { id: 'opencode', label: 'OpenCode' },
+        ],
+
+        integration: {
+            visible: false,
+            agent: 'claude-code',
+            mode: 'cli',
+            mcpPort: 9474,
+            copied: false,
+        },
 
         showToast(msg, type = 'success') {
             this.toasts.push({ id: Date.now(), msg, type });
@@ -235,6 +372,10 @@ function toolsPage() {
 
         toolMapperCount(toolName) {
             return this.mappers.filter(m => m.tool_name === toolName).length;
+        },
+
+        toolGuardrailCount(toolName) {
+            return this.guardrails.filter(g => g.tool_name === toolName || g.tool_name === '*').length;
         },
 
         isHidden(toolName) {
@@ -267,7 +408,7 @@ function toolsPage() {
             this.targetName = decodeURIComponent(parts.split('/tools')[0]);
             document.title = `Maskit - ${this.targetName}`;
             try {
-                await Promise.all([this.loadTools(), this.loadRules(), this.loadMappers(), this.loadMappings()]);
+                await Promise.all([this.loadTools(), this.loadRules(), this.loadMappers(), this.loadGuardrails(), this.loadMappings()]);
             } catch (e) {
                 this.showToast('Failed to load data', 'error');
             }
@@ -300,6 +441,13 @@ function toolsPage() {
             if (!res.ok) throw new Error('Failed to load mappers');
             const data = await res.json();
             this.mappers = data.mappers;
+        },
+
+        async loadGuardrails() {
+            const res = await fetch(`${this.apiBase()}/guardrails`);
+            if (!res.ok) throw new Error('Failed to load guardrails');
+            const data = await res.json();
+            this.guardrails = data.guardrails;
         },
 
         async loadMappings() {
@@ -386,12 +534,25 @@ function toolsPage() {
             this.ws = new WebSocket(`${proto}//${location.host}/ws/targets/${encodeURIComponent(this.targetName)}/traffic`);
             this.ws.onopen = () => {
                 this._wsReconnectDelay = 2000;
+                this.traffic = [];
+                this.selectedEntry = null;
             };
             this.ws.onmessage = (event) => {
                 try {
-                    this.traffic.push(JSON.parse(event.data));
-                    if (this.traffic.length > 200) {
-                        this.traffic = this.traffic.slice(-100);
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'new') {
+                        this.traffic.push(msg.entry);
+                        if (this.traffic.length > 100) {
+                            this.traffic = this.traffic.slice(-100);
+                        }
+                    } else if (msg.type === 'update') {
+                        const idx = this.traffic.findIndex(e => e.id === msg.id);
+                        if (idx !== -1) {
+                            this.traffic[idx] = { ...this.traffic[idx], ...msg.updates };
+                            if (this.selectedEntry && this.selectedEntry.id === msg.id) {
+                                this.selectedEntry = this.traffic[idx];
+                            }
+                        }
                     }
                 } catch {}
             };
@@ -399,6 +560,114 @@ function toolsPage() {
                 setTimeout(() => this.connectWebSocket(), this._wsReconnectDelay);
                 this._wsReconnectDelay = Math.min(this._wsReconnectDelay * 2, 30000);
             };
+        },
+
+        entryIcon(entry) {
+            if (entry.status === 'blocked') return '✘';
+            if (entry.status === 'pending') return '•';
+            if (entry.type === 'tools_list') return '☰';
+            return '✓';
+        },
+
+        formatTime(ts) {
+            return new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+        },
+
+        async openIntegration() {
+            if (!this._mcpPortCache) {
+                try {
+                    const r = await fetch('/api/config');
+                    const data = await r.json();
+                    this._mcpPortCache = data.mcp_port;
+                } catch { this._mcpPortCache = 9474; }
+            }
+            this.integration = {
+                visible: true,
+                agent: 'claude-code',
+                mode: 'cli',
+                mcpPort: this._mcpPortCache,
+                copied: false,
+            };
+        },
+
+        closeIntegration() {
+            this.integration.visible = false;
+        },
+
+        integrationUrl() {
+            return `http://localhost:${this.integration.mcpPort}/${this.targetName}/mcp`;
+        },
+
+        hasCli() {
+            return ['claude-code', 'codex'].includes(this.integration.agent);
+        },
+
+        getCliSnippet() {
+            const url = this.integrationUrl();
+            const name = `maskit-${this.targetName}`;
+            switch (this.integration.agent) {
+                case 'claude-code':
+                    return `claude mcp add --scope project ${name} --transport http ${url}`;
+                case 'codex':
+                    return `codex --mcp-config mcp.json`;
+                default:
+                    return '';
+            }
+        },
+
+        getSnippet() {
+            const url = this.integrationUrl();
+            const name = this.targetName;
+            switch (this.integration.agent) {
+                case 'claude-code':
+                    return JSON.stringify({ mcpServers: { [name]: { type: 'streamable-http', url } } }, null, 2);
+                case 'cursor':
+                    return JSON.stringify({ mcpServers: { [name]: { url } } }, null, 2);
+                case 'vscode':
+                    return JSON.stringify({ servers: { [name]: { type: 'http', url } } }, null, 2);
+                case 'windsurf':
+                    return JSON.stringify({ mcpServers: { [name]: { serverUrl: url } } }, null, 2);
+                case 'jetbrains':
+                    return JSON.stringify({ servers: { [name]: { type: 'http', url } } }, null, 2);
+                case 'codex':
+                    return JSON.stringify({ mcpServers: { [name]: { type: 'url', url } } }, null, 2);
+                case 'opencode':
+                    return JSON.stringify({ mcp: { servers: { [name]: { type: 'streamable-http', url } } } }, null, 2);
+                default:
+                    return '';
+            }
+        },
+
+        getNote() {
+            switch (this.integration.agent) {
+                case 'claude-code':
+                    return 'Add to <code>.mcp.json</code> in your project root, or <code>~/.claude.json</code> globally.';
+                case 'cursor':
+                    return 'Add to <code>.cursor/mcp.json</code> in your project root.';
+                case 'vscode':
+                    return 'Add to <code>.vscode/mcp.json</code> in your workspace.';
+                case 'windsurf':
+                    return 'Add to <code>~/.codeium/windsurf/mcp_config.json</code>.';
+                case 'jetbrains':
+                    return 'Go to <code>Settings &gt; Tools &gt; AI Assistant &gt; MCP Servers</code>, click \'+\', select \'As JSON\', and paste.';
+                case 'codex':
+                    return 'Add to <code>~/.codex/config.json</code> or pass via <code>--mcp-config</code>.';
+                case 'opencode':
+                    return 'Add to your <code>opencode.json</code> config file.';
+                default:
+                    return '';
+            }
+        },
+
+        async copySnippet() {
+            try {
+                const text = this.integration.mode === 'cli' ? this.getCliSnippet() : this.getSnippet();
+                await navigator.clipboard.writeText(text);
+                this.integration.copied = true;
+                setTimeout(() => this.integration.copied = false, 2000);
+            } catch {
+                this.showToast('Failed to copy to clipboard', 'error');
+            }
         },
     };
 }

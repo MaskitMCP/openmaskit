@@ -73,9 +73,10 @@ class TargetState:
     engine: MaskingEngine
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     hidden_tools: set[str] = field(default_factory=set)
-    traffic_log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=1000))
+    traffic_log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
+    traffic_events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
     response_dispatcher: ResponseDispatcher = field(default_factory=ResponseDispatcher)
-    pending_tool_calls: dict[str | int, str] = field(default_factory=dict)
+    pending_tool_calls: dict[str | int, dict[str, Any]] = field(default_factory=dict)
     pending_requests: dict[str | int, str] = field(default_factory=dict)
     initialized: bool = False
     init_result: dict[str, Any] | None = None
@@ -85,9 +86,16 @@ class TargetState:
     def cache_tool_schemas(self, schemas: list[dict[str, Any]]):
         self.tool_schemas = schemas
 
-    def log_traffic(self, direction: str, method: str, data: dict[str, Any] | None = None):
-        entry = {"direction": direction, "method": method, "data": data}
+    def log_traffic_entry(self, entry: dict[str, Any]):
         self.traffic_log.append(entry)
+        self.traffic_events.append({"type": "new", "entry": entry})
+
+    def update_traffic_entry(self, entry_id: str, updates: dict[str, Any]):
+        for entry in reversed(self.traffic_log):
+            if entry.get("id") == entry_id:
+                entry.update(updates)
+                break
+        self.traffic_events.append({"type": "update", "id": entry_id, "updates": updates})
 
 
 class ProxyState:
@@ -99,6 +107,7 @@ class ProxyState:
         self.target_manager: Any | None = None
         self.callback_server: Any | None = None
         self.config_target_ids: set[str] = set()
+        self.mcp_port: int = 9474
 
     def get_target(self, name: str) -> TargetState | None:
         return self.targets.get(name)
@@ -258,7 +267,19 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
 
         if tool_name in target.hidden_tools:
             logger.info("[%s] Blocked call to hidden tool: %s", target.name, tool_name)
-            target.log_traffic("blocked", "tools/call", {"tool": tool_name})
+            target.log_traffic_entry({
+                "id": str(time.time_ns()),
+                "type": "blocked",
+                "tool_name": tool_name,
+                "timestamp": time.time(),
+                "duration_ms": None,
+                "status": "blocked",
+                "masked_args": None,
+                "unmasked_fields": [],
+                "masked_response_fields": [],
+                "response_preview": None,
+                "reason": "hidden_tool",
+            })
             error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
                 jsonrpc="2.0",
                 id=root.id,
@@ -267,25 +288,40 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
             target.response_dispatcher.dispatch(root.id, error_response)
             return None
 
-        target.pending_tool_calls[root.id] = tool_name
-        target.log_traffic("request", method, {"tool": tool_name})
+        request_ts = time.time()
+        entry_id = str(time.time_ns())
+        masked_args = None
+        unmasked_fields = []
 
         if target.engine:
             arguments = params.get("arguments")
             if arguments and isinstance(arguments, dict):
+                masked_args = dict(arguments)
                 unmasked = target.engine.unmask_arguments(tool_name, arguments)
                 if unmasked != arguments:
-                    masked_args = ", ".join(f"{v}" for v in arguments.values())
-                    real_args = ", ".join(f"{v}" for v in unmasked.values())
-                    logger.info("[%s] Received tool call: %s(%s)", target.name, tool_name, masked_args)
-                    logger.info("[%s] Translating to:    %s(%s)", target.name, tool_name, real_args)
+                    unmasked_fields = [k for k in arguments if arguments.get(k) != unmasked.get(k)]
+                    masked_str = ", ".join(f"{v}" for v in arguments.values())
+                    real_str = ", ".join(f"{v}" for v in unmasked.values())
+                    logger.info("[%s] Received tool call: %s(%s)", target.name, tool_name, masked_str)
+                    logger.info("[%s] Translating to:    %s(%s)", target.name, tool_name, real_str)
                 params["arguments"] = unmasked
 
-                # Check guardrails on unmasked values
                 violation = target.engine.check_guardrails(tool_name, params["arguments"])
                 if violation:
                     logger.info("[%s] Guardrail blocked %s: %s", target.name, tool_name, violation)
-                    target.log_traffic("blocked", "tools/call", {"tool": tool_name, "reason": violation})
+                    target.log_traffic_entry({
+                        "id": entry_id,
+                        "type": "blocked",
+                        "tool_name": tool_name,
+                        "timestamp": request_ts,
+                        "duration_ms": (time.time() - request_ts) * 1000,
+                        "status": "blocked",
+                        "masked_args": masked_args,
+                        "unmasked_fields": unmasked_fields,
+                        "masked_response_fields": [],
+                        "response_preview": None,
+                        "reason": violation,
+                    })
                     error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
                         jsonrpc="2.0",
                         id=root.id,
@@ -294,8 +330,26 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
                     target.response_dispatcher.dispatch(root.id, error_response)
                     return None
 
-                # Apply argument injections
                 params["arguments"] = target.engine.apply_injections(tool_name, params["arguments"])
+
+        target.pending_tool_calls[root.id] = {
+            "tool_name": tool_name,
+            "entry_id": entry_id,
+            "timestamp": request_ts,
+        }
+        target.log_traffic_entry({
+            "id": entry_id,
+            "type": "tool_call",
+            "tool_name": tool_name,
+            "timestamp": request_ts,
+            "duration_ms": None,
+            "status": "pending",
+            "masked_args": masked_args,
+            "unmasked_fields": unmasked_fields,
+            "masked_response_fields": [],
+            "response_preview": None,
+            "reason": None,
+        })
 
     return msg
 
@@ -336,19 +390,62 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
                 target.cache_tool_schemas(tools)
                 if target.hidden_tools:
                     result["tools"] = [t for t in tools if t.get("name") not in target.hidden_tools]
-                target.log_traffic("response", "tools/list", {"count": len(result["tools"])})
+                target.log_traffic_entry({
+                    "id": str(time.time_ns()),
+                    "type": "tools_list",
+                    "tool_name": None,
+                    "timestamp": time.time(),
+                    "duration_ms": None,
+                    "status": "complete",
+                    "masked_args": None,
+                    "unmasked_fields": [],
+                    "masked_response_fields": [],
+                    "response_preview": f"{len(result['tools'])} tools",
+                    "reason": None,
+                })
         return msg
 
     # Check if this is a response to a tools/call request
     if request_id in target.pending_tool_calls:
-        tool_name = target.pending_tool_calls.pop(request_id)
-        target.log_traffic("response", "tools/call", {"tool": tool_name})
+        pending = target.pending_tool_calls.pop(request_id)
+        tool_name = pending["tool_name"]
+        entry_id = pending["entry_id"]
+        request_ts = pending["timestamp"]
+
+        duration_ms = (time.time() - request_ts) * 1000
+        masked_response_fields = []
+
+        # Extract original response preview BEFORE masking
+        original_preview = None
+        if result and isinstance(result, dict):
+            for block in result.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+                    original_preview = block["text"][:200]
+                    break
 
         if target.engine and result:
             pending_before = target.engine.pending_writes_count
             root.result = target.engine.mask_response(tool_name, result)
             new_masks = target.engine.get_new_masks_since(pending_before)
+            masked_response_fields = [field_path for _, _, _, field_path in new_masks]
             for alias, real_value, _, field_path in new_masks:
                 logger.info("[%s] Masked %s.%s: %s → %s", target.name, tool_name, field_path, real_value, alias)
+
+        # Extract masked response preview (what the agent sees)
+        masked_preview = None
+        masked_result = root.result if root.result else result
+        if masked_result and isinstance(masked_result, dict):
+            for block in masked_result.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+                    masked_preview = block["text"][:200]
+                    break
+
+        target.update_traffic_entry(entry_id, {
+            "status": "complete",
+            "duration_ms": round(duration_ms, 1),
+            "masked_response_fields": masked_response_fields,
+            "response_preview": original_preview,
+            "masked_preview": masked_preview,
+        })
 
     return msg
