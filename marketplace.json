@@ -1,44 +1,5 @@
 [
   {
-    "id": "slack",
-    "name": "Slack",
-    "description": "Team messaging, channels, and workspace management",
-    "icon": "messaging",
-    "official": true,
-    "tags": [
-      "communication",
-      "messaging",
-      "team"
-    ],
-    "transport": "http",
-    "url": "https://mcp.slack.com/mcp",
-    "oauth": {},
-    "oauth_vars": [
-      "client_id",
-      "client_secret"
-    ],
-    "env_vars": []
-  },
-  {
-    "id": "github",
-    "name": "GitHub",
-    "description": "Repositories, pull requests, issues, and code review",
-    "icon": "code",
-    "official": true,
-    "tags": [
-      "development",
-      "git",
-      "code"
-    ],
-    "transport": "http",
-    "url": "https://api.githubcopilot.com/mcp/",
-    "oauth": {},
-    "oauth_vars": [
-      "client_id"
-    ],
-    "env_vars": []
-  },
-  {
     "id": "postgres",
     "name": "PostgreSQL",
     "description": "Query and manage PostgreSQL databases",
