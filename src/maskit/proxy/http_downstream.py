@@ -74,8 +74,15 @@ async def _handle_mcp_post(request: Request) -> Response:
     await target.ds_read_send.send(session_msg)
 
     # Wait for the response from the proxy relay
-    with anyio.fail_after(60):
-        await event.wait()
+    try:
+        with anyio.fail_after(60):
+            await event.wait()
+    except TimeoutError:
+        target.response_dispatcher.collect(request_id)
+        return JSONResponse(
+            {"jsonrpc": "2.0", "error": {"code": -32603, "message": "Upstream timeout"}, "id": request_id},
+            status_code=504,
+        )
 
     response_msg = target.response_dispatcher.collect(request_id)
     if response_msg is None:

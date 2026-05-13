@@ -5,15 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Maskit - Marketplace</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
 <div x-data="marketplacePage()" x-init="init()">
     <header>
         <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
         <nav>
-            <a href="/">Targets</a>
+            <a href="/">Servers</a>
             <a href="/marketplace" class="active">Marketplace</a>
         </nav>
     </header>
@@ -21,7 +24,7 @@
     <main>
         <section class="panel">
             <h2>Marketplace</h2>
-            <p class="section-hint">Browse and install MCP servers. Installed servers appear as targets automatically.</p>
+            <p class="section-hint">Browse and install MCP servers. Installed servers appear on the Servers page automatically.</p>
 
             <div class="marketplace-search">
                 <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

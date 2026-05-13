@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import signal
 import sys
 from contextlib import AsyncExitStack
@@ -17,7 +16,7 @@ from mcp.shared.message import SessionMessage
 
 from maskit.config import load_config
 from maskit.masking.engine import MaskingEngine
-from maskit.masking.rules import MaskingRule
+from maskit.masking.rules import ArgumentGuardrail, ArgumentInjection, MaskingRule
 from maskit.masking.store import MaskingStore
 from maskit.oauth.handler import OAUTH_CALLBACK_PORT, OAuthCallbackServer
 from maskit.proxy.core import ProxyState, TargetState, run_proxy_for_target
@@ -33,13 +32,13 @@ async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
     """Periodically flush pending alias writes to the database."""
     while not shutdown_event.is_set():
         await anyio.sleep(1.0)
-        if engine._pending_writes:
+        if engine.has_pending_writes:
             try:
                 await engine.flush_pending()
             except Exception:
                 logger.exception("Failed to flush aliases to database")
     # Final flush on shutdown
-    if engine._pending_writes:
+    if engine.has_pending_writes:
         try:
             await engine.flush_pending()
         except Exception:
@@ -73,6 +72,7 @@ async def async_main():
                 tool_name=r.tool_name,
                 field_path=r.field_path,
                 alias_prefix=r.alias_prefix,
+                action=r.action,
             )
             for r in target_config.rules
         ]
@@ -82,6 +82,19 @@ async def async_main():
         engine = MaskingEngine(rules, store, target_name=name)
         await engine.load_aliases()
         await engine.load_mappers()
+        await engine.load_guardrails()
+        await engine.load_injections()
+
+        for g in target_config.guardrails:
+            engine.add_guardrail(ArgumentGuardrail(
+                tool_name=g.tool_name, argument_name=g.argument_name,
+                match_type=g.match_type, pattern=g.pattern, message=g.message,
+            ))
+        for i in target_config.injections:
+            engine.add_injection(ArgumentInjection(
+                tool_name=i.tool_name, argument_name=i.argument_name,
+                value=i.value, mode=i.mode,
+            ))
 
         hidden = await store.get_hidden_tools(target_name=name)
 
@@ -109,6 +122,8 @@ async def async_main():
         engine = MaskingEngine([], store, target_name=server_id)
         await engine.load_aliases()
         await engine.load_mappers()
+        await engine.load_guardrails()
+        await engine.load_injections()
         hidden = await store.get_hidden_tools(target_name=server_id)
         ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](32)
 
@@ -141,7 +156,7 @@ async def async_main():
     print("Maskit proxy starting", file=sys.stderr)
     print(f"  Dashboard: http://127.0.0.1:{config.web_port}", file=sys.stderr)
     print(f"  OAuth callback: http://127.0.0.1:{OAUTH_CALLBACK_PORT}/callback", file=sys.stderr)
-    print("  MCP endpoints:", file=sys.stderr)
+    print("  MCP servers:", file=sys.stderr)
     for name in state.target_names:
         print(f"    {name}: http://127.0.0.1:{config.mcp_port}/{name}/mcp", file=sys.stderr)
 
@@ -176,6 +191,7 @@ async def async_main():
                 MemoryObjectSendStream[SessionMessage],
             ]] = {}
 
+            failed_targets = []
             for name, target_state in state.targets.items():
                 if name in config.targets:
                     target_config = config.targets[name]
@@ -188,15 +204,18 @@ async def async_main():
                 elif name in marketplace_configs:
                     try:
                         upstream_cfg = _build_upstream_config(marketplace_configs[name])
-                        us_read, us_write = await stack.enter_async_context(
-                            connect_upstream(upstream_cfg, config.store_path,
-                                           errlog=sys.stderr, server_id=name,
-                                           callback_server=callback_server)
-                        )
+                        with anyio.fail_after(15):
+                            us_read, us_write = await stack.enter_async_context(
+                                connect_upstream(upstream_cfg, config.store_path,
+                                               errlog=sys.stderr, server_id=name,
+                                               callback_server=callback_server)
+                            )
                         upstream_streams[name] = (us_read, us_write)
                     except Exception as exc:
                         logger.warning("Failed to connect marketplace server %s: %s", name, exc)
-                        del state.targets[name]
+                        failed_targets.append(name)
+            for name in failed_targets:
+                del state.targets[name]
 
             async with anyio.create_task_group() as tg:
                 manager = TargetManager(state, store, config.store_path,
@@ -247,9 +266,7 @@ def main():
         print(f"Fatal error: {exc}", file=sys.stderr)
         import traceback
         traceback.print_exc(file=sys.stderr)
-        os._exit(1)
-    finally:
-        os._exit(0)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

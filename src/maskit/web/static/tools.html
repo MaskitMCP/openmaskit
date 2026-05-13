@@ -5,15 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Maskit - Tools</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
 <div x-data="toolsPage()" x-init="init()">
     <header>
         <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
         <nav>
-            <a href="/">Targets</a>
+            <a href="/">Servers</a>
             <a href="/marketplace">Marketplace</a>
             <span class="nav-sep">/</span>
             <span class="nav-current" x-text="targetName"></span>
@@ -21,7 +24,7 @@
     </header>
 
     <main>
-        <a href="/" class="back-link">&larr; Back to Targets</a>
+        <a href="/" class="back-link">&larr; Back to Servers</a>
 
         <section class="panel">
             <h2>Available Tools</h2>
@@ -175,7 +178,8 @@
 
         <section class="panel">
             <h2>Live Traffic</h2>
-            <div class="traffic-log">
+            <p x-show="traffic.length === 0" class="muted">No traffic yet. Call a tool to see requests and responses here.</p>
+            <div class="traffic-log" x-show="traffic.length > 0">
                 <template x-for="(entry, idx) in traffic.slice(-50).reverse()" :key="idx">
                     <div class="traffic-entry" :class="entry.direction">
                         <span class="direction" x-text="entry.direction === 'request' ? '→' : '←'"></span>
@@ -186,28 +190,17 @@
             </div>
         </section>
     </main>
-</div>
 
-<div class="toast-container" x-data="toastStore()">
-    <template x-for="t in toasts" :key="t.id">
-        <div class="toast" :class="'toast-' + t.type" x-text="t.msg"
-             x-init="setTimeout(() => toasts = toasts.filter(x => x.id !== t.id), 3000)"></div>
-    </template>
+    <!-- Toast -->
+    <div class="toast-container">
+        <template x-for="t in toasts" :key="t.id">
+            <div class="toast" :class="'toast-' + t.type" x-text="t.msg"
+                 x-init="setTimeout(() => toasts = toasts.filter(x => x.id !== t.id), 3000)"></div>
+        </template>
+    </div>
 </div>
 
 <script>
-function toastStore() {
-    return {
-        toasts: [],
-        show(msg, type = 'success') {
-            this.toasts.push({ id: Date.now(), msg, type });
-        }
-    };
-}
-function showToast(msg, type = 'success') {
-    window.dispatchEvent(new CustomEvent('toast', { detail: { msg, type } }));
-}
-
 function toolsPage() {
     return {
         targetName: '',
@@ -222,6 +215,11 @@ function toolsPage() {
         _mappingsInterval: null,
         newRule: { field_path: '', alias_prefix: '' },
         newMapper: { pattern: '', alias_prefix: '' },
+        toasts: [],
+
+        showToast(msg, type = 'success') {
+            this.toasts.push({ id: Date.now(), msg, type });
+        },
 
         get globalRules() {
             return this.rules.filter(r => r.tool_name === '*');
@@ -260,7 +258,7 @@ function toolsPage() {
                     this.hiddenTools = this.hiddenTools.filter(n => n !== toolName);
                 }
             } catch (e) {
-                showToast(e.message, 'error');
+                this.showToast(e.message, 'error');
             }
         },
 
@@ -271,16 +269,11 @@ function toolsPage() {
             try {
                 await Promise.all([this.loadTools(), this.loadRules(), this.loadMappers(), this.loadMappings()]);
             } catch (e) {
-                showToast('Failed to load data', 'error');
+                this.showToast('Failed to load data', 'error');
             }
             this.loading = false;
             this.connectWebSocket();
             this._mappingsInterval = setInterval(() => this.loadMappings(), 5000);
-
-            window.addEventListener('toast', (e) => {
-                const store = document.querySelector('[x-data="toastStore()"]')?.__x?.$data;
-                if (store) store.show(e.detail.msg, e.detail.type);
-            });
         },
 
         apiBase() {
@@ -333,9 +326,9 @@ function toolsPage() {
                 if (!res.ok) throw new Error((await res.json()).error || 'Failed');
                 this.newRule = { field_path: '', alias_prefix: '' };
                 await this.loadRules();
-                showToast('Rule added');
+                this.showToast('Rule added');
             } catch (e) {
-                showToast(e.message, 'error');
+                this.showToast(e.message, 'error');
             }
         },
 
@@ -354,9 +347,9 @@ function toolsPage() {
                 if (!res.ok) throw new Error((await res.json()).error || 'Failed');
                 this.newMapper = { pattern: '', alias_prefix: '' };
                 await this.loadMappers();
-                showToast('Mapper added');
+                this.showToast('Mapper added');
             } catch (e) {
-                showToast(e.message, 'error');
+                this.showToast(e.message, 'error');
             }
         },
 
@@ -365,9 +358,9 @@ function toolsPage() {
             try {
                 await fetch(`${this.apiBase()}/rules/${id}/delete`, { method: 'DELETE' });
                 await this.loadRules();
-                showToast('Rule deleted');
+                this.showToast('Rule deleted');
             } catch (e) {
-                showToast('Failed to delete rule', 'error');
+                this.showToast('Failed to delete rule', 'error');
             }
         },
 
@@ -376,11 +369,13 @@ function toolsPage() {
             try {
                 await fetch(`${this.apiBase()}/mappers/${id}/delete`, { method: 'DELETE' });
                 await this.loadMappers();
-                showToast('Mapper deleted');
+                this.showToast('Mapper deleted');
             } catch (e) {
-                showToast('Failed to delete mapper', 'error');
+                this.showToast('Failed to delete mapper', 'error');
             }
         },
+
+        _wsReconnectDelay: 2000,
 
         connectWebSocket() {
             if (this.ws) {
@@ -389,6 +384,9 @@ function toolsPage() {
             }
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
             this.ws = new WebSocket(`${proto}//${location.host}/ws/targets/${encodeURIComponent(this.targetName)}/traffic`);
+            this.ws.onopen = () => {
+                this._wsReconnectDelay = 2000;
+            };
             this.ws.onmessage = (event) => {
                 try {
                     this.traffic.push(JSON.parse(event.data));
@@ -398,7 +396,8 @@ function toolsPage() {
                 } catch {}
             };
             this.ws.onclose = () => {
-                setTimeout(() => this.connectWebSocket(), 2000);
+                setTimeout(() => this.connectWebSocket(), this._wsReconnectDelay);
+                this._wsReconnectDelay = Math.min(this._wsReconnectDelay * 2, 30000);
             };
         },
     };

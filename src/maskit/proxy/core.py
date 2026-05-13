@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -72,7 +73,7 @@ class TargetState:
     engine: MaskingEngine
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     hidden_tools: set[str] = field(default_factory=set)
-    traffic_log: list[dict[str, Any]] = field(default_factory=list)
+    traffic_log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=1000))
     response_dispatcher: ResponseDispatcher = field(default_factory=ResponseDispatcher)
     pending_tool_calls: dict[str | int, str] = field(default_factory=dict)
     pending_requests: dict[str | int, str] = field(default_factory=dict)
@@ -87,8 +88,6 @@ class TargetState:
     def log_traffic(self, direction: str, method: str, data: dict[str, Any] | None = None):
         entry = {"direction": direction, "method": method, "data": data}
         self.traffic_log.append(entry)
-        if len(self.traffic_log) > 1000:
-            self.traffic_log = self.traffic_log[-500:]
 
 
 class ProxyState:
@@ -107,21 +106,6 @@ class ProxyState:
     @property
     def target_names(self) -> list[str]:
         return list(self.targets.keys())
-
-
-async def _fetch_tool_schemas(
-    us_write: MemoryObjectSendStream[SessionMessage],
-    target: TargetState,
-):
-    """Send a tools/list request upstream to populate the web UI."""
-    tools_req = JSONRPCRequest(
-        method="tools/list",
-        id="__maskit_tools_list__",
-        jsonrpc="2.0",
-    )
-    msg = SessionMessage(message=JSONRPCMessage(root=tools_req))
-    await us_write.send(msg)
-    logger.info("[%s] Sent tools/list request to upstream", target.name)
 
 
 async def _bootstrap_upstream(
@@ -236,7 +220,6 @@ async def _relay_upstream_to_downstream(
     us_write: MemoryObjectSendStream[SessionMessage],
 ):
     """Relay messages from upstream (real MCP server) to downstream (HTTP clients)."""
-    _needs_tools_fetch = False
     try:
         async for msg in us_read:
             if isinstance(msg, Exception):
@@ -249,10 +232,6 @@ async def _relay_upstream_to_downstream(
                 if isinstance(root, JSONRPCResponse) and root.id is not None:
                     if target.response_dispatcher.dispatch(root.id, modified):
                         continue
-
-            if _needs_tools_fetch:
-                _needs_tools_fetch = False
-                await _fetch_tool_schemas(us_write, target)
     except (anyio.ClosedResourceError, anyio.EndOfStream):
         pass
 
@@ -302,6 +281,22 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
                     logger.info("[%s] Translating to:    %s(%s)", target.name, tool_name, real_args)
                 params["arguments"] = unmasked
 
+                # Check guardrails on unmasked values
+                violation = target.engine.check_guardrails(tool_name, params["arguments"])
+                if violation:
+                    logger.info("[%s] Guardrail blocked %s: %s", target.name, tool_name, violation)
+                    target.log_traffic("blocked", "tools/call", {"tool": tool_name, "reason": violation})
+                    error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
+                        jsonrpc="2.0",
+                        id=root.id,
+                        error=ErrorData(code=-32602, message=violation),
+                    )))
+                    target.response_dispatcher.dispatch(root.id, error_response)
+                    return None
+
+                # Apply argument injections
+                params["arguments"] = target.engine.apply_injections(tool_name, params["arguments"])
+
     return msg
 
 
@@ -350,9 +345,9 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
         target.log_traffic("response", "tools/call", {"tool": tool_name})
 
         if target.engine and result:
-            pending_before = len(target.engine._pending_writes)
+            pending_before = target.engine.pending_writes_count
             root.result = target.engine.mask_response(tool_name, result)
-            new_masks = target.engine._pending_writes[pending_before:]
+            new_masks = target.engine.get_new_masks_since(pending_before)
             for alias, real_value, _, field_path in new_masks:
                 logger.info("[%s] Masked %s.%s: %s → %s", target.name, tool_name, field_path, real_value, alias)
 

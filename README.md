@@ -28,8 +28,11 @@ Real MCP Server
 
 - Tool responses are intercepted and matched against masking rules and response mappers
 - Matched field values are replaced with stable aliases (same value always gets the same alias)
+- Fields can be stripped entirely from responses (the agent never sees them)
 - When the agent passes an alias back in a tool call, Maskit swaps in the real value before forwarding
-- Tools can be hidden per-target, blocking agent access entirely
+- Argument guardrails block tool calls whose arguments match dangerous patterns (e.g., `DROP TABLE`)
+- Argument injections silently inject or override values before forwarding (e.g., force `read_only: true`)
+- Tools can be hidden per-server, blocking agent access entirely
 
 ## Install
 
@@ -81,7 +84,7 @@ uv run maskit              # uses ./maskit.yaml
 uv run maskit config.yaml  # custom path
 ```
 
-3. Connect your AI agent to Maskit's MCP endpoint (per target):
+3. Connect your AI agent to Maskit's MCP endpoint (per server):
 
 ```bash
 claude mcp add --scope project maskit-time --transport http http://localhost:9474/time/mcp
@@ -92,17 +95,19 @@ claude mcp add --scope project maskit-slack --transport http http://localhost:94
 
 Open `http://127.0.0.1:9473` to:
 
-- Browse and manage multiple upstream targets
+- Browse and manage multiple upstream MCP servers
 - Browse tool schemas from upstream servers
 - Hide tools from the agent (blocked calls return an error)
-- Create and manage masking rules (field-path-based)
+- Create and manage masking rules (mask or strip fields)
 - Create and manage response mappers (regex or JSON field mask)
+- Configure argument guardrails to block dangerous tool calls
+- Configure argument injections to force safe defaults
 - Try out tools directly from the UI
 - View live traffic and current alias mappings
 
 ## Configuration
 
-Maskit supports multiple upstream targets in a single config:
+Maskit supports multiple upstream servers in a single config:
 
 ```yaml
 targets:
@@ -123,13 +128,25 @@ targets:
     rules:
       - tool_name: "send_message"
         field_path: "channel_id"
+      - tool_name: "get_user"
+        field_path: "ssn"
+        action: "strip"
+    guardrails:
+      - tool_name: "run_sql"
+        pattern: "DROP TABLE"
+        message: "Destructive SQL is not allowed"
+    injections:
+      - tool_name: "run_sql"
+        argument_name: "read_only"
+        value: "true"
+        mode: "set"
 
 web_port: 9473
 mcp_port: 9474
 store_path: "~/.maskit/store.db"
 ```
 
-Each target gets its own MCP endpoint at `http://localhost:{mcp_port}/{target_name}/mcp`.
+Each server gets its own MCP endpoint at `http://localhost:{mcp_port}/{server_name}/mcp`.
 
 Or a single upstream (legacy format):
 
@@ -142,7 +159,43 @@ Or a single upstream (legacy format):
 | `web_port` | Dashboard port (default: 9473) |
 | `mcp_port` | MCP HTTP endpoint port (default: 9474) |
 | `store_path` | SQLite database path |
-| `rules` | List of `{tool_name, field_path, alias_prefix?}` |
+| `rules` | List of `{tool_name, field_path, alias_prefix?, action?}` |
+| `guardrails` | List of `{tool_name?, argument_name?, match_type?, pattern, message?}` |
+| `injections` | List of `{tool_name?, argument_name, value, mode?}` |
+
+### Rules
+
+Rules define fields to mask or strip in tool responses:
+
+| Field | Description |
+|-------|-------------|
+| `tool_name` | Tool to apply to (`*` for all) |
+| `field_path` | Dot-notation path (e.g. `user.email`) |
+| `alias_prefix` | Custom alias prefix (default: `_masked_{field}`) |
+| `action` | `mask` (default) or `strip` (removes field entirely) |
+
+### Guardrails
+
+Guardrails block tool calls whose arguments match patterns:
+
+| Field | Description |
+|-------|-------------|
+| `tool_name` | Tool to apply to (`*` for all, default) |
+| `argument_name` | Argument to check (`*` scans all values recursively, default) |
+| `match_type` | `contains` (default), `equals`, or `regex` |
+| `pattern` | Pattern to match against |
+| `message` | Error message returned to the agent |
+
+### Injections
+
+Injections silently inject or override argument values:
+
+| Field | Description |
+|-------|-------------|
+| `tool_name` | Tool to apply to (`*` for all, default) |
+| `argument_name` | Argument key to set |
+| `value` | JSON-encoded value (e.g. `"true"`, `"100"`, `"\"hello\""`) |
+| `mode` | `set` (always override, default), `default` (only if absent), `append` |
 
 ## Development
 

@@ -48,6 +48,18 @@ def create_app(state: ProxyState) -> Starlette:
         tool_detail_page,
         tools_page,
     )
+    from maskit.web.routes.guardrails import (
+        guardrails_create,
+        guardrails_delete,
+        guardrails_list,
+        guardrails_update,
+    )
+    from maskit.web.routes.injections import (
+        injections_create,
+        injections_delete,
+        injections_list,
+        injections_update,
+    )
     from maskit.web.routes.rules import rules_create, rules_delete, rules_list, rules_update
     from maskit.web.routes.traffic import TrafficWebSocket, api_mappings
 
@@ -78,6 +90,14 @@ def create_app(state: ProxyState) -> Starlette:
         Route("/api/targets/{target_name}/mappers/preview_json", mappers_preview_json, methods=["POST"]),
         Route("/api/targets/{target_name}/mappers/reorder", mappers_reorder, methods=["POST"]),
         Route("/api/targets/{target_name}/parse_text", parse_text, methods=["POST"]),
+        Route("/api/targets/{target_name}/guardrails", guardrails_list, methods=["GET"]),
+        Route("/api/targets/{target_name}/guardrails/create", guardrails_create, methods=["POST"]),
+        Route("/api/targets/{target_name}/guardrails/{guardrail_id:int}/update", guardrails_update, methods=["POST"]),
+        Route("/api/targets/{target_name}/guardrails/{guardrail_id:int}/delete", guardrails_delete, methods=["POST", "DELETE"]),
+        Route("/api/targets/{target_name}/injections", injections_list, methods=["GET"]),
+        Route("/api/targets/{target_name}/injections/create", injections_create, methods=["POST"]),
+        Route("/api/targets/{target_name}/injections/{injection_id:int}/update", injections_update, methods=["POST"]),
+        Route("/api/targets/{target_name}/injections/{injection_id:int}/delete", injections_delete, methods=["POST", "DELETE"]),
         Route("/api/targets/{target_name}/hidden_tools", hidden_tools_list, methods=["GET"]),
         Route("/api/targets/{target_name}/hidden_tools/toggle", hidden_tools_toggle, methods=["POST"]),
         Route("/api/targets/{target_name}/mappings", api_mappings),

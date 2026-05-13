@@ -5,10 +5,13 @@ from __future__ import annotations
 import logging
 import re
 
+import anyio
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+_DELETE_DISCONNECT_TIMEOUT = 15
 
 
 def _slugify(name: str) -> str:
@@ -173,9 +176,14 @@ async def custom_target_delete(request: Request):
 
     if manager and target_id in state.targets:
         try:
-            await manager.remove_target(target_id)
+            with anyio.fail_after(_DELETE_DISCONNECT_TIMEOUT):
+                await manager.remove_target(target_id)
+        except TimeoutError:
+            logger.warning("Timed out disconnecting %s, forcing removal", target_id)
+            state.targets.pop(target_id, None)
         except Exception as exc:
             logger.warning("Error disconnecting %s for delete: %s", target_id, exc)
+            state.targets.pop(target_id, None)
 
     await store.uninstall_server(target_id)
     return JSONResponse({"ok": True})

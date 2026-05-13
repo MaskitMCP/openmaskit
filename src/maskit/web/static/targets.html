@@ -3,17 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Maskit - Targets</title>
+    <title>Maskit - Servers</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
 <div x-data="targetsPage()" x-init="init()">
     <header>
         <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
         <nav>
-            <a href="/" class="active">Targets</a>
+            <a href="/" class="active">Servers</a>
             <a href="/marketplace">Marketplace</a>
         </nav>
     </header>
@@ -22,14 +25,14 @@
         <!-- Page title row — no panel wrapper -->
         <div class="page-title-row">
             <div class="page-title-left">
-                <h2 class="page-title">Targets</h2>
+                <h2 class="page-title">Servers</h2>
                 <span class="page-title-count" x-show="targets.length > 0" x-text="targets.length"></span>
             </div>
-            <button class="btn-add-target" @click="openAddModal()" title="Add custom target">
+            <button class="btn-add-target" @click="openAddModal()" title="Add MCP server">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
                     <path d="M12 5v14M5 12h14"/>
                 </svg>
-                <span>Add Target</span>
+                <span>Add Server</span>
             </button>
         </div>
 
@@ -43,8 +46,8 @@
                     <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                 </svg>
             </div>
-            <p class="targets-empty-title">No targets connected</p>
-            <p class="targets-empty-hint">Add an MCP server target to get started, or browse the <a href="/marketplace">Marketplace</a>.</p>
+            <p class="targets-empty-title">No servers connected</p>
+            <p class="targets-empty-hint">Add an MCP server to get started, or browse the <a href="/marketplace">Marketplace</a>.</p>
         </div>
 
         <div class="targets-list" x-show="!loading && targets.length > 0">
@@ -98,7 +101,7 @@
          style="display: none;">
         <div class="modal modal-target" @click.outside="closeModal()">
             <div class="modal-header-bar">
-                <h3 x-text="modal.mode === 'add' ? 'New Target' : 'Edit Target'"></h3>
+                <h3 x-text="modal.mode === 'add' ? 'New Server' : 'Edit Server'"></h3>
                 <button class="modal-close-btn" @click="closeModal()" title="Close">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
@@ -276,7 +279,7 @@ function targetsPage() {
             try {
                 const res = await fetch(`/api/targets/custom/${encodeURIComponent(target.name)}`);
                 if (!res.ok) {
-                    this.showToast('Failed to load target config', 'error');
+                    this.showToast('Failed to load server config', 'error');
                     return;
                 }
                 const data = await res.json();
@@ -346,7 +349,7 @@ function targetsPage() {
                 });
                 const data = await res.json();
                 if (!res.ok) {
-                    this.modal.error = data.error || 'Failed to save target';
+                    this.modal.error = data.error || 'Failed to save server';
                 } else {
                     this.modal.visible = false;
                     if (data.connected) {
@@ -363,7 +366,7 @@ function targetsPage() {
         },
 
         async deleteTarget(target) {
-            if (!confirm(`Delete "${target.name}"? This will disconnect and remove it.`)) return;
+            if (!confirm(`Delete "${target.name}"? This will disconnect and remove this server.`)) return;
             try {
                 const res = await fetch(`/api/targets/custom/${encodeURIComponent(target.name)}/delete`, { method: 'POST' });
                 if (res.ok) {

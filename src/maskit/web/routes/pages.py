@@ -80,7 +80,6 @@ async def api_tools_call(request: Request):
     )
     session_msg = SessionMessage(message=JSONRPCMessage(root=rpc_request))
 
-    snapshot_len = len(target.engine._pending_writes)
     event = target.response_dispatcher.register(request_id)
     await target.ds_read_send.send(session_msg)
 
@@ -97,10 +96,10 @@ async def api_tools_call(request: Request):
 
     root = response_msg.message.root
     if hasattr(root, "result"):
-        new_aliases = {}
-        for alias, real_value, _, _ in target.engine._pending_writes[snapshot_len:]:
-            new_aliases[alias] = real_value
-        return JSONResponse({"result": root.result, "aliases": new_aliases})
+        aliases = {alias: real for alias, real in target.engine.alias_cache.items()}
+        return JSONResponse({"result": root.result, "aliases": aliases})
     if hasattr(root, "error"):
-        return JSONResponse({"error": root.error}, status_code=400)
+        err = root.error
+        msg = err.message if hasattr(err, "message") else str(err)
+        return JSONResponse({"error": msg}, status_code=400)
     return JSONResponse({"error": "Unexpected response"}, status_code=500)

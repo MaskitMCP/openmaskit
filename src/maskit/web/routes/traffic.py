@@ -17,7 +17,7 @@ async def api_mappings(request: Request):
     if target is None:
         return JSONResponse({"error": "Target not found"}, status_code=404)
 
-    mappings = await target.engine._store.get_all_mappings(target_name=target_name)
+    mappings = await target.engine.store.get_all_mappings(target_name=target_name)
     return JSONResponse({"mappings": mappings})
 
 
@@ -31,14 +31,18 @@ async def TrafficWebSocket(websocket: WebSocket):
         await websocket.close(code=4004)
         return
 
-    last_idx = len(target.traffic_log)
+    last_len = len(target.traffic_log)
     try:
         while True:
             await anyio.sleep(0.5)
-            current = target.traffic_log[last_idx:]
-            if current:
-                for entry in current:
+            current_len = len(target.traffic_log)
+            if current_len > last_len:
+                new_count = current_len - last_len
+                new_entries = list(target.traffic_log)[-new_count:]
+                for entry in new_entries:
                     await websocket.send_text(json.dumps(entry))
-                last_idx = len(target.traffic_log)
+                last_len = current_len
+            elif current_len < last_len:
+                last_len = current_len
     except (WebSocketDisconnect, anyio.ClosedResourceError):
         pass

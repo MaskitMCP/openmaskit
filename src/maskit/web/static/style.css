@@ -4,7 +4,7 @@
    Palette: Deep charcoal base with teal/cyan accents
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Fonts loaded via <link> in HTML for non-blocking rendering */
 
 /* --- CSS Variables --- */
 :root {
@@ -34,6 +34,10 @@
     --red: #f87171;
     --red-dim: #f8717118;
     --red-border: #f8717140;
+
+    --teal: #2dd4bf;
+    --teal-dim: #2dd4bf18;
+    --teal-border: #2dd4bf40;
 
     --purple: #a78bfa;
     --purple-dim: #a78bfa18;
@@ -128,6 +132,8 @@ header h1::after {
 nav {
     display: flex;
     gap: 0.25rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 nav a {
@@ -427,7 +433,8 @@ code {
     font-weight: 500;
 }
 
-.form-row input {
+.form-row input,
+.form-row select {
     background: var(--bg-input);
     border: 1px solid var(--border-default);
     color: var(--text-primary);
@@ -438,7 +445,22 @@ code {
     transition: all var(--transition-fast);
 }
 
-.form-row input:focus {
+.form-row select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238892a4' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+    cursor: pointer;
+}
+
+.form-row select option {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.form-row input:focus,
+.form-row select:focus {
     outline: none;
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-dim);
@@ -1078,6 +1100,30 @@ code {
     }
 }
 
+@media (max-width: 480px) {
+    header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    nav a {
+        padding: 0.4rem 0.6rem;
+        font-size: 0.8rem;
+    }
+
+    .page-title-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+
+    .modal-target {
+        width: 95vw;
+        max-height: 90vh;
+    }
+}
+
 /* --- Response Tabs & JSON Tree View --- */
 .response-tabs {
     display: flex;
@@ -1147,12 +1193,12 @@ code {
 }
 
 .tree-node-masked {
-    background: rgba(45, 212, 191, 0.08);
-    border-left: 2px solid rgba(45, 212, 191, 0.5);
+    background: var(--teal-dim);
+    border-left: 2px solid var(--teal-border);
 }
 
 .tree-node-masked:hover {
-    background: rgba(45, 212, 191, 0.14);
+    background: var(--teal-border);
 }
 
 /* --- Masked Field Tooltip --- */
@@ -1165,9 +1211,9 @@ code {
     white-space: nowrap;
     font-size: 0.72rem;
     font-family: var(--font-mono);
-    color: #2dd4bf;
-    background: rgba(45, 212, 191, 0.08);
-    border: 1px solid rgba(45, 212, 191, 0.25);
+    color: var(--teal);
+    background: var(--teal-dim);
+    border: 1px solid var(--teal-border);
     border-radius: 4px;
     padding: 0.15rem 0;
     margin-left: 0;
@@ -1712,7 +1758,7 @@ code {
     margin-top: 1.5rem;
 }
 
-/* --- Targets Page --- */
+/* --- Servers Page --- */
 
 .page-title-row {
     display: flex;

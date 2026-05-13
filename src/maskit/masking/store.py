@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import aiosqlite
 
 from maskit.masking.mappers import ResponseMapper
-from maskit.masking.rules import MaskingRule
+from maskit.masking.rules import ArgumentGuardrail, ArgumentInjection, MaskingRule
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS mappings (
@@ -59,6 +58,27 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS guardrails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    argument_name TEXT NOT NULL DEFAULT '*',
+    match_type TEXT NOT NULL DEFAULT 'contains',
+    pattern TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT 'Blocked by guardrail',
+    active BOOLEAN NOT NULL DEFAULT 1,
+    target_name TEXT NOT NULL DEFAULT 'default'
+);
+
+CREATE TABLE IF NOT EXISTS injections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    argument_name TEXT NOT NULL,
+    value TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'set',
+    active BOOLEAN NOT NULL DEFAULT 1,
+    target_name TEXT NOT NULL DEFAULT 'default'
+);
+
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_active ON mcp_servers(active);
 CREATE INDEX IF NOT EXISTS idx_mappings_real_value ON mappings(real_value);
 CREATE INDEX IF NOT EXISTS idx_mappings_target ON mappings(target_name);
@@ -67,6 +87,10 @@ CREATE INDEX IF NOT EXISTS idx_rules_target ON rules(target_name);
 CREATE INDEX IF NOT EXISTS idx_response_mappers_tool ON response_mappers(tool_name);
 CREATE INDEX IF NOT EXISTS idx_response_mappers_target ON response_mappers(target_name);
 CREATE INDEX IF NOT EXISTS idx_hidden_tools_target ON hidden_tools(target_name);
+CREATE INDEX IF NOT EXISTS idx_guardrails_tool ON guardrails(tool_name);
+CREATE INDEX IF NOT EXISTS idx_guardrails_target ON guardrails(target_name);
+CREATE INDEX IF NOT EXISTS idx_injections_tool ON injections(tool_name);
+CREATE INDEX IF NOT EXISTS idx_injections_target ON injections(target_name);
 """
 
 
@@ -88,7 +112,7 @@ class MaskingStore:
         return store
 
     async def _migrate(self):
-        """Add target_name and config columns to existing tables if missing."""
+        """Add columns to existing tables if missing."""
         cursor = await self._db.execute("PRAGMA table_info(mappings)")
         columns = {row[1] for row in await cursor.fetchall()}
         if "target_name" not in columns:
@@ -117,6 +141,14 @@ class MaskingStore:
         if "config" not in mapper_columns:
             await self._db.execute(
                 "ALTER TABLE response_mappers ADD COLUMN config TEXT DEFAULT NULL"
+            )
+            await self._db.commit()
+
+        cursor = await self._db.execute("PRAGMA table_info(rules)")
+        rule_columns = {row[1] for row in await cursor.fetchall()}
+        if "action" not in rule_columns:
+            await self._db.execute(
+                "ALTER TABLE rules ADD COLUMN action TEXT NOT NULL DEFAULT 'mask'"
             )
             await self._db.commit()
 
@@ -209,18 +241,18 @@ class MaskingStore:
 
     async def add_rule(self, rule: MaskingRule, target_name: str = "default") -> int:
         cursor = await self._db.execute(
-            "INSERT INTO rules (tool_name, field_path, alias_prefix, active, target_name) VALUES (?, ?, ?, ?, ?)",
-            (rule.tool_name, rule.field_path, rule.alias_prefix, rule.active, target_name),
+            "INSERT INTO rules (tool_name, field_path, alias_prefix, action, active, target_name) VALUES (?, ?, ?, ?, ?, ?)",
+            (rule.tool_name, rule.field_path, rule.alias_prefix, rule.action, rule.active, target_name),
         )
         await self._db.commit()
         return cursor.lastrowid
 
     async def get_rules(self, target_name: str | None = None) -> list[MaskingRule]:
         if target_name:
-            query = "SELECT id, tool_name, field_path, alias_prefix, active FROM rules WHERE target_name = ?"
+            query = "SELECT id, tool_name, field_path, alias_prefix, action, active FROM rules WHERE target_name = ?"
             params: tuple = (target_name,)
         else:
-            query = "SELECT id, tool_name, field_path, alias_prefix, active FROM rules"
+            query = "SELECT id, tool_name, field_path, alias_prefix, action, active FROM rules"
             params = ()
 
         async with self._db.execute(query, params) as cursor:
@@ -231,7 +263,8 @@ class MaskingStore:
                     tool_name=r[1],
                     field_path=r[2],
                     alias_prefix=r[3],
-                    active=bool(r[4]),
+                    action=r[4] or "mask",
+                    active=bool(r[5]),
                 )
                 for r in rows
             ]
@@ -246,6 +279,111 @@ class MaskingStore:
 
     async def delete_rule(self, rule_id: int) -> bool:
         cursor = await self._db.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    # --- Guardrail CRUD ---
+
+    async def add_guardrail(self, guardrail: ArgumentGuardrail, target_name: str = "default") -> int:
+        cursor = await self._db.execute(
+            "INSERT INTO guardrails (tool_name, argument_name, match_type, pattern, message, active, target_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (guardrail.tool_name, guardrail.argument_name, guardrail.match_type, guardrail.pattern, guardrail.message, guardrail.active, target_name),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def get_guardrails(self, target_name: str | None = None) -> list[ArgumentGuardrail]:
+        if target_name:
+            query = "SELECT id, tool_name, argument_name, match_type, pattern, message, active FROM guardrails WHERE target_name = ?"
+            params: tuple = (target_name,)
+        else:
+            query = "SELECT id, tool_name, argument_name, match_type, pattern, message, active FROM guardrails"
+            params = ()
+
+        async with self._db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                ArgumentGuardrail(
+                    id=r[0],
+                    tool_name=r[1],
+                    argument_name=r[2],
+                    match_type=r[3],
+                    pattern=r[4],
+                    message=r[5],
+                    active=bool(r[6]),
+                )
+                for r in rows
+            ]
+
+    async def update_guardrail(self, guardrail_id: int, **fields) -> bool:
+        if not fields:
+            return False
+        allowed = {"tool_name", "argument_name", "match_type", "pattern", "message", "active"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [guardrail_id]
+        cursor = await self._db.execute(
+            f"UPDATE guardrails SET {set_clause} WHERE id = ?", values
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def delete_guardrail(self, guardrail_id: int) -> bool:
+        cursor = await self._db.execute("DELETE FROM guardrails WHERE id = ?", (guardrail_id,))
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    # --- Injection CRUD ---
+
+    async def add_injection(self, injection: ArgumentInjection, target_name: str = "default") -> int:
+        cursor = await self._db.execute(
+            "INSERT INTO injections (tool_name, argument_name, value, mode, active, target_name) VALUES (?, ?, ?, ?, ?, ?)",
+            (injection.tool_name, injection.argument_name, injection.value, injection.mode, injection.active, target_name),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def get_injections(self, target_name: str | None = None) -> list[ArgumentInjection]:
+        if target_name:
+            query = "SELECT id, tool_name, argument_name, value, mode, active FROM injections WHERE target_name = ?"
+            params: tuple = (target_name,)
+        else:
+            query = "SELECT id, tool_name, argument_name, value, mode, active FROM injections"
+            params = ()
+
+        async with self._db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                ArgumentInjection(
+                    id=r[0],
+                    tool_name=r[1],
+                    argument_name=r[2],
+                    value=r[3],
+                    mode=r[4],
+                    active=bool(r[5]),
+                )
+                for r in rows
+            ]
+
+    async def update_injection(self, injection_id: int, **fields) -> bool:
+        if not fields:
+            return False
+        allowed = {"tool_name", "argument_name", "value", "mode", "active"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [injection_id]
+        cursor = await self._db.execute(
+            f"UPDATE injections SET {set_clause} WHERE id = ?", values
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def delete_injection(self, injection_id: int) -> bool:
+        cursor = await self._db.execute("DELETE FROM injections WHERE id = ?", (injection_id,))
         await self._db.commit()
         return cursor.rowcount > 0
 
@@ -324,13 +462,12 @@ class MaskingStore:
             return [row[0] async for row in cursor]
 
     async def hide_tool(self, tool_name: str, target_name: str = "default") -> bool:
-        await self._db.execute(
+        cursor = await self._db.execute(
             "INSERT OR IGNORE INTO hidden_tools (tool_name, target_name) VALUES (?, ?)",
             (tool_name, target_name),
         )
-        changed = self._db.total_changes
         await self._db.commit()
-        return changed > 0
+        return cursor.rowcount > 0
 
     async def unhide_tool(self, tool_name: str, target_name: str = "default") -> bool:
         cursor = await self._db.execute(

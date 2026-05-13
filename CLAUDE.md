@@ -16,6 +16,10 @@ uv run maskit                    # Run with ./maskit.yaml
 uv run maskit path/to/config.yaml  # Run with custom config
 ```
 
+## Naming
+
+The UI says "Servers" but the codebase uses "target" everywhere (classes, DB columns, API routes, variables). They mean the same thing — an upstream MCP server that Maskit proxies to. "Server" is the user-facing term; "target" is the internal term. Do not rename internal code.
+
 ## Architecture
 
 The system has four concurrent components running in one asyncio event loop (via anyio task groups):
@@ -59,7 +63,27 @@ HTTP clients (MCP endpoint and web UI "Try it out") register a waiter by request
 
 ### Hidden tools
 
-Tools can be hidden per-target via the Web UI. Hidden tools are stored in the `hidden_tools` SQLite table and loaded into `TargetState.hidden_tools` at startup. When an agent calls a hidden tool, the proxy returns a `METHOD_NOT_FOUND` error without forwarding to upstream.
+Tools can be hidden per-server via the Web UI. Hidden tools are stored in the `hidden_tools` SQLite table and loaded into `TargetState.hidden_tools` at startup. When an agent calls a hidden tool, the proxy returns a `METHOD_NOT_FOUND` error without forwarding to upstream.
+
+### Request interception pipeline
+
+In `_intercept_request()`, tool calls pass through these stages in order:
+1. **Hidden tool check** — blocks with `METHOD_NOT_FOUND` error
+2. **Unmask arguments** — replaces aliases with real values
+3. **Guardrail check** — validates unmasked args against patterns, blocks with `-32602` error if violated
+4. **Injection application** — injects/overrides argument values before forwarding
+
+### Argument guardrails
+
+Block tool calls whose arguments match dangerous patterns. Stored in `guardrails` table, loaded into `MaskingEngine._guardrails`. Support three match types: `contains`, `equals`, `regex`. When `argument_name="*"`, scans all string values recursively.
+
+### Argument injections
+
+Silently inject or override argument values before forwarding. Stored in `injections` table, loaded into `MaskingEngine._injections`. Three modes: `set` (always override), `default` (only if absent), `append` (append to string/list). Values are JSON-encoded strings.
+
+### Field stripping
+
+Rules with `action="strip"` remove fields entirely from responses (no alias created, field is gone). Only applies to structured data (parsed JSON/repr); plain text blocks skip strip rules.
 
 ### Text parsing (`masking/parsing.py`)
 
@@ -69,9 +93,11 @@ The `try_parse_structured` utility attempts JSON first, then falls back to `ast.
 
 SQLite database (default `~/.maskit/store.db`) with tables:
 - `mappings` — alias ↔ real_value (persists across restarts so the same real value always gets the same alias)
-- `rules` — masking rules created via Web UI (merged with config-file rules at startup)
+- `rules` — masking rules created via Web UI (merged with config-file rules at startup), supports `action` column (`mask` or `strip`)
 - `response_mappers` — output mapper configs (regex or json_field_mask) with optional `config` JSON column
-- `hidden_tools` — tools hidden per target (blocked from agent access)
+- `hidden_tools` — tools hidden per server (blocked from agent access)
+- `guardrails` — argument validation rules that block tool calls matching dangerous patterns
+- `injections` — argument injection rules that inject/override values before forwarding
 
 ## Configuration
 
@@ -79,12 +105,14 @@ SQLite database (default `~/.maskit/store.db`) with tables:
 
 ## Web UI API
 
-All API routes are scoped per target: `/api/targets/{target_name}/...`
+All API routes are scoped per server: `/api/targets/{target_name}/...`
 
 - `GET /api/targets/{target_name}/tools` — cached tool schemas
 - `POST /api/targets/{target_name}/tools/call` — invoke a tool through the proxy (used by "Try it out")
-- `GET/POST/PUT/DELETE /api/targets/{target_name}/rules` — masking rule CRUD
+- `GET/POST/PUT/DELETE /api/targets/{target_name}/rules` — masking rule CRUD (supports `action: "mask"|"strip"`)
 - `GET/POST/PUT/DELETE /api/targets/{target_name}/mappers` — response mapper CRUD
+- `GET/POST/PUT/DELETE /api/targets/{target_name}/guardrails` — argument guardrail CRUD
+- `GET/POST/PUT/DELETE /api/targets/{target_name}/injections` — argument injection CRUD
 - `GET /api/targets/{target_name}/mappings` — current alias mappings
 - `GET/POST /api/targets/{target_name}/hidden_tools` — hide/unhide tools from the agent
 - `WS /ws/traffic` — live traffic stream

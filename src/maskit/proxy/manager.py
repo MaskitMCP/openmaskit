@@ -57,10 +57,16 @@ class TargetManager:
         self._shutdown_event = shutdown_event
 
     async def add_target(self, server_id: str, config: dict) -> TargetState:
-        """Hot-add a new target: create state, connect upstream, start relay."""
+        """Hot-add a new target: create state, connect upstream, start relay.
+
+        Cleans up after itself on failure — callers should NOT call remove_target
+        if this raises.
+        """
         engine = MaskingEngine([], self._store, target_name=server_id)
         await engine.load_aliases()
         await engine.load_mappers()
+        await engine.load_guardrails()
+        await engine.load_injections()
 
         hidden = await self._store.get_hidden_tools(target_name=server_id)
 
@@ -77,18 +83,23 @@ class TargetManager:
         stack = AsyncExitStack()
         await stack.__aenter__()
 
-        upstream = _build_upstream_config(config)
-        us_read, us_write = await stack.enter_async_context(
-            connect_upstream(upstream, self._store_path, errlog=sys.stderr,
-                           server_id=server_id, callback_server=self._callback_server)
-        )
+        try:
+            upstream = _build_upstream_config(config)
+            us_read, us_write = await stack.enter_async_context(
+                connect_upstream(upstream, self._store_path, errlog=sys.stderr,
+                               server_id=server_id, callback_server=self._callback_server)
+            )
 
-        self._exit_stacks[server_id] = stack
-        self._state.targets[server_id] = target
+            self._exit_stacks[server_id] = stack
+            self._state.targets[server_id] = target
 
-        # Bootstrap inline (triggers OAuth if needed) — 120s to allow browser auth
-        with anyio.fail_after(120):
-            await _bootstrap_upstream(us_read, us_write, target)
+            with anyio.fail_after(120):
+                await _bootstrap_upstream(us_read, us_write, target)
+        except BaseException:
+            self._exit_stacks.pop(server_id, None)
+            self._state.targets.pop(server_id, None)
+            await stack.aclose()
+            raise
 
         if self._task_group:
             self._task_group.start_soon(run_proxy_for_target, target, us_read, us_write)
@@ -100,19 +111,30 @@ class TargetManager:
         """Teardown: close upstream connection, stop relay tasks, remove from state."""
         target = self._state.targets.get(server_id)
         if target and target.ds_read_send:
-            await target.ds_read_send.aclose()
+            try:
+                await target.ds_read_send.aclose()
+            except (anyio.ClosedResourceError, anyio.EndOfStream):
+                pass
 
         stack = self._exit_stacks.pop(server_id, None)
         if stack:
-            await stack.aclose()
+            try:
+                await stack.aclose()
+            except Exception as exc:
+                logger.warning("Error closing exit stack for %s: %s", server_id, exc)
 
         self._state.targets.pop(server_id, None)
 
     async def _flush_loop(self, engine: MaskingEngine) -> None:
         while self._shutdown_event and not self._shutdown_event.is_set():
             await anyio.sleep(1.0)
-            if engine._pending_writes:
+            if engine.has_pending_writes:
                 try:
                     await engine.flush_pending()
                 except Exception:
-                    logger.exception("Failed to flush aliases for marketplace target")
+                    logger.exception("Failed to flush aliases for hot-added target")
+        if engine.has_pending_writes:
+            try:
+                await engine.flush_pending()
+            except Exception:
+                logger.exception("Failed final flush for hot-added target")

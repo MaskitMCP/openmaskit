@@ -5,6 +5,8 @@ from pathlib import Path
 import yaml
 
 from maskit.models import (
+    GuardrailConfig,
+    InjectionConfig,
     MaskingRuleConfig,
     MultiTargetConfig,
     TargetConfig,
@@ -42,7 +44,9 @@ def load_config(path: Path | None = None) -> MultiTargetConfig:
         for name, target_raw in raw["targets"].items():
             upstream = _parse_upstream(target_raw.get("upstream", {}))
             rules = [MaskingRuleConfig(**r) for r in target_raw.get("rules", [])]
-            targets[name] = TargetConfig(upstream=upstream, rules=rules)
+            guardrails = [GuardrailConfig(**g) for g in target_raw.get("guardrails", [])]
+            injections = [InjectionConfig(**i) for i in target_raw.get("injections", [])]
+            targets[name] = TargetConfig(upstream=upstream, rules=rules, guardrails=guardrails, injections=injections)
         return MultiTargetConfig(
             targets=targets,
             web_port=raw.get("web_port", 9473),
@@ -61,7 +65,9 @@ def load_config(path: Path | None = None) -> MultiTargetConfig:
 
     upstream = _parse_upstream(raw["upstream"])
     rules = [MaskingRuleConfig(**r) for r in raw.get("rules", [])]
-    target = TargetConfig(upstream=upstream, rules=rules)
+    guardrails = [GuardrailConfig(**g) for g in raw.get("guardrails", [])]
+    injections = [InjectionConfig(**i) for i in raw.get("injections", [])]
+    target = TargetConfig(upstream=upstream, rules=rules, guardrails=guardrails, injections=injections)
     return MultiTargetConfig(
         targets={"default": target},
         web_port=raw.get("web_port", 9473),
