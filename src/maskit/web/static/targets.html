@@ -3,47 +3,264 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Maskit - Targets</title>
+    <title>Maskit - Servers</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
 <div x-data="targetsPage()" x-init="init()">
     <header>
         <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
+        <nav>
+            <a href="/" class="active">Servers</a>
+            <a href="/marketplace">Marketplace</a>
+        </nav>
     </header>
 
     <main>
-        <section class="panel">
-            <h2>Targets</h2>
-            <div x-show="loading" class="loading-overlay">
-                <span class="spinner"></span> Loading...
+        <!-- Page title row — no panel wrapper -->
+        <div class="page-title-row">
+            <div class="page-title-left">
+                <h2 class="page-title">Servers</h2>
+                <span class="page-title-count" x-show="targets.length > 0" x-text="targets.length"></span>
             </div>
-            <p x-show="!loading && targets.length === 0" class="muted">
-                No targets configured. Add targets to your maskit.yaml to get started.
-            </p>
-            <div class="tools-grid" x-show="targets.length > 0">
-                <template x-for="target in targets" :key="target.name">
-                    <a :href="'/targets/' + encodeURIComponent(target.name) + '/tools'" class="tool-card-link">
-                        <h3 x-text="target.name"></h3>
-                        <p x-text="target.initialized ? 'Connected' : 'Connecting...'" :class="target.initialized ? 'status-ok' : 'status-pending'"></p>
-                        <div class="tool-badges">
-                            <span class="tool-badge">
-                                <span x-text="target.tool_count"></span> tools
+            <button class="btn-add-target" @click="openAddModal()" title="Add MCP server">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                    <path d="M12 5v14M5 12h14"/>
+                </svg>
+                <span>Add Server</span>
+            </button>
+        </div>
+
+        <div x-show="loading" class="loading-overlay">
+            <span class="spinner"></span> Loading...
+        </div>
+
+        <div x-show="!loading && targets.length === 0" class="targets-empty">
+            <div class="targets-empty-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+            </div>
+            <p class="targets-empty-title">No servers connected</p>
+            <p class="targets-empty-hint">Add an MCP server to get started, or browse the <a href="/marketplace">Marketplace</a>.</p>
+        </div>
+
+        <div class="targets-list" x-show="!loading && targets.length > 0">
+            <template x-for="(target, idx) in targets" :key="target.name">
+                <div class="tgt-card" :style="'animation-delay:' + (idx * 60) + 'ms'">
+                    <div class="tgt-card-accent" :class="target.initialized ? 'tgt-accent-live' : 'tgt-accent-pending'"></div>
+                    <a :href="'/targets/' + encodeURIComponent(target.name) + '/tools'" class="tgt-card-main">
+                        <div class="tgt-card-header">
+                            <div class="tgt-status-indicator">
+                                <span class="tgt-dot" :class="target.initialized ? 'dot-live' : 'dot-pending'"></span>
+                                <span class="tgt-status-label" x-text="target.initialized ? 'Live' : 'Connecting'" :class="target.initialized ? 'label-live' : 'label-pending'"></span>
+                            </div>
+                            <div class="tgt-card-actions" @click.prevent.stop>
+                                <button class="tgt-action-btn tgt-action-connect" @click="openIntegration(target)" title="Connect agent">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                    </svg>
+                                </button>
+                                <template x-if="target.editable">
+                                    <button class="tgt-action-btn" @click="openEditModal(target)" title="Edit">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                        </svg>
+                                    </button>
+                                </template>
+                                <template x-if="target.editable">
+                                    <button class="tgt-action-btn tgt-action-danger" @click="deleteTarget(target)" title="Delete">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                        </svg>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                        <h3 class="tgt-card-name" x-text="target.name"></h3>
+                        <div class="tgt-card-meta">
+                            <span class="tgt-meta-badge">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                <span x-text="target.tool_count + ' tools'"></span>
                             </span>
-                            <span x-show="target.rule_count > 0" class="tool-badge">
-                                <span x-text="target.rule_count"></span> rules
+                            <span x-show="target.rule_count > 0" class="tgt-meta-badge tgt-badge-rules">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                <span x-text="target.rule_count + ' rules'"></span>
                             </span>
-                            <span x-show="target.mapper_count > 0" class="tool-badge tool-badge-mapper">
-                                <span x-text="target.mapper_count"></span> mappers
+                            <span x-show="target.mapper_count > 0" class="tgt-meta-badge tgt-badge-mappers">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                                <span x-text="target.mapper_count + ' mappers'"></span>
                             </span>
                         </div>
                     </a>
-                </template>
-            </div>
-        </section>
+                </div>
+            </template>
+        </div>
     </main>
+
+    <!-- Add/Edit Modal -->
+    <div x-show="modal.visible" class="modal-backdrop" @keydown.escape.window="closeModal()"
+         x-transition:enter="modal-enter" x-transition:enter-start="modal-enter-from" x-transition:enter-end="modal-enter-to"
+         x-transition:leave="modal-leave" x-transition:leave-start="modal-leave-from" x-transition:leave-end="modal-leave-to"
+         style="display: none;">
+        <div class="modal modal-target" @click.outside="closeModal()">
+            <div class="modal-header-bar">
+                <h3 x-text="modal.mode === 'add' ? 'New Server' : 'Edit Server'"></h3>
+                <button class="modal-close-btn" @click="closeModal()" title="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <label class="modal-field">
+                    <span class="modal-label">Name</span>
+                    <input type="text" class="modal-input" placeholder="e.g. postgres, my-api" x-model="modal.name" :disabled="modal.mode === 'edit'">
+                </label>
+
+                <div class="transport-switch">
+                    <button type="button" class="transport-opt" :class="{ active: modal.transport === 'stdio' }" @click="modal.transport = 'stdio'">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                        stdio
+                    </button>
+                    <button type="button" class="transport-opt" :class="{ active: modal.transport === 'http' }" @click="modal.transport = 'http'">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                        http
+                    </button>
+                </div>
+
+                <!-- Stdio fields -->
+                <div x-show="modal.transport === 'stdio'" x-transition.opacity>
+                    <label class="modal-field">
+                        <span class="modal-label">Command</span>
+                        <input type="text" class="modal-input" placeholder="e.g. uvx, npx, podman" x-model="modal.command">
+                    </label>
+
+                    <label class="modal-field">
+                        <span class="modal-label">Arguments</span>
+                        <textarea class="modal-input modal-textarea"
+                                  placeholder="run -i --rm -e DATABASE_URI crystaldba/postgres-mcp"
+                                  rows="3"
+                                  x-model="modal.argsText"></textarea>
+                        <span class="modal-field-hint">Space-separated or one per line</span>
+                    </label>
+
+                    <div class="dynamic-section">
+                        <div class="dynamic-section-header">
+                            <span class="dynamic-section-title">Environment</span>
+                            <button type="button" class="dynamic-add-btn" @click="addEnv()">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                            </button>
+                        </div>
+                        <template x-for="(env, idx) in modal.env" :key="'env-' + idx">
+                            <div class="dynamic-row dynamic-row-kv">
+                                <input type="text" class="modal-input env-key-input" placeholder="KEY" x-model="modal.env[idx].key">
+                                <span class="dynamic-row-sep">=</span>
+                                <input type="text" class="modal-input env-val-input" placeholder="value" x-model="modal.env[idx].value">
+                                <button type="button" class="dynamic-remove-btn" @click="removeEnv(idx)">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/></svg>
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- HTTP fields -->
+                <div x-show="modal.transport === 'http'" x-transition.opacity>
+                    <label class="modal-field">
+                        <span class="modal-label">URL</span>
+                        <input type="url" class="modal-input" placeholder="https://mcp.example.com/mcp" x-model="modal.url">
+                    </label>
+
+                    <label class="oauth-switch">
+                        <span class="oauth-switch-track" :class="{ active: modal.oauthEnabled }">
+                            <span class="oauth-switch-thumb"></span>
+                        </span>
+                        <input type="checkbox" x-model="modal.oauthEnabled" hidden>
+                        <span>Requires OAuth</span>
+                    </label>
+
+                    <div x-show="modal.oauthEnabled" x-transition.opacity class="oauth-fields">
+                        <label class="modal-field">
+                            <span class="modal-label">Client ID</span>
+                            <input type="text" class="modal-input" placeholder="OAuth client_id" x-model="modal.oauth.client_id">
+                        </label>
+                        <label class="modal-field">
+                            <span class="modal-label">Client Secret</span>
+                            <input type="password" class="modal-input" placeholder="OAuth client_secret" x-model="modal.oauth.client_secret">
+                        </label>
+                        <label class="modal-field">
+                            <span class="modal-label">Scope <span class="optional-hint">(optional)</span></span>
+                            <input type="text" class="modal-input" placeholder="e.g. read write" x-model="modal.oauth.scope">
+                        </label>
+                    </div>
+                </div>
+
+                <div x-show="modal.error" class="modal-error" x-text="modal.error" x-transition.opacity></div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn-modal-cancel" @click="closeModal()">Cancel</button>
+                <button type="button" class="btn-modal-submit" :disabled="modal.saving" @click="saveTarget()">
+                    <span x-show="!modal.saving" x-text="modal.mode === 'add' ? 'Connect' : 'Save & Reconnect'"></span>
+                    <span x-show="modal.saving" class="btn-loading">
+                        <span class="spinner spinner-sm"></span>
+                        Connecting...
+                    </span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Integration Helper Modal -->
+    <div x-show="integration.visible" class="modal-backdrop" @keydown.escape.window="closeIntegration()"
+         x-transition:enter="modal-enter" x-transition:enter-start="modal-enter-from" x-transition:enter-end="modal-enter-to"
+         x-transition:leave="modal-leave" x-transition:leave-start="modal-leave-from" x-transition:leave-end="modal-leave-to"
+         style="display: none;">
+        <div class="modal modal-target modal-integration" @click.outside="closeIntegration()">
+            <div class="modal-header-bar">
+                <h3>Connect to <span x-text="integration.targetName"></span></h3>
+                <button class="modal-close-btn" @click="closeIntegration()" title="Close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <div class="integration-agents">
+                    <template x-for="a in agents" :key="a.id">
+                        <button class="integration-agent-btn" :class="{ active: integration.agent === a.id }"
+                                @click="integration.agent = a.id; integration.copied = false; integration.mode = hasCli() ? 'cli' : 'json'"
+                                x-text="a.label"></button>
+                    </template>
+                </div>
+
+                <div class="response-tabs" style="margin-bottom: 0;">
+                    <button x-show="hasCli()" class="response-tab" :class="{'response-tab-active': integration.mode === 'cli'}" @click="integration.mode = 'cli'; integration.copied = false">CLI</button>
+                    <button class="response-tab" :class="{'response-tab-active': integration.mode === 'json'}" @click="integration.mode = 'json'; integration.copied = false">JSON</button>
+                </div>
+
+                <div class="integration-snippet" style="border-top-left-radius: 0; border-top-right-radius: 0;">
+                    <button class="integration-copy-btn" :class="{ copied: integration.copied }" @click="copySnippet()"
+                            x-text="integration.copied ? 'Copied!' : 'Copy'"></button>
+                    <pre x-text="integration.mode === 'cli' ? getCliSnippet() : getSnippet()"></pre>
+                </div>
+
+                <p x-show="integration.mode === 'json'" class="integration-note" x-html="getNote()"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast-container">
+        <template x-for="t in toasts" :key="t.id">
+            <div class="toast" :class="'toast-' + t.type" x-text="t.msg"
+                 x-init="setTimeout(() => toasts = toasts.filter(x => x.id !== t.id), 3000)"></div>
+        </template>
+    </div>
 </div>
 
 <script>
@@ -51,6 +268,47 @@ function targetsPage() {
     return {
         targets: [],
         loading: true,
+        toasts: [],
+        _mcpPortCache: null,
+
+        agents: [
+            { id: 'claude-code', label: 'Claude Code' },
+            { id: 'cursor', label: 'Cursor' },
+            { id: 'vscode', label: 'VS Code' },
+            { id: 'windsurf', label: 'Windsurf' },
+            { id: 'jetbrains', label: 'JetBrains' },
+            { id: 'codex', label: 'Codex' },
+            { id: 'opencode', label: 'OpenCode' },
+        ],
+
+        integration: {
+            visible: false,
+            targetName: '',
+            mcpPort: 9474,
+            agent: 'claude-code',
+            mode: 'cli',
+            copied: false,
+        },
+
+        modal: {
+            visible: false,
+            mode: 'add',
+            editId: null,
+            name: '',
+            transport: 'stdio',
+            command: '',
+            argsText: '',
+            env: [{ key: '', value: '' }],
+            url: '',
+            oauthEnabled: false,
+            oauth: { client_id: '', client_secret: '', scope: '' },
+            saving: false,
+            error: null,
+        },
+
+        showToast(msg, type = 'success') {
+            this.toasts.push({ id: Date.now(), msg, type });
+        },
 
         async init() {
             try {
@@ -64,6 +322,228 @@ function targetsPage() {
             if (!res.ok) throw new Error('Failed to load targets');
             const data = await res.json();
             this.targets = data.targets;
+        },
+
+        openAddModal() {
+            this.modal = {
+                visible: true,
+                mode: 'add',
+                editId: null,
+                name: '',
+                transport: 'stdio',
+                command: '',
+                argsText: '',
+                env: [{ key: '', value: '' }],
+                url: '',
+                oauthEnabled: false,
+                oauth: { client_id: '', client_secret: '', scope: '' },
+                saving: false,
+                error: null,
+            };
+        },
+
+        async openEditModal(target) {
+            try {
+                const res = await fetch(`/api/targets/custom/${encodeURIComponent(target.name)}`);
+                if (!res.ok) {
+                    this.showToast('Failed to load server config', 'error');
+                    return;
+                }
+                const data = await res.json();
+                const config = data.config;
+                this.modal = {
+                    visible: true,
+                    mode: 'edit',
+                    editId: data.id,
+                    name: data.name,
+                    transport: config.transport || 'stdio',
+                    command: config.command || '',
+                    argsText: (config.args || []).join(' '),
+                    env: config.env ? Object.entries(config.env).map(([k, v]) => ({ key: k, value: v })) : [{ key: '', value: '' }],
+                    url: config.url || '',
+                    oauthEnabled: !!config.oauth,
+                    oauth: config.oauth ? { client_id: config.oauth.client_id || '', client_secret: config.oauth.client_secret || '', scope: config.oauth.scope || '' } : { client_id: '', client_secret: '', scope: '' },
+                    saving: false,
+                    error: null,
+                };
+            } catch (e) {
+                this.showToast('Network error: ' + e.message, 'error');
+            }
+        },
+
+        closeModal() {
+            this.modal.visible = false;
+        },
+
+        addEnv() { this.modal.env.push({ key: '', value: '' }); },
+        removeEnv(idx) {
+            this.modal.env.splice(idx, 1);
+            if (this.modal.env.length === 0) this.modal.env.push({ key: '', value: '' });
+        },
+
+        async saveTarget() {
+            this.modal.saving = true;
+            this.modal.error = null;
+
+            const payload = { name: this.modal.name, transport: this.modal.transport };
+            if (this.modal.transport === 'stdio') {
+                payload.command = this.modal.command;
+                payload.args = this.modal.argsText.trim().split(/\s+/).filter(Boolean);
+                const envObj = {};
+                this.modal.env.forEach(e => { if (e.key.trim()) envObj[e.key.trim()] = e.value; });
+                payload.env = envObj;
+            } else {
+                payload.url = this.modal.url;
+                if (this.modal.oauthEnabled) {
+                    payload.oauth = { ...this.modal.oauth };
+                }
+            }
+
+            let url, method;
+            if (this.modal.mode === 'add') {
+                url = '/api/targets/custom';
+                method = 'POST';
+            } else {
+                url = `/api/targets/custom/${encodeURIComponent(this.modal.editId)}/update`;
+                method = 'POST';
+            }
+
+            try {
+                const res = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    this.modal.error = data.error || 'Failed to save server';
+                } else {
+                    this.modal.visible = false;
+                    if (data.connected) {
+                        this.showToast(`${this.modal.name} connected successfully`);
+                    } else {
+                        this.showToast(`${this.modal.name} saved but failed to connect: ${data.error || 'unknown'}`, 'error');
+                    }
+                    await this.loadTargets();
+                }
+            } catch (e) {
+                this.modal.error = 'Network error: ' + e.message;
+            }
+            this.modal.saving = false;
+        },
+
+        async openIntegration(target) {
+            if (!this._mcpPortCache) {
+                try {
+                    const r = await fetch('/api/config');
+                    const data = await r.json();
+                    this._mcpPortCache = data.mcp_port;
+                } catch { this._mcpPortCache = 9474; }
+            }
+            this.integration = {
+                visible: true,
+                targetName: target.name,
+                mcpPort: this._mcpPortCache,
+                agent: 'claude-code',
+                mode: 'cli',
+                copied: false,
+            };
+        },
+
+        closeIntegration() {
+            this.integration.visible = false;
+        },
+
+        integrationUrl() {
+            return `http://localhost:${this.integration.mcpPort}/${this.integration.targetName}/mcp`;
+        },
+
+        hasCli() {
+            return ['claude-code', 'codex'].includes(this.integration.agent);
+        },
+
+        getCliSnippet() {
+            const url = this.integrationUrl();
+            const name = `maskit-${this.integration.targetName}`;
+            switch (this.integration.agent) {
+                case 'claude-code':
+                    return `claude mcp add --scope project ${name} --transport http ${url}`;
+                case 'codex':
+                    return `codex --mcp-config mcp.json`;
+                default:
+                    return '';
+            }
+        },
+
+        getSnippet() {
+            const url = this.integrationUrl();
+            const name = this.integration.targetName;
+            switch (this.integration.agent) {
+                case 'claude-code':
+                    return JSON.stringify({ mcpServers: { [name]: { type: 'streamable-http', url } } }, null, 2);
+                case 'cursor':
+                    return JSON.stringify({ mcpServers: { [name]: { url } } }, null, 2);
+                case 'vscode':
+                    return JSON.stringify({ servers: { [name]: { type: 'http', url } } }, null, 2);
+                case 'windsurf':
+                    return JSON.stringify({ mcpServers: { [name]: { serverUrl: url } } }, null, 2);
+                case 'jetbrains':
+                    return JSON.stringify({ servers: { [name]: { type: 'http', url } } }, null, 2);
+                case 'codex':
+                    return JSON.stringify({ mcpServers: { [name]: { type: 'url', url } } }, null, 2);
+                case 'opencode':
+                    return JSON.stringify({ mcp: { servers: { [name]: { type: 'streamable-http', url } } } }, null, 2);
+                default:
+                    return '';
+            }
+        },
+
+        getNote() {
+            switch (this.integration.agent) {
+                case 'claude-code':
+                    return 'Add to <code>.mcp.json</code> in your project root, or <code>~/.claude.json</code> globally.';
+                case 'cursor':
+                    return 'Add to <code>.cursor/mcp.json</code> in your project root.';
+                case 'vscode':
+                    return 'Add to <code>.vscode/mcp.json</code> in your workspace.';
+                case 'windsurf':
+                    return 'Add to <code>~/.codeium/windsurf/mcp_config.json</code>.';
+                case 'jetbrains':
+                    return 'Go to <code>Settings &gt; Tools &gt; AI Assistant &gt; MCP Servers</code>, click \'+\', select \'As JSON\', and paste.';
+                case 'codex':
+                    return 'Add to <code>~/.codex/config.json</code> or pass via <code>--mcp-config</code>.';
+                case 'opencode':
+                    return 'Add to your <code>opencode.json</code> config file.';
+                default:
+                    return '';
+            }
+        },
+
+        async copySnippet() {
+            try {
+                const text = this.integration.mode === 'cli' ? this.getCliSnippet() : this.getSnippet();
+                await navigator.clipboard.writeText(text);
+                this.integration.copied = true;
+                setTimeout(() => this.integration.copied = false, 2000);
+            } catch {
+                this.showToast('Failed to copy to clipboard', 'error');
+            }
+        },
+
+        async deleteTarget(target) {
+            if (!confirm(`Delete "${target.name}"? This will disconnect and remove this server.`)) return;
+            try {
+                const res = await fetch(`/api/targets/custom/${encodeURIComponent(target.name)}/delete`, { method: 'POST' });
+                if (res.ok) {
+                    this.showToast(`${target.name} deleted`);
+                    await this.loadTargets();
+                } else {
+                    const data = await res.json();
+                    this.showToast(data.error || 'Delete failed', 'error');
+                }
+            } catch (e) {
+                this.showToast('Network error: ' + e.message, 'error');
+            }
         },
     };
 }

@@ -8,7 +8,7 @@ import pytest_asyncio
 
 from maskit.masking.engine import MaskingEngine
 from maskit.masking.mappers import ResponseMapper
-from maskit.masking.rules import MaskingRule, get_nested_value, set_nested_value
+from maskit.masking.rules import MaskingRule, delete_nested_value, get_nested_value, set_nested_value
 from maskit.masking.store import MaskingStore
 
 
@@ -276,3 +276,106 @@ class TestPythonReprMasking:
         result = {"content": [{"type": "image", "data": "base64stuff"}]}
         masked = engine.mask_response("get_connection", result)
         assert masked["content"][0] == {"type": "image", "data": "base64stuff"}
+
+
+class TestDeleteNestedValue:
+    def test_delete_simple(self):
+        data = {"host": "mydb.com", "port": 5432}
+        assert delete_nested_value(data, "host")
+        assert "host" not in data
+        assert data["port"] == 5432
+
+    def test_delete_nested(self):
+        data = {"connection": {"password": "secret", "host": "db.com"}}
+        assert delete_nested_value(data, "connection.password")
+        assert "password" not in data["connection"]
+        assert data["connection"]["host"] == "db.com"
+
+    def test_delete_missing_returns_false(self):
+        data = {"foo": "bar"}
+        assert not delete_nested_value(data, "missing")
+
+    def test_delete_missing_nested_returns_false(self):
+        data = {"foo": {"bar": "baz"}}
+        assert not delete_nested_value(data, "foo.missing")
+
+
+class TestStripAction:
+    @pytest.mark.anyio
+    async def test_strip_removes_field_from_structured_content(self, store):
+        rules = [
+            MaskingRule(tool_name="get_user", field_path="ssn", action="strip"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {"name": "Alice", "ssn": "123-45-6789", "email": "a@b.com"}
+        }
+        masked = engine.mask_response("get_user", result)
+        assert "ssn" not in masked["structuredContent"]
+        assert masked["structuredContent"]["name"] == "Alice"
+        assert masked["structuredContent"]["email"] == "a@b.com"
+
+    @pytest.mark.anyio
+    async def test_strip_removes_field_from_text_json(self, store):
+        rules = [
+            MaskingRule(tool_name="get_user", field_path="secret", action="strip"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "content": [{"type": "text", "text": '{"name": "Bob", "secret": "hunter2"}'}]
+        }
+        masked = engine.mask_response("get_user", result)
+        parsed = json.loads(masked["content"][0]["text"])
+        assert "secret" not in parsed
+        assert parsed["name"] == "Bob"
+
+    @pytest.mark.anyio
+    async def test_strip_creates_no_alias(self, store):
+        rules = [
+            MaskingRule(tool_name="get_user", field_path="ssn", action="strip"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {"name": "Alice", "ssn": "123-45-6789"}
+        }
+        engine.mask_response("get_user", result)
+        assert len(engine.alias_cache) == 0
+        assert not engine.has_pending_writes
+
+    @pytest.mark.anyio
+    async def test_strip_nested_field(self, store):
+        rules = [
+            MaskingRule(tool_name="*", field_path="user.internal_id", action="strip"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {"user": {"name": "Alice", "internal_id": "abc123"}}
+        }
+        masked = engine.mask_response("any_tool", result)
+        assert "internal_id" not in masked["structuredContent"]["user"]
+        assert masked["structuredContent"]["user"]["name"] == "Alice"
+
+    @pytest.mark.anyio
+    async def test_strip_and_mask_combined(self, store):
+        rules = [
+            MaskingRule(tool_name="*", field_path="password", action="strip"),
+            MaskingRule(tool_name="*", field_path="host", alias_prefix="host"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {"host": "prod.db.com", "password": "secret123", "port": 5432}
+        }
+        masked = engine.mask_response("get_conn", result)
+        assert "password" not in masked["structuredContent"]
+        assert masked["structuredContent"]["host"] == "host_1"
+        assert masked["structuredContent"]["port"] == 5432

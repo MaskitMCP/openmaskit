@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
-import anyio
 import httpx
-import uvicorn
 
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from maskit.models import UpstreamHttpConfig, UpstreamStdioConfig
+
+if TYPE_CHECKING:
+    from maskit.oauth.handler import OAuthCallbackServer
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -23,6 +27,8 @@ async def connect_upstream(
     store_path: str = "~/.maskit/store.db",
     errlog: TextIO = sys.stderr,
     extra_env: dict[str, str] | None = None,
+    server_id: str | None = None,
+    callback_server: "OAuthCallbackServer | None" = None,
 ):
     """Connect to the upstream MCP server. Yields (read_stream, write_stream)."""
     if isinstance(upstream, UpstreamStdioConfig):
@@ -42,37 +48,26 @@ async def connect_upstream(
         if upstream.oauth:
             from maskit.oauth.handler import create_oauth_provider
 
-            oauth_store_path = Path(store_path).expanduser().parent / "oauth_tokens.json"
-            provider, callback_server = create_oauth_provider(
-                upstream.url, upstream.oauth, oauth_store_path
+            oauth_dir = Path(store_path).expanduser().parent / "oauth"
+            oauth_dir.mkdir(parents=True, exist_ok=True)
+            name = server_id or upstream.url.replace("https://", "").replace("/", "_")
+            oauth_store_path = oauth_dir / f"{name}.json"
+
+            provider = create_oauth_provider(
+                upstream.url,
+                upstream.oauth,
+                oauth_store_path,
+                callback_server=callback_server,
             )
 
-            # Start the callback server so it can receive the OAuth redirect
-            callback_app = callback_server.create_app()
-            uvicorn_config = uvicorn.Config(
-                callback_app,
-                host="127.0.0.1",
-                port=upstream.oauth.callback_port,
-                log_level="warning",
-                log_config=None,
-            )
-            callback_web_server = uvicorn.Server(uvicorn_config)
+            http_client = httpx.AsyncClient(auth=provider)
+            async with http_client:
+                async with streamable_http_client(
+                    upstream.url, http_client=http_client
+                ) as (read_stream, write_stream, _get_session_id):
+                    yield read_stream, write_stream
 
-            async with anyio.create_task_group() as oauth_tg:
-                oauth_tg.start_soon(callback_web_server.serve)
-                await anyio.sleep(0.3)  # Let server bind
-
-                http_client = httpx.AsyncClient(auth=provider)
-                async with http_client:
-                    async with streamable_http_client(
-                        upstream.url, http_client=http_client
-                    ) as (read_stream, write_stream, _get_session_id):
-                        yield read_stream, write_stream
-
-                callback_web_server.should_exit = True
-                oauth_tg.cancel_scope.cancel()
         else:
-            # No OAuth, plain HTTP connection
             async with streamable_http_client(upstream.url) as (
                 read_stream,
                 write_stream,

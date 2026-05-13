@@ -112,12 +112,9 @@ async def mappers_create(request: Request):
         config=config,
     )
 
-    mapper_id = await target.engine._store.add_mapper(mapper, target_name=target_name)
+    mapper_id = await target.engine.store.add_mapper(mapper, target_name=target_name)
     mapper.id = mapper_id
-
-    target.engine._mappers.append(mapper)
-    if mapper_type == "regex_replace":
-        target.engine._compiled_patterns[mapper_id] = re.compile(pattern)
+    target.engine.add_mapper(mapper)
 
     return JSONResponse(
         {
@@ -156,7 +153,7 @@ async def mappers_update(request: Request):
     if len(alias_prefix) > MAX_PREFIX_LENGTH:
         return JSONResponse({"error": f"alias_prefix too long (max {MAX_PREFIX_LENGTH})"}, status_code=400)
 
-    mapper = next((m for m in target.engine._mappers if m.id == mapper_id), None)
+    mapper = target.engine.get_mapper(mapper_id)
     if mapper is None:
         return JSONResponse({"error": "Mapper not found"}, status_code=404)
 
@@ -172,14 +169,11 @@ async def mappers_update(request: Request):
         if not _validate_dot_path(pattern):
             return JSONResponse({"error": "Invalid dot-notation path"}, status_code=400)
 
-    updated = await target.engine._store.update_mapper(mapper_id, pattern, alias_prefix)
+    updated = await target.engine.store.update_mapper(mapper_id, pattern, alias_prefix)
     if not updated:
         return JSONResponse({"error": "Mapper not found"}, status_code=404)
 
-    mapper.pattern = pattern
-    mapper.alias_prefix = alias_prefix
-    if mapper.mapper_type == "regex_replace":
-        target.engine._compiled_patterns[mapper_id] = re.compile(pattern)
+    target.engine.update_mapper_pattern(mapper_id, pattern, alias_prefix)
 
     return JSONResponse({"ok": True})
 
@@ -195,12 +189,11 @@ async def mappers_delete(request: Request):
         mapper_id = int(request.path_params["mapper_id"])
     except (ValueError, TypeError):
         return JSONResponse({"error": "Invalid mapper_id"}, status_code=400)
-    deleted = await target.engine._store.delete_mapper(mapper_id)
+    deleted = await target.engine.store.delete_mapper(mapper_id)
     if not deleted:
         return JSONResponse({"error": "Mapper not found"}, status_code=404)
 
-    target.engine._mappers = [m for m in target.engine._mappers if m.id != mapper_id]
-    target.engine._compiled_patterns.pop(mapper_id, None)
+    target.engine.remove_mapper(mapper_id)
 
     return JSONResponse({"ok": True})
 
@@ -260,15 +253,15 @@ async def mappers_reorder(request: Request):
     if not mapper_ids:
         return JSONResponse({"error": "mapper_ids is required"}, status_code=400)
 
-    await target.engine._store.reorder_mappers(mapper_ids)
+    await target.engine.store.reorder_mappers(mapper_ids)
 
     for idx, mid in enumerate(mapper_ids):
-        for m in target.engine._mappers:
+        for m in target.engine.mappers:
             if m.id == mid:
                 m.order = idx
                 break
 
-    target.engine._mappers.sort(key=lambda m: m.order)
+    target.engine.mappers.sort(key=lambda m: m.order)
     return JSONResponse({"ok": True})
 
 

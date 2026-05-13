@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -72,9 +73,10 @@ class TargetState:
     engine: MaskingEngine
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     hidden_tools: set[str] = field(default_factory=set)
-    traffic_log: list[dict[str, Any]] = field(default_factory=list)
+    traffic_log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
+    traffic_events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
     response_dispatcher: ResponseDispatcher = field(default_factory=ResponseDispatcher)
-    pending_tool_calls: dict[str | int, str] = field(default_factory=dict)
+    pending_tool_calls: dict[str | int, dict[str, Any]] = field(default_factory=dict)
     pending_requests: dict[str | int, str] = field(default_factory=dict)
     initialized: bool = False
     init_result: dict[str, Any] | None = None
@@ -84,11 +86,16 @@ class TargetState:
     def cache_tool_schemas(self, schemas: list[dict[str, Any]]):
         self.tool_schemas = schemas
 
-    def log_traffic(self, direction: str, method: str, data: dict[str, Any] | None = None):
-        entry = {"direction": direction, "method": method, "data": data}
+    def log_traffic_entry(self, entry: dict[str, Any]):
         self.traffic_log.append(entry)
-        if len(self.traffic_log) > 1000:
-            self.traffic_log = self.traffic_log[-500:]
+        self.traffic_events.append({"type": "new", "entry": entry})
+
+    def update_traffic_entry(self, entry_id: str, updates: dict[str, Any]):
+        for entry in reversed(self.traffic_log):
+            if entry.get("id") == entry_id:
+                entry.update(updates)
+                break
+        self.traffic_events.append({"type": "update", "id": entry_id, "updates": updates})
 
 
 class ProxyState:
@@ -97,6 +104,10 @@ class ProxyState:
     def __init__(self):
         self.targets: dict[str, TargetState] = {}
         self.store: MaskingStore | None = None
+        self.target_manager: Any | None = None
+        self.callback_server: Any | None = None
+        self.config_target_ids: set[str] = set()
+        self.mcp_port: int = 9474
 
     def get_target(self, name: str) -> TargetState | None:
         return self.targets.get(name)
@@ -104,21 +115,6 @@ class ProxyState:
     @property
     def target_names(self) -> list[str]:
         return list(self.targets.keys())
-
-
-async def _fetch_tool_schemas(
-    us_write: MemoryObjectSendStream[SessionMessage],
-    target: TargetState,
-):
-    """Send a tools/list request upstream to populate the web UI."""
-    tools_req = JSONRPCRequest(
-        method="tools/list",
-        id="__maskit_tools_list__",
-        jsonrpc="2.0",
-    )
-    msg = SessionMessage(message=JSONRPCMessage(root=tools_req))
-    await us_write.send(msg)
-    logger.info("[%s] Sent tools/list request to upstream", target.name)
 
 
 async def _bootstrap_upstream(
@@ -193,15 +189,16 @@ async def run_proxy_for_target(
     us_write: MemoryObjectSendStream[SessionMessage],
 ):
     """Run the proxy relay for a single target."""
-    try:
-        logger.info("[%s] Bootstrapping upstream session...", target.name)
-        with anyio.fail_after(30):
-            await _bootstrap_upstream(us_read, us_write, target)
-        logger.info("[%s] Bootstrap complete — %d tools cached", target.name, len(target.tool_schemas))
-    except TimeoutError:
-        logger.warning("[%s] Timed out bootstrapping upstream — tools will appear after first client connects", target.name)
-    except Exception as exc:
-        logger.error("[%s] Bootstrap failed: %s", target.name, exc, exc_info=True)
+    if not target.initialized:
+        try:
+            logger.info("[%s] Bootstrapping upstream session...", target.name)
+            with anyio.fail_after(30):
+                await _bootstrap_upstream(us_read, us_write, target)
+            logger.info("[%s] Bootstrap complete — %d tools cached", target.name, len(target.tool_schemas))
+        except TimeoutError:
+            logger.warning("[%s] Timed out bootstrapping upstream — tools will appear after first client connects", target.name)
+        except Exception as exc:
+            logger.error("[%s] Bootstrap failed: %s", target.name, exc, exc_info=True)
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(_relay_downstream_to_upstream, target, us_write)
@@ -232,7 +229,6 @@ async def _relay_upstream_to_downstream(
     us_write: MemoryObjectSendStream[SessionMessage],
 ):
     """Relay messages from upstream (real MCP server) to downstream (HTTP clients)."""
-    _needs_tools_fetch = False
     try:
         async for msg in us_read:
             if isinstance(msg, Exception):
@@ -245,10 +241,6 @@ async def _relay_upstream_to_downstream(
                 if isinstance(root, JSONRPCResponse) and root.id is not None:
                     if target.response_dispatcher.dispatch(root.id, modified):
                         continue
-
-            if _needs_tools_fetch:
-                _needs_tools_fetch = False
-                await _fetch_tool_schemas(us_write, target)
     except (anyio.ClosedResourceError, anyio.EndOfStream):
         pass
 
@@ -275,7 +267,19 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
 
         if tool_name in target.hidden_tools:
             logger.info("[%s] Blocked call to hidden tool: %s", target.name, tool_name)
-            target.log_traffic("blocked", "tools/call", {"tool": tool_name})
+            target.log_traffic_entry({
+                "id": str(time.time_ns()),
+                "type": "blocked",
+                "tool_name": tool_name,
+                "timestamp": time.time(),
+                "duration_ms": None,
+                "status": "blocked",
+                "masked_args": None,
+                "unmasked_fields": [],
+                "masked_response_fields": [],
+                "response_preview": None,
+                "reason": "hidden_tool",
+            })
             error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
                 jsonrpc="2.0",
                 id=root.id,
@@ -284,19 +288,68 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
             target.response_dispatcher.dispatch(root.id, error_response)
             return None
 
-        target.pending_tool_calls[root.id] = tool_name
-        target.log_traffic("request", method, {"tool": tool_name})
+        request_ts = time.time()
+        entry_id = str(time.time_ns())
+        masked_args = None
+        unmasked_fields = []
 
         if target.engine:
             arguments = params.get("arguments")
             if arguments and isinstance(arguments, dict):
+                masked_args = dict(arguments)
                 unmasked = target.engine.unmask_arguments(tool_name, arguments)
                 if unmasked != arguments:
-                    masked_args = ", ".join(f"{v}" for v in arguments.values())
-                    real_args = ", ".join(f"{v}" for v in unmasked.values())
-                    logger.info("[%s] Received tool call: %s(%s)", target.name, tool_name, masked_args)
-                    logger.info("[%s] Translating to:    %s(%s)", target.name, tool_name, real_args)
+                    unmasked_fields = [k for k in arguments if arguments.get(k) != unmasked.get(k)]
+                    masked_str = ", ".join(f"{v}" for v in arguments.values())
+                    real_str = ", ".join(f"{v}" for v in unmasked.values())
+                    logger.info("[%s] Received tool call: %s(%s)", target.name, tool_name, masked_str)
+                    logger.info("[%s] Translating to:    %s(%s)", target.name, tool_name, real_str)
                 params["arguments"] = unmasked
+
+                violation = target.engine.check_guardrails(tool_name, params["arguments"])
+                if violation:
+                    logger.info("[%s] Guardrail blocked %s: %s", target.name, tool_name, violation)
+                    target.log_traffic_entry({
+                        "id": entry_id,
+                        "type": "blocked",
+                        "tool_name": tool_name,
+                        "timestamp": request_ts,
+                        "duration_ms": (time.time() - request_ts) * 1000,
+                        "status": "blocked",
+                        "masked_args": masked_args,
+                        "unmasked_fields": unmasked_fields,
+                        "masked_response_fields": [],
+                        "response_preview": None,
+                        "reason": violation,
+                    })
+                    error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
+                        jsonrpc="2.0",
+                        id=root.id,
+                        error=ErrorData(code=-32602, message=violation),
+                    )))
+                    target.response_dispatcher.dispatch(root.id, error_response)
+                    return None
+
+                params["arguments"] = target.engine.apply_injections(tool_name, params["arguments"])
+
+        target.pending_tool_calls[root.id] = {
+            "tool_name": tool_name,
+            "entry_id": entry_id,
+            "timestamp": request_ts,
+        }
+        target.log_traffic_entry({
+            "id": entry_id,
+            "type": "tool_call",
+            "tool_name": tool_name,
+            "timestamp": request_ts,
+            "duration_ms": None,
+            "status": "pending",
+            "masked_args": masked_args,
+            "unmasked_fields": unmasked_fields,
+            "masked_response_fields": [],
+            "response_preview": None,
+            "reason": None,
+        })
 
     return msg
 
@@ -337,19 +390,62 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
                 target.cache_tool_schemas(tools)
                 if target.hidden_tools:
                     result["tools"] = [t for t in tools if t.get("name") not in target.hidden_tools]
-                target.log_traffic("response", "tools/list", {"count": len(result["tools"])})
+                target.log_traffic_entry({
+                    "id": str(time.time_ns()),
+                    "type": "tools_list",
+                    "tool_name": None,
+                    "timestamp": time.time(),
+                    "duration_ms": None,
+                    "status": "complete",
+                    "masked_args": None,
+                    "unmasked_fields": [],
+                    "masked_response_fields": [],
+                    "response_preview": f"{len(result['tools'])} tools",
+                    "reason": None,
+                })
         return msg
 
     # Check if this is a response to a tools/call request
     if request_id in target.pending_tool_calls:
-        tool_name = target.pending_tool_calls.pop(request_id)
-        target.log_traffic("response", "tools/call", {"tool": tool_name})
+        pending = target.pending_tool_calls.pop(request_id)
+        tool_name = pending["tool_name"]
+        entry_id = pending["entry_id"]
+        request_ts = pending["timestamp"]
+
+        duration_ms = (time.time() - request_ts) * 1000
+        masked_response_fields = []
+
+        # Extract original response preview BEFORE masking
+        original_preview = None
+        if result and isinstance(result, dict):
+            for block in result.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+                    original_preview = block["text"][:200]
+                    break
 
         if target.engine and result:
-            pending_before = len(target.engine._pending_writes)
+            pending_before = target.engine.pending_writes_count
             root.result = target.engine.mask_response(tool_name, result)
-            new_masks = target.engine._pending_writes[pending_before:]
+            new_masks = target.engine.get_new_masks_since(pending_before)
+            masked_response_fields = [field_path for _, _, _, field_path in new_masks]
             for alias, real_value, _, field_path in new_masks:
                 logger.info("[%s] Masked %s.%s: %s → %s", target.name, tool_name, field_path, real_value, alias)
+
+        # Extract masked response preview (what the agent sees)
+        masked_preview = None
+        masked_result = root.result if root.result else result
+        if masked_result and isinstance(masked_result, dict):
+            for block in masked_result.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+                    masked_preview = block["text"][:200]
+                    break
+
+        target.update_traffic_entry(entry_id, {
+            "status": "complete",
+            "duration_ms": round(duration_ms, 1),
+            "masked_response_fields": masked_response_fields,
+            "response_preview": original_preview,
+            "masked_preview": masked_preview,
+        })
 
     return msg

@@ -4,8 +4,9 @@ from pydantic import BaseModel, Field
 
 
 class HttpOAuthConfig(BaseModel):
-    client_id: str
-    callback_port: int = 3118
+    client_id: str | None = None
+    client_secret: str | None = None
+    scope: str | None = None
 
 
 class UpstreamStdioConfig(BaseModel):
@@ -25,11 +26,29 @@ class MaskingRuleConfig(BaseModel):
     tool_name: str
     field_path: str
     alias_prefix: str | None = None
+    action: str = "mask"
+
+
+class GuardrailConfig(BaseModel):
+    tool_name: str = "*"
+    argument_name: str = "*"
+    match_type: str = "contains"
+    pattern: str
+    message: str = "Blocked by guardrail"
+
+
+class InjectionConfig(BaseModel):
+    tool_name: str = "*"
+    argument_name: str
+    value: str
+    mode: str = "set"
 
 
 class TargetConfig(BaseModel):
     upstream: UpstreamStdioConfig | UpstreamHttpConfig
     rules: list[MaskingRuleConfig] = Field(default_factory=list)
+    guardrails: list[GuardrailConfig] = Field(default_factory=list)
+    injections: list[InjectionConfig] = Field(default_factory=list)
 
 
 class MultiTargetConfig(BaseModel):

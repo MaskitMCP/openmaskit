@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import signal
 import sys
 from contextlib import AsyncExitStack
@@ -17,10 +16,12 @@ from mcp.shared.message import SessionMessage
 
 from maskit.config import load_config
 from maskit.masking.engine import MaskingEngine
-from maskit.masking.rules import MaskingRule
+from maskit.masking.rules import ArgumentGuardrail, ArgumentInjection, MaskingRule
 from maskit.masking.store import MaskingStore
+from maskit.oauth.handler import OAUTH_CALLBACK_PORT, OAuthCallbackServer
 from maskit.proxy.core import ProxyState, TargetState, run_proxy_for_target
 from maskit.proxy.http_downstream import create_mcp_app
+from maskit.proxy.manager import TargetManager, _build_upstream_config
 from maskit.proxy.upstream import connect_upstream
 from maskit.web.app import create_app
 
@@ -31,13 +32,13 @@ async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
     """Periodically flush pending alias writes to the database."""
     while not shutdown_event.is_set():
         await anyio.sleep(1.0)
-        if engine._pending_writes:
+        if engine.has_pending_writes:
             try:
                 await engine.flush_pending()
             except Exception:
                 logger.exception("Failed to flush aliases to database")
     # Final flush on shutdown
-    if engine._pending_writes:
+    if engine.has_pending_writes:
         try:
             await engine.flush_pending()
         except Exception:
@@ -50,6 +51,8 @@ async def async_main():
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         stream=sys.stderr,
     )
+    logging.getLogger("mcp.client.auth").setLevel(logging.DEBUG)
+    logging.getLogger("maskit.proxy.upstream").setLevel(logging.DEBUG)
 
     config_path = Path("maskit.yaml")
     if len(sys.argv) > 1:
@@ -61,6 +64,7 @@ async def async_main():
 
     state = ProxyState()
     state.store = store
+    state.mcp_port = config.mcp_port
 
     # Create per-target state
     for name, target_config in config.targets.items():
@@ -69,6 +73,7 @@ async def async_main():
                 tool_name=r.tool_name,
                 field_path=r.field_path,
                 alias_prefix=r.alias_prefix,
+                action=r.action,
             )
             for r in target_config.rules
         ]
@@ -78,6 +83,19 @@ async def async_main():
         engine = MaskingEngine(rules, store, target_name=name)
         await engine.load_aliases()
         await engine.load_mappers()
+        await engine.load_guardrails()
+        await engine.load_injections()
+
+        for g in target_config.guardrails:
+            engine.add_guardrail(ArgumentGuardrail(
+                tool_name=g.tool_name, argument_name=g.argument_name,
+                match_type=g.match_type, pattern=g.pattern, message=g.message,
+            ))
+        for i in target_config.injections:
+            engine.add_injection(ArgumentInjection(
+                tool_name=i.tool_name, argument_name=i.argument_name,
+                value=i.value, mode=i.mode,
+            ))
 
         hidden = await store.get_hidden_tools(target_name=name)
 
@@ -92,11 +110,54 @@ async def async_main():
         )
         state.targets[name] = target_state
 
+    state.config_target_ids = set(config.targets.keys())
+
+    # Load active marketplace servers from DB
+    marketplace_configs: dict[str, dict] = {}
+    installed = await store.get_installed_servers(active_only=True)
+    for record in installed:
+        server_id = record["id"]
+        if server_id in state.targets:
+            continue
+
+        engine = MaskingEngine([], store, target_name=server_id)
+        await engine.load_aliases()
+        await engine.load_mappers()
+        await engine.load_guardrails()
+        await engine.load_injections()
+        hidden = await store.get_hidden_tools(target_name=server_id)
+        ds_read_send, ds_read_recv = anyio.create_memory_object_stream[SessionMessage | Exception](32)
+
+        target_state = TargetState(
+            name=server_id,
+            engine=engine,
+            hidden_tools=set(hidden),
+            ds_read_send=ds_read_send,
+            ds_read_recv=ds_read_recv,
+        )
+        state.targets[server_id] = target_state
+        marketplace_configs[server_id] = record["config"]
+
     shutdown_event = anyio.Event()
+
+    # Shared OAuth callback server (always running)
+    callback_server = OAuthCallbackServer()
+    callback_app = callback_server.create_app()
+    callback_uvicorn_config = uvicorn.Config(
+        callback_app,
+        host="127.0.0.1",
+        port=OAUTH_CALLBACK_PORT,
+        log_level="warning",
+        log_config=None,
+    )
+    callback_web_server = uvicorn.Server(callback_uvicorn_config)
+    callback_web_server.install_signal_handlers = lambda: None
+    state.callback_server = callback_server
 
     print("Maskit proxy starting", file=sys.stderr)
     print(f"  Dashboard: http://127.0.0.1:{config.web_port}", file=sys.stderr)
-    print("  MCP endpoints:", file=sys.stderr)
+    print(f"  OAuth callback: http://127.0.0.1:{OAUTH_CALLBACK_PORT}/callback", file=sys.stderr)
+    print("  MCP servers:", file=sys.stderr)
     for name in state.target_names:
         print(f"    {name}: http://127.0.0.1:{config.mcp_port}/{name}/mcp", file=sys.stderr)
 
@@ -131,14 +192,37 @@ async def async_main():
                 MemoryObjectSendStream[SessionMessage],
             ]] = {}
 
+            failed_targets = []
             for name, target_state in state.targets.items():
-                target_config = config.targets[name]
-                us_read, us_write = await stack.enter_async_context(
-                    connect_upstream(target_config.upstream, config.store_path, errlog=sys.stderr)
-                )
-                upstream_streams[name] = (us_read, us_write)
+                if name in config.targets:
+                    target_config = config.targets[name]
+                    us_read, us_write = await stack.enter_async_context(
+                        connect_upstream(target_config.upstream, config.store_path,
+                                       errlog=sys.stderr, server_id=name,
+                                       callback_server=callback_server)
+                    )
+                    upstream_streams[name] = (us_read, us_write)
+                elif name in marketplace_configs:
+                    try:
+                        upstream_cfg = _build_upstream_config(marketplace_configs[name])
+                        with anyio.fail_after(15):
+                            us_read, us_write = await stack.enter_async_context(
+                                connect_upstream(upstream_cfg, config.store_path,
+                                               errlog=sys.stderr, server_id=name,
+                                               callback_server=callback_server)
+                            )
+                        upstream_streams[name] = (us_read, us_write)
+                    except Exception as exc:
+                        logger.warning("Failed to connect marketplace server %s: %s", name, exc)
+                        failed_targets.append(name)
+            for name in failed_targets:
+                del state.targets[name]
 
             async with anyio.create_task_group() as tg:
+                manager = TargetManager(state, store, config.store_path,
+                                       callback_server=callback_server)
+                manager.set_task_group(tg, shutdown_event)
+                state.target_manager = manager
 
                 async def _shutdown_on_signal():
                     with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
@@ -147,6 +231,7 @@ async def async_main():
                             shutdown_event.set()
                             web_server.should_exit = True
                             mcp_server.should_exit = True
+                            callback_web_server.should_exit = True
                             for ts in state.targets.values():
                                 if ts.ds_read_send:
                                     await ts.ds_read_send.aclose()
@@ -162,6 +247,7 @@ async def async_main():
 
                 tg.start_soon(web_server.serve)
                 tg.start_soon(mcp_server.serve)
+                tg.start_soon(callback_web_server.serve)
 
     except Exception as exc:
         print(f"Error: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -181,9 +267,7 @@ def main():
         print(f"Fatal error: {exc}", file=sys.stderr)
         import traceback
         traceback.print_exc(file=sys.stderr)
-        os._exit(1)
-    finally:
-        os._exit(0)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

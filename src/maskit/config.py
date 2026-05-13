@@ -5,6 +5,8 @@ from pathlib import Path
 import yaml
 
 from maskit.models import (
+    GuardrailConfig,
+    InjectionConfig,
     MaskingRuleConfig,
     MultiTargetConfig,
     TargetConfig,
@@ -27,17 +29,24 @@ def load_config(path: Path | None = None) -> MultiTargetConfig:
     if path is None:
         path = Path("maskit.yaml")
     if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+        return MultiTargetConfig(
+            targets={},
+            web_port=9473,
+            mcp_port=9474,
+            store_path="~/.maskit/store.db",
+        )
 
     with open(path) as f:
-        raw = yaml.safe_load(f)
+        raw = yaml.safe_load(f) or {}
 
     if "targets" in raw:
         targets = {}
         for name, target_raw in raw["targets"].items():
             upstream = _parse_upstream(target_raw.get("upstream", {}))
             rules = [MaskingRuleConfig(**r) for r in target_raw.get("rules", [])]
-            targets[name] = TargetConfig(upstream=upstream, rules=rules)
+            guardrails = [GuardrailConfig(**g) for g in target_raw.get("guardrails", [])]
+            injections = [InjectionConfig(**i) for i in target_raw.get("injections", [])]
+            targets[name] = TargetConfig(upstream=upstream, rules=rules, guardrails=guardrails, injections=injections)
         return MultiTargetConfig(
             targets=targets,
             web_port=raw.get("web_port", 9473),
@@ -46,9 +55,19 @@ def load_config(path: Path | None = None) -> MultiTargetConfig:
         )
 
     # Legacy single-upstream format — wrap as target "default"
-    upstream = _parse_upstream(raw.get("upstream", {}))
+    if "upstream" not in raw:
+        return MultiTargetConfig(
+            targets={},
+            web_port=raw.get("web_port", 9473),
+            mcp_port=raw.get("mcp_port", 9474),
+            store_path=raw.get("store_path", "~/.maskit/store.db"),
+        )
+
+    upstream = _parse_upstream(raw["upstream"])
     rules = [MaskingRuleConfig(**r) for r in raw.get("rules", [])]
-    target = TargetConfig(upstream=upstream, rules=rules)
+    guardrails = [GuardrailConfig(**g) for g in raw.get("guardrails", [])]
+    injections = [InjectionConfig(**i) for i in raw.get("injections", [])]
+    target = TargetConfig(upstream=upstream, rules=rules, guardrails=guardrails, injections=injections)
     return MultiTargetConfig(
         targets={"default": target},
         web_port=raw.get("web_port", 9473),

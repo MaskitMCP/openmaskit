@@ -5,15 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Maskit - Tool</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
 <div x-data="toolDetail()" x-init="init()">
     <header>
         <h1><img src="/static/icon.png" alt="" class="header-icon">Maskit</h1>
         <nav>
-            <a href="/">Targets</a>
+            <a href="/">Servers</a>
+            <a href="/marketplace">Marketplace</a>
             <span class="nav-sep">/</span>
             <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools'" x-text="targetName"></a>
             <span class="nav-sep">/</span>
@@ -22,7 +26,15 @@
     </header>
 
     <main>
+        <div x-show="pageLoading" class="loading-overlay">
+            <span class="spinner"></span> Loading...
+        </div>
+
         <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools'" class="back-link">&larr; Back to Tools</a>
+
+        <div x-show="pageError" class="try-error" style="margin-bottom: 1rem;">
+            <pre x-text="pageError"></pre>
+        </div>
 
         <div class="tool-detail-header">
             <h2 x-text="tool ? tool.name : 'Loading...'"></h2>
@@ -131,6 +143,7 @@
                     <thead>
                         <tr>
                             <th>Field Path</th>
+                            <th>Action</th>
                             <th>Alias Prefix</th>
                             <th>Scope</th>
                             <th></th>
@@ -140,9 +153,11 @@
                         <template x-for="rule in toolRules" :key="rule.id">
                             <tr>
                                 <td><code x-text="rule.field_path"></code></td>
+                                <td><span class="badge-tool" x-text="rule.action || 'mask'"></span></td>
                                 <td>
-                                    <span x-show="editingRule?.id !== rule.id" x-text="rule.alias_prefix || ('_masked_' + rule.field_path.split('.').pop())"></span>
-                                    <input x-show="editingRule?.id === rule.id" type="text" class="edit-input" x-model="editingRule.alias_prefix" @keydown.enter="saveEditRule()" @keydown.escape="cancelEditRule()">
+                                    <span x-show="(rule.action || 'mask') === 'strip'">—</span>
+                                    <span x-show="(rule.action || 'mask') !== 'strip' && editingRule?.id !== rule.id" x-text="rule.alias_prefix || ('_masked_' + rule.field_path.split('.').pop())"></span>
+                                    <input x-show="(rule.action || 'mask') !== 'strip' && editingRule?.id === rule.id" type="text" class="edit-input" x-model="editingRule.alias_prefix" @keydown.enter="saveEditRule()" @keydown.escape="cancelEditRule()">
                                 </td>
                                 <td>
                                     <span x-show="rule.tool_name === '*'" class="badge-global">Global</span>
@@ -192,6 +207,13 @@
                         <input type="text" x-model="newRule.field_path" placeholder="e.g. nested.field.path" required>
                     </label>
                     <label>
+                        Action
+                        <select x-model="newRule.action">
+                            <option value="mask">Mask</option>
+                            <option value="strip">Strip</option>
+                        </select>
+                    </label>
+                    <label x-show="newRule.action === 'mask'">
                         Alias Prefix
                         <input type="text" x-model="newRule.alias_prefix" placeholder="auto from field name">
                     </label>
@@ -303,7 +325,132 @@
                 </div>
             </div>
         </section>
+
+        <!-- Argument Guardrails -->
+        <section class="panel">
+            <h2>Argument Guardrails</h2>
+            <p class="section-hint">Block tool calls whose arguments match dangerous patterns.</p>
+
+            <div x-show="toolGuardrails.length > 0" style="margin-bottom: 1rem;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Argument</th>
+                            <th>Match</th>
+                            <th>Pattern</th>
+                            <th>Message</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="g in toolGuardrails" :key="g.id">
+                            <tr>
+                                <td><code x-text="g.argument_name"></code></td>
+                                <td><span class="badge-tool" x-text="g.match_type"></span></td>
+                                <td><code x-text="g.pattern" style="word-break: break-all;"></code></td>
+                                <td x-text="g.message"></td>
+                                <td class="actions-cell">
+                                    <button class="btn-danger" @click="deleteGuardrail(g.id)">Delete</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="manual-rule-form">
+                <form @submit.prevent="addGuardrail()" class="form-row">
+                    <label>
+                        Argument
+                        <input type="text" x-model="newGuardrail.argument_name" placeholder="* (all)" style="width:80px;">
+                    </label>
+                    <label>
+                        Match
+                        <select x-model="newGuardrail.match_type">
+                            <option value="contains">contains</option>
+                            <option value="regex">regex</option>
+                            <option value="equals">equals</option>
+                        </select>
+                    </label>
+                    <label>
+                        Pattern
+                        <input type="text" x-model="newGuardrail.pattern" placeholder="e.g. DROP TABLE" required>
+                    </label>
+                    <label>
+                        Message
+                        <input type="text" x-model="newGuardrail.message" placeholder="Blocked by guardrail">
+                    </label>
+                    <button type="submit" class="btn-primary">Add Guardrail</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Argument Injections -->
+        <section class="panel">
+            <h2>Argument Injections</h2>
+            <p class="section-hint">Silently inject or override argument values before forwarding to upstream.</p>
+
+            <div x-show="toolInjections.length > 0" style="margin-bottom: 1rem;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Argument</th>
+                            <th>Value</th>
+                            <th>Mode</th>
+                            <th>Scope</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="inj in toolInjections" :key="inj.id">
+                            <tr>
+                                <td><code x-text="inj.argument_name"></code></td>
+                                <td><code x-text="inj.value" style="word-break: break-all;"></code></td>
+                                <td><span class="badge-tool" x-text="inj.mode"></span></td>
+                                <td>
+                                    <span x-show="inj.tool_name === '*'" class="badge-global">Global</span>
+                                    <span x-show="inj.tool_name !== '*'" class="badge-tool">This tool</span>
+                                </td>
+                                <td class="actions-cell">
+                                    <button class="btn-danger" @click="deleteInjection(inj.id)">Delete</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="manual-rule-form">
+                <form @submit.prevent="addInjection()" class="form-row">
+                    <label>
+                        Argument Name
+                        <input type="text" x-model="newInjection.argument_name" placeholder="e.g. read_only" required>
+                    </label>
+                    <label>
+                        Value (JSON)
+                        <input type="text" x-model="newInjection.value" placeholder='e.g. true, "hello", 100' required>
+                    </label>
+                    <label>
+                        Mode
+                        <select x-model="newInjection.mode">
+                            <option value="set">set (always)</option>
+                            <option value="default">default (if absent)</option>
+                            <option value="append">append</option>
+                        </select>
+                    </label>
+                    <button type="submit" class="btn-primary">Add Injection</button>
+                </form>
+            </div>
+        </section>
     </main>
+
+    <!-- Toast -->
+    <div class="toast-container">
+        <template x-for="t in toasts" :key="t.id">
+            <div class="toast" :class="'toast-' + t.type" x-text="t.msg"
+                 x-init="setTimeout(() => toasts = toasts.filter(x => x.id !== t.id), 3000)"></div>
+        </template>
+    </div>
 </div>
 
 <script>
@@ -326,12 +473,19 @@ function toolDetail() {
         aliasMap: {},
         editingRule: null,
         editingMapper: null,
-        newRule: { field_path: '', alias_prefix: '' },
+        newRule: { field_path: '', alias_prefix: '', action: 'mask' },
         newMapper: { pattern: '', alias_prefix: '' },
+        guardrails: [],
+        newGuardrail: { argument_name: '*', match_type: 'contains', pattern: '', message: '' },
+        injections: [],
+        newInjection: { argument_name: '', value: '', mode: 'set' },
         mapperPreview: null,
         mapperPreviewError: null,
         mapperPreviewLoading: false,
         mapperMatches: [],
+        pageLoading: true,
+        pageError: null,
+        toasts: [],
 
         get toolRules() {
             return this.rules.filter(r => r.tool_name === this.toolName || r.tool_name === '*');
@@ -341,20 +495,37 @@ function toolDetail() {
             return this.mappers.filter(m => m.tool_name === this.toolName || m.tool_name === '*');
         },
 
+        get toolGuardrails() {
+            return this.guardrails.filter(g => g.tool_name === this.toolName || g.tool_name === '*');
+        },
+
+        get toolInjections() {
+            return this.injections.filter(i => i.tool_name === this.toolName || i.tool_name === '*');
+        },
+
         hasRuleForField(fieldName) {
             return this.rules.some(r =>
                 (r.tool_name === this.toolName || r.tool_name === '*') && r.field_path === fieldName
             );
         },
 
+        showToast(msg, type = 'success') {
+            this.toasts.push({ id: Date.now(), msg, type });
+        },
+
         async init() {
-            // URL: /targets/<target>/tools/<tool_name>
             const afterTargets = window.location.pathname.split('/targets/')[1];
             const parts = afterTargets.split('/tools/');
             this.targetName = decodeURIComponent(parts[0]);
             this.toolName = decodeURIComponent(parts[1] || '');
             document.title = `Maskit - ${this.targetName} - ${this.toolName}`;
-            await Promise.all([this.loadTool(), this.loadRules(), this.loadMappers()]);
+            try {
+                await Promise.all([this.loadTool(), this.loadRules(), this.loadMappers(), this.loadGuardrails(), this.loadInjections()]);
+            } catch (e) {
+                this.pageError = 'Failed to load tool data: ' + e.message;
+            } finally {
+                this.pageLoading = false;
+            }
         },
 
         apiBase() {
@@ -363,18 +534,21 @@ function toolDetail() {
 
         async loadTool() {
             const res = await fetch(`${this.apiBase()}/tools`);
+            if (!res.ok) throw new Error('Failed to load tools');
             const data = await res.json();
             this.tool = data.tools.find(t => t.name === this.toolName) || null;
         },
 
         async loadRules() {
             const res = await fetch(`${this.apiBase()}/rules`);
+            if (!res.ok) throw new Error('Failed to load rules');
             const data = await res.json();
             this.rules = data.rules;
         },
 
         async loadMappers() {
             const res = await fetch(`${this.apiBase()}/mappers`);
+            if (!res.ok) throw new Error('Failed to load mappers');
             const data = await res.json();
             this.mappers = data.mappers;
         },
@@ -471,7 +645,7 @@ function toolDetail() {
                             nodes.push(...this.flattenTree(item, childPath, `${i}`, depth + 1));
                         } else {
                             const vt = item === null ? 'null' : typeof item;
-                            const disp = typeof item === 'string' ? `"${item}"` : String(item);
+                            const disp = typeof item === 'string' ? JSON.stringify(item) : String(item);
                             nodes.push({ type: 'leaf', path: childPath, key: String(i), value: item, display: disp, valueType: vt, depth: depth + 1 });
                         }
                     });
@@ -486,7 +660,7 @@ function toolDetail() {
                             nodes.push(...this.flattenTree(v, childPath, k, depth + 1));
                         } else {
                             const vt = v === null ? 'null' : typeof v;
-                            const disp = typeof v === 'string' ? `"${v}"` : String(v);
+                            const disp = typeof v === 'string' ? JSON.stringify(v) : String(v);
                             nodes.push({ type: 'leaf', path: childPath, key: k, value: v, display: disp, valueType: vt, depth: depth + 1 });
                         }
                     }
@@ -494,7 +668,7 @@ function toolDetail() {
                 nodes.push({ type: 'object_end', path, depth });
             } else {
                 const vt = typeof data;
-                const disp = typeof data === 'string' ? `"${data}"` : String(data);
+                const disp = typeof data === 'string' ? JSON.stringify(data) : String(data);
                 nodes.push({ type: 'leaf', path, key, value: data, display: disp, valueType: vt, depth });
             }
             return nodes;
@@ -512,49 +686,62 @@ function toolDetail() {
         },
 
         async createJsonFieldMapper(path, aliasPrefix) {
-            const res = await fetch(`${this.apiBase()}/mappers/create`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    tool_name: this.toolName,
-                    mapper_type: 'json_field_mask',
-                    pattern: path,
-                    alias_prefix: aliasPrefix,
-                }),
-            });
-            const data = await res.json();
-            await this.loadMappers();
-            if (data.id) {
-                this.editingMapper = { id: data.id, pattern: path, alias_prefix: aliasPrefix };
-            }
+            try {
+                const res = await fetch(`${this.apiBase()}/mappers/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tool_name: this.toolName,
+                        mapper_type: 'json_field_mask',
+                        pattern: path,
+                        alias_prefix: aliasPrefix,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) { this.showToast(data.error || 'Failed to create mapper', 'error'); return; }
+                await this.loadMappers();
+                this.showToast('Mapper created');
+                if (data.id) {
+                    this.editingMapper = { id: data.id, pattern: path, alias_prefix: aliasPrefix };
+                }
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
 
         async quickAddRule(fieldName) {
-            await fetch(`${this.apiBase()}/rules/create`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    tool_name: this.toolName,
-                    field_path: fieldName,
-                    alias_prefix: '',
-                }),
-            });
-            await this.loadRules();
+            try {
+                const res = await fetch(`${this.apiBase()}/rules/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tool_name: this.toolName,
+                        field_path: fieldName,
+                        alias_prefix: '',
+                    }),
+                });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Failed to add rule', 'error'); return; }
+                this.showToast('Rule added');
+                await this.loadRules();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
 
         async addRule() {
             if (!this.newRule.field_path) return;
-            await fetch(`${this.apiBase()}/rules/create`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    tool_name: this.toolName,
-                    field_path: this.newRule.field_path,
-                    alias_prefix: this.newRule.alias_prefix,
-                }),
-            });
-            this.newRule = { field_path: '', alias_prefix: '' };
-            await this.loadRules();
+            try {
+                const res = await fetch(`${this.apiBase()}/rules/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tool_name: this.toolName,
+                        field_path: this.newRule.field_path,
+                        alias_prefix: this.newRule.alias_prefix,
+                        action: this.newRule.action,
+                    }),
+                });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Failed to add rule', 'error'); return; }
+                this.showToast('Rule added');
+                this.newRule = { field_path: '', alias_prefix: '', action: 'mask' };
+                await this.loadRules();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
 
         startEditRule(rule) {
@@ -567,19 +754,27 @@ function toolDetail() {
 
         async saveEditRule() {
             if (!this.editingRule) return;
-            await fetch(`${this.apiBase()}/rules/${this.editingRule.id}/update`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ alias_prefix: this.editingRule.alias_prefix }),
-            });
-            this.editingRule = null;
-            await this.loadRules();
+            try {
+                const res = await fetch(`${this.apiBase()}/rules/${this.editingRule.id}/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ alias_prefix: this.editingRule.alias_prefix }),
+                });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Failed to save', 'error'); return; }
+                this.showToast('Rule updated');
+                this.editingRule = null;
+                await this.loadRules();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
 
         async deleteRule(id) {
             if (!confirm('Delete this rule?')) return;
-            await fetch(`${this.apiBase()}/rules/${id}/delete`, { method: 'DELETE' });
-            await this.loadRules();
+            try {
+                const res = await fetch(`${this.apiBase()}/rules/${id}/delete`, { method: 'DELETE' });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Delete failed', 'error'); return; }
+                this.showToast('Rule deleted');
+                await this.loadRules();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
 
         async previewMapper() {
@@ -655,8 +850,91 @@ function toolDetail() {
 
         async deleteMapper(id) {
             if (!confirm('Delete this mapper?')) return;
-            await fetch(`${this.apiBase()}/mappers/${id}/delete`, { method: 'DELETE' });
-            await this.loadMappers();
+            try {
+                const res = await fetch(`${this.apiBase()}/mappers/${id}/delete`, { method: 'DELETE' });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Delete failed', 'error'); return; }
+                this.showToast('Mapper deleted');
+                await this.loadMappers();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
+        },
+
+        // --- Guardrails ---
+
+        async loadGuardrails() {
+            const res = await fetch(`${this.apiBase()}/guardrails`);
+            if (!res.ok) throw new Error('Failed to load guardrails');
+            const data = await res.json();
+            this.guardrails = data.guardrails;
+        },
+
+        async addGuardrail() {
+            if (!this.newGuardrail.pattern) return;
+            try {
+                const res = await fetch(`${this.apiBase()}/guardrails/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tool_name: this.toolName,
+                        argument_name: this.newGuardrail.argument_name || '*',
+                        match_type: this.newGuardrail.match_type,
+                        pattern: this.newGuardrail.pattern,
+                        message: this.newGuardrail.message || 'Blocked by guardrail',
+                    }),
+                });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Failed to add guardrail', 'error'); return; }
+                this.showToast('Guardrail added');
+                this.newGuardrail = { argument_name: '*', match_type: 'contains', pattern: '', message: '' };
+                await this.loadGuardrails();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
+        },
+
+        async deleteGuardrail(id) {
+            if (!confirm('Delete this guardrail?')) return;
+            try {
+                const res = await fetch(`${this.apiBase()}/guardrails/${id}/delete`, { method: 'DELETE' });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Delete failed', 'error'); return; }
+                this.showToast('Guardrail deleted');
+                await this.loadGuardrails();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
+        },
+
+        // --- Injections ---
+
+        async loadInjections() {
+            const res = await fetch(`${this.apiBase()}/injections`);
+            if (!res.ok) throw new Error('Failed to load injections');
+            const data = await res.json();
+            this.injections = data.injections;
+        },
+
+        async addInjection() {
+            if (!this.newInjection.argument_name || !this.newInjection.value) return;
+            try {
+                const res = await fetch(`${this.apiBase()}/injections/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tool_name: this.toolName,
+                        argument_name: this.newInjection.argument_name,
+                        value: this.newInjection.value,
+                        mode: this.newInjection.mode,
+                    }),
+                });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Failed to add injection', 'error'); return; }
+                this.showToast('Injection added');
+                this.newInjection = { argument_name: '', value: '', mode: 'set' };
+                await this.loadInjections();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
+        },
+
+        async deleteInjection(id) {
+            if (!confirm('Delete this injection?')) return;
+            try {
+                const res = await fetch(`${this.apiBase()}/injections/${id}/delete`, { method: 'DELETE' });
+                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Delete failed', 'error'); return; }
+                this.showToast('Injection deleted');
+                await this.loadInjections();
+            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
     };
 }

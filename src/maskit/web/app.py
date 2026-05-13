@@ -16,6 +16,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 def create_app(state: ProxyState) -> Starlette:
+    from maskit.web.routes.custom_targets import (
+        custom_target_create,
+        custom_target_delete,
+        custom_target_get,
+        custom_target_update,
+    )
     from maskit.web.routes.hidden_tools import hidden_tools_list, hidden_tools_toggle
     from maskit.web.routes.mappers import (
         mappers_create,
@@ -27,7 +33,15 @@ def create_app(state: ProxyState) -> Starlette:
         mappers_update,
         parse_text,
     )
+    from maskit.web.routes.marketplace import (
+        marketplace_activate,
+        marketplace_deactivate,
+        marketplace_install,
+        marketplace_list,
+        marketplace_page,
+    )
     from maskit.web.routes.pages import (
+        api_config,
         api_targets,
         api_tools,
         api_tools_call,
@@ -35,12 +49,34 @@ def create_app(state: ProxyState) -> Starlette:
         tool_detail_page,
         tools_page,
     )
+    from maskit.web.routes.guardrails import (
+        guardrails_create,
+        guardrails_delete,
+        guardrails_list,
+        guardrails_update,
+    )
+    from maskit.web.routes.injections import (
+        injections_create,
+        injections_delete,
+        injections_list,
+        injections_update,
+    )
     from maskit.web.routes.rules import rules_create, rules_delete, rules_list, rules_update
     from maskit.web.routes.traffic import TrafficWebSocket, api_mappings
 
     routes = [
         Route("/", targets_page),
+        Route("/marketplace", marketplace_page),
+        Route("/api/marketplace", marketplace_list),
+        Route("/api/marketplace/install", marketplace_install, methods=["POST"]),
+        Route("/api/marketplace/deactivate", marketplace_deactivate, methods=["POST"]),
+        Route("/api/marketplace/activate", marketplace_activate, methods=["POST"]),
         Route("/targets/{target_name}/tools", tools_page),
+        Route("/api/config", api_config),
+        Route("/api/targets/custom", custom_target_create, methods=["POST"]),
+        Route("/api/targets/custom/{target_id}", custom_target_get, methods=["GET"]),
+        Route("/api/targets/custom/{target_id}/update", custom_target_update, methods=["POST"]),
+        Route("/api/targets/custom/{target_id}/delete", custom_target_delete, methods=["POST"]),
         Route("/api/targets", api_targets),
         Route("/api/targets/{target_name}/tools", api_tools),
         Route("/api/targets/{target_name}/tools/call", api_tools_call, methods=["POST"]),
@@ -56,6 +92,14 @@ def create_app(state: ProxyState) -> Starlette:
         Route("/api/targets/{target_name}/mappers/preview_json", mappers_preview_json, methods=["POST"]),
         Route("/api/targets/{target_name}/mappers/reorder", mappers_reorder, methods=["POST"]),
         Route("/api/targets/{target_name}/parse_text", parse_text, methods=["POST"]),
+        Route("/api/targets/{target_name}/guardrails", guardrails_list, methods=["GET"]),
+        Route("/api/targets/{target_name}/guardrails/create", guardrails_create, methods=["POST"]),
+        Route("/api/targets/{target_name}/guardrails/{guardrail_id:int}/update", guardrails_update, methods=["POST"]),
+        Route("/api/targets/{target_name}/guardrails/{guardrail_id:int}/delete", guardrails_delete, methods=["POST", "DELETE"]),
+        Route("/api/targets/{target_name}/injections", injections_list, methods=["GET"]),
+        Route("/api/targets/{target_name}/injections/create", injections_create, methods=["POST"]),
+        Route("/api/targets/{target_name}/injections/{injection_id:int}/update", injections_update, methods=["POST"]),
+        Route("/api/targets/{target_name}/injections/{injection_id:int}/delete", injections_delete, methods=["POST", "DELETE"]),
         Route("/api/targets/{target_name}/hidden_tools", hidden_tools_list, methods=["GET"]),
         Route("/api/targets/{target_name}/hidden_tools/toggle", hidden_tools_toggle, methods=["POST"]),
         Route("/api/targets/{target_name}/mappings", api_mappings),

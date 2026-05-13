@@ -11,7 +11,6 @@ import logging
 import sys
 import webbrowser
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 import anyio
 from starlette.applications import Starlette
@@ -25,6 +24,8 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAu
 from maskit.models import HttpOAuthConfig
 
 logger = logging.getLogger(__name__)
+
+OAUTH_CALLBACK_PORT = 3131
 
 
 class FileTokenStorage:
@@ -71,9 +72,9 @@ class FileTokenStorage:
 
 
 class OAuthCallbackServer:
-    """Tiny HTTP server that receives the OAuth callback."""
+    """Always-on HTTP server that receives OAuth callbacks for all targets."""
 
-    def __init__(self, port: int):
+    def __init__(self, port: int = OAUTH_CALLBACK_PORT):
         self._port = port
         self._auth_code: str | None = None
         self._state: str | None = None
@@ -110,7 +111,10 @@ class OAuthCallbackServer:
         ])
 
     async def wait_for_callback(self) -> tuple[str, str | None]:
-        """Wait for the OAuth callback and return (code, state)."""
+        """Wait for the next OAuth callback. Resets state for each new flow."""
+        self._event = anyio.Event()
+        self._auth_code = None
+        self._state = None
         await self._event.wait()
         return self._auth_code or "", self._state
 
@@ -119,36 +123,47 @@ def create_oauth_provider(
     server_url: str,
     oauth_config: HttpOAuthConfig,
     store_path: Path,
-) -> tuple[OAuthClientProvider, OAuthCallbackServer]:
-    """Create an OAuthClientProvider configured for the given MCP server."""
+    callback_server: OAuthCallbackServer,
+) -> OAuthClientProvider:
+    """Create an OAuthClientProvider configured for the given MCP server.
 
-    callback_server = OAuthCallbackServer(oauth_config.callback_port)
+    If oauth_config has a client_id, pre-seeds storage to skip Dynamic Client
+    Registration.  Otherwise, leaves storage empty so the SDK will attempt DCR
+    automatically via the server's registration_endpoint.
+    """
+
     storage = FileTokenStorage(store_path)
 
     redirect_uri = callback_server.redirect_uri
+
+    auth_method = "none"
+    if oauth_config.client_secret:
+        auth_method = "client_secret_post"
 
     client_metadata = OAuthClientMetadata(
         client_name="Maskit",
         redirect_uris=[redirect_uri],
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],
-        token_endpoint_auth_method="none",
+        token_endpoint_auth_method=auth_method,
+        scope=oauth_config.scope,
     )
 
-    # Pre-seed storage with the configured client_id to skip dynamic registration
-    # (many servers like Slack don't support dynamic client registration)
-    data = storage._read()
-    if not data.get("client_info") or data["client_info"].get("client_id") != oauth_config.client_id:
-        client_info = OAuthClientInformationFull(
-            client_id=oauth_config.client_id,
-            client_name="Maskit",
-            redirect_uris=[redirect_uri],
-            grant_types=["authorization_code", "refresh_token"],
-            response_types=["code"],
-            token_endpoint_auth_method="none",
-        )
-        data["client_info"] = client_info.model_dump(exclude_none=True)
-        storage._write(data)
+    if oauth_config.client_id:
+        data = storage._read()
+        stored_id = (data.get("client_info") or {}).get("client_id")
+        if stored_id != oauth_config.client_id:
+            client_info = OAuthClientInformationFull(
+                client_id=oauth_config.client_id,
+                client_secret=oauth_config.client_secret,
+                client_name="Maskit",
+                redirect_uris=[redirect_uri],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                token_endpoint_auth_method=auth_method,
+            )
+            data["client_info"] = client_info.model_dump(exclude_none=True)
+            storage._write(data)
 
     async def redirect_handler(auth_url: str) -> None:
         print(
@@ -169,4 +184,4 @@ def create_oauth_provider(
         callback_handler=callback_handler,
     )
 
-    return provider, callback_server
+    return provider

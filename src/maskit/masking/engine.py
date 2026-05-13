@@ -9,7 +9,14 @@ from typing import Any
 
 from maskit.masking.mappers import ResponseMapper
 from maskit.masking.parsing import serialize, try_parse_structured
-from maskit.masking.rules import MaskingRule, get_nested_value, set_nested_value
+from maskit.masking.rules import (
+    ArgumentGuardrail,
+    ArgumentInjection,
+    MaskingRule,
+    delete_nested_value,
+    get_nested_value,
+    set_nested_value,
+)
 from maskit.masking.store import MaskingStore
 
 logger = logging.getLogger(__name__)
@@ -27,21 +34,193 @@ class MaskingEngine:
         self._target_name = target_name
         self._alias_cache: dict[str, str] = {}  # alias -> real_value
         self._reverse_cache: dict[str, dict[str, str]] = {}  # (field_path, real_value) -> alias
+        self._sorted_aliases: list[tuple[str, str]] = []  # sorted by alias length desc
         self._pending_writes: list[tuple[str, str, str, str]] = []
         self._counters: dict[str, int] = {}
         self._mappers: list[ResponseMapper] = []
         self._compiled_patterns: dict[int, re.Pattern] = {}
+        self._guardrails: list[ArgumentGuardrail] = []
+        self._compiled_guardrails: dict[int, re.Pattern] = {}
+        self._injections: list[ArgumentInjection] = []
+
+    @property
+    def store(self) -> MaskingStore:
+        return self._store
 
     @property
     def rules(self) -> list[MaskingRule]:
         return self._rules
 
+    @rules.setter
+    def rules(self, value: list[MaskingRule]):
+        self._rules = value
+
     @property
     def mappers(self) -> list[ResponseMapper]:
         return self._mappers
 
+    @mappers.setter
+    def mappers(self, value: list[ResponseMapper]):
+        self._mappers = value
+
+    @property
+    def compiled_patterns(self) -> dict[int, re.Pattern]:
+        return self._compiled_patterns
+
+    @property
+    def alias_cache(self) -> dict[str, str]:
+        return self._alias_cache
+
+    @property
+    def has_pending_writes(self) -> bool:
+        return bool(self._pending_writes)
+
+    def get_new_masks_since(self, offset: int) -> list[tuple[str, str, str, str]]:
+        return self._pending_writes[offset:]
+
+    @property
+    def pending_writes_count(self) -> int:
+        return len(self._pending_writes)
+
     def set_rules(self, rules: list[MaskingRule]):
         self._rules = rules
+
+    def add_rule(self, rule: MaskingRule):
+        self._rules.append(rule)
+
+    def remove_rule(self, rule_id: int):
+        self._rules = [r for r in self._rules if r.id != rule_id]
+
+    def add_mapper(self, mapper: ResponseMapper):
+        self._mappers.append(mapper)
+        if mapper.mapper_type == "regex_replace" and mapper.id:
+            try:
+                self._compiled_patterns[mapper.id] = re.compile(mapper.pattern)
+            except re.error:
+                pass
+
+    def remove_mapper(self, mapper_id: int):
+        self._mappers = [m for m in self._mappers if m.id != mapper_id]
+        self._compiled_patterns.pop(mapper_id, None)
+
+    def get_mapper(self, mapper_id: int) -> ResponseMapper | None:
+        return next((m for m in self._mappers if m.id == mapper_id), None)
+
+    def update_mapper_pattern(self, mapper_id: int, pattern: str, alias_prefix: str):
+        mapper = self.get_mapper(mapper_id)
+        if mapper:
+            mapper.pattern = pattern
+            mapper.alias_prefix = alias_prefix
+            if mapper.mapper_type == "regex_replace":
+                self._compiled_patterns[mapper_id] = re.compile(pattern)
+
+    # --- Guardrail management ---
+
+    @property
+    def guardrails(self) -> list[ArgumentGuardrail]:
+        return self._guardrails
+
+    @guardrails.setter
+    def guardrails(self, value: list[ArgumentGuardrail]):
+        self._guardrails = value
+
+    def add_guardrail(self, guardrail: ArgumentGuardrail):
+        self._guardrails.append(guardrail)
+        if guardrail.match_type == "regex" and guardrail.id is not None:
+            try:
+                self._compiled_guardrails[guardrail.id] = re.compile(guardrail.pattern)
+            except re.error:
+                pass
+
+    def remove_guardrail(self, guardrail_id: int):
+        self._guardrails = [g for g in self._guardrails if g.id != guardrail_id]
+        self._compiled_guardrails.pop(guardrail_id, None)
+
+    async def load_guardrails(self):
+        self._guardrails = await self._store.get_guardrails(target_name=self._target_name)
+        self._compiled_guardrails = {}
+        for g in self._guardrails:
+            if g.match_type == "regex" and g.id is not None:
+                try:
+                    self._compiled_guardrails[g.id] = re.compile(g.pattern)
+                except re.error as exc:
+                    logger.warning("Invalid regex in guardrail %d: %s", g.id, exc)
+
+    def check_guardrails(self, tool_name: str, arguments: dict[str, Any]) -> str | None:
+        """Check arguments against guardrails. Returns error message or None."""
+        applicable = [g for g in self._guardrails if g.active and g.matches_tool(tool_name)]
+        for guardrail in applicable:
+            if guardrail.argument_name == "*":
+                if self._check_guardrail_recursive(arguments, guardrail):
+                    return guardrail.message
+            else:
+                value = arguments.get(guardrail.argument_name)
+                if value is not None and isinstance(value, str):
+                    if self._matches_guardrail(value, guardrail):
+                        return guardrail.message
+        return None
+
+    def _check_guardrail_recursive(self, data: Any, guardrail: ArgumentGuardrail) -> bool:
+        if isinstance(data, str):
+            return self._matches_guardrail(data, guardrail)
+        elif isinstance(data, dict):
+            return any(self._check_guardrail_recursive(v, guardrail) for v in data.values())
+        elif isinstance(data, list):
+            return any(self._check_guardrail_recursive(item, guardrail) for item in data)
+        return False
+
+    def _matches_guardrail(self, value: str, guardrail: ArgumentGuardrail) -> bool:
+        if guardrail.match_type == "equals":
+            return value == guardrail.pattern
+        elif guardrail.match_type == "contains":
+            return guardrail.pattern in value
+        elif guardrail.match_type == "regex":
+            compiled = self._compiled_guardrails.get(guardrail.id)
+            if compiled:
+                return bool(compiled.search(value))
+        return False
+
+    # --- Injection management ---
+
+    @property
+    def injections(self) -> list[ArgumentInjection]:
+        return self._injections
+
+    @injections.setter
+    def injections(self, value: list[ArgumentInjection]):
+        self._injections = value
+
+    def add_injection(self, injection: ArgumentInjection):
+        self._injections.append(injection)
+
+    def remove_injection(self, injection_id: int):
+        self._injections = [i for i in self._injections if i.id != injection_id]
+
+    async def load_injections(self):
+        self._injections = await self._store.get_injections(target_name=self._target_name)
+
+    def apply_injections(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Apply argument injections. Returns modified arguments."""
+        applicable = [i for i in self._injections if i.active and i.matches_tool(tool_name)]
+        for injection in applicable:
+            parsed_value = json.loads(injection.value)
+            if injection.mode == "set":
+                arguments[injection.argument_name] = parsed_value
+            elif injection.mode == "default":
+                if injection.argument_name not in arguments:
+                    arguments[injection.argument_name] = parsed_value
+            elif injection.mode == "append":
+                existing = arguments.get(injection.argument_name)
+                if existing is None:
+                    arguments[injection.argument_name] = parsed_value
+                elif isinstance(existing, str) and isinstance(parsed_value, str):
+                    arguments[injection.argument_name] = existing + parsed_value
+                elif isinstance(existing, list):
+                    if isinstance(parsed_value, list):
+                        arguments[injection.argument_name] = existing + parsed_value
+                    else:
+                        existing.append(parsed_value)
+        return arguments
 
     async def load_aliases(self):
         """Load all existing aliases into memory for fast lookup."""
@@ -56,6 +235,12 @@ class MaskingEngine:
                 self._counters[prefix] = max(
                     self._counters.get(prefix, 0), int(parts[1])
                 )
+        self._rebuild_sorted_aliases()
+
+    def _rebuild_sorted_aliases(self):
+        self._sorted_aliases = sorted(
+            self._alias_cache.items(), key=lambda x: len(x[0]), reverse=True
+        )
 
     async def load_mappers(self):
         """Load response mappers from store and compile patterns."""
@@ -115,12 +300,15 @@ class MaskingEngine:
         self, data: dict[str, Any], tool_name: str, rules: list[MaskingRule]
     ) -> dict[str, Any]:
         for rule in rules:
-            value = get_nested_value(data, rule.field_path)
-            if value is not None and isinstance(value, str):
-                alias = self._get_or_create_alias(
-                    value, tool_name, rule.field_path, rule.effective_prefix
-                )
-                set_nested_value(data, rule.field_path, alias)
+            if rule.action == "strip":
+                delete_nested_value(data, rule.field_path)
+            else:
+                value = get_nested_value(data, rule.field_path)
+                if value is not None and isinstance(value, str):
+                    alias = self._get_or_create_alias(
+                        value, tool_name, rule.field_path, rule.effective_prefix
+                    )
+                    set_nested_value(data, rule.field_path, alias)
         return data
 
     def _get_or_create_alias(
@@ -138,6 +326,7 @@ class MaskingEngine:
         self._alias_cache[new_alias] = real_value
         self._reverse_cache.setdefault(prefix, {})[real_value] = new_alias
         self._pending_writes.append((new_alias, real_value, tool_name, field_path))
+        self._rebuild_sorted_aliases()
         return new_alias
 
     def _mask_content_block(
@@ -156,8 +345,10 @@ class MaskingEngine:
             block["text"] = serialize(masked, parse_result.format)
             return block
 
-        # For plain text, replace known real values with their aliases
+        # For plain text, replace known real values with their aliases (skip strip rules)
         for rule in rules:
+            if rule.action == "strip":
+                continue
             prefix = rule.effective_prefix
             prefix_map = self._reverse_cache.get(prefix, {})
             for real_value, alias in prefix_map.items():
@@ -170,10 +361,7 @@ class MaskingEngine:
         if isinstance(data, str):
             if data in self._alias_cache:
                 return self._alias_cache[data]
-            # Sort by length descending to prevent partial matches (cred_10 before cred_1)
-            for alias, real_value in sorted(
-                self._alias_cache.items(), key=lambda x: len(x[0]), reverse=True
-            ):
+            for alias, real_value in self._sorted_aliases:
                 if alias in data:
                     data = data.replace(alias, real_value)
             return data
