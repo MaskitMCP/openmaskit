@@ -85,6 +85,17 @@
                                         </svg>
                                     </button>
                                 </template>
+                                <template x-if="!target.editable">
+                                    <button class="tgt-action-btn tgt-action-danger" @click="deactivateTarget(target)" title="Deactivate" :aria-label="'Deactivate ' + target.name" :disabled="target.deactivating">
+                                        <svg x-show="!target.deactivating" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                                        </svg>
+                                        <svg x-show="target.deactivating" width="14" height="14" class="spinner spinner-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                                            <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
+                                        </svg>
+                                    </button>
+                                </template>
                             </div>
                         </div>
                         <h3 class="tgt-card-name" x-text="target.name"></h3>
@@ -308,7 +319,12 @@ function targetsPage() {
             const res = await fetch('/api/targets');
             if (!res.ok) throw new Error('Failed to load targets');
             const data = await res.json();
-            this.targets = data.targets;
+            // Initialize reactive state properties for each target
+            this.targets = data.targets.map(t => ({
+                ...t,
+                deleting: false,
+                deactivating: false,
+            }));
         },
 
         openAddModal() {
@@ -437,6 +453,30 @@ function targetsPage() {
             } catch (e) {
                 this.showToast('Network error: ' + e.message, 'error');
                 target.deleting = false;
+            }
+        },
+
+        async deactivateTarget(target) {
+            console.log('test')
+            if (!confirm(`Deactivate "${target.name}"? This will disconnect the server but keep it in the marketplace.`)) return;
+            target.deactivating = true;
+            try {
+                const res = await fetch('/api/marketplace/deactivate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_id: target.name }),
+                });
+                if (res.ok) {
+                    this.showToast(`${target.name} deactivated`);
+                    await this.loadTargets();
+                } else {
+                    const data = await res.json();
+                    this.showToast(data.error || 'Deactivation failed', 'error');
+                    target.deactivating = false;
+                }
+            } catch (e) {
+                this.showToast('Network error: ' + e.message, 'error');
+                target.deactivating = false;
             }
         },
     };

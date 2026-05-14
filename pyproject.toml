@@ -1,12 +1,26 @@
 [project]
 name = "maskit"
 version = "0.1.0"
-description = "MCP server wrapper that masks sensitive fields in tool responses"
+description = "Drop-in MCP proxy that keeps your secrets out of the context window"
 readme = "README.md"
 authors = [
     { name = "Amin Malekloo", email = "amin.malekloo@yahoo.com" }
 ]
+license = { text = "MIT" }
 requires-python = ">=3.10"
+keywords = ["mcp", "proxy", "security", "data-masking", "ai", "model-context-protocol"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
 dependencies = [
     "mcp[cli]>=1.27.0",
     "starlette>=0.40.0",
@@ -17,6 +31,11 @@ dependencies = [
     "pydantic>=2.0",
     "anyio>=4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/AminMal/maskit"
+Repository = "https://github.com/AminMal/maskit"
+Issues = "https://github.com/AminMal/maskit/issues"
 
 [project.scripts]
 maskit = "maskit.__main__:main"

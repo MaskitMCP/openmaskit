@@ -34,9 +34,16 @@ async def api_config(request: Request):
 
 async def api_targets(request: Request):
     state = request.app.state.proxy_state
+    store = state.store
+
+    # Load marketplace catalog to check if servers are from marketplace
+    from maskit.web.routes.marketplace import _load_catalog
+    catalog_ids = {entry["id"] for entry in _load_catalog()}
+
     targets = []
     for name, ts in state.targets.items():
-        editable = name not in state.config_target_ids
+        # A target is editable only if it's NOT from config file AND NOT from marketplace
+        editable = name not in state.config_target_ids and name not in catalog_ids
         targets.append({
             "name": name,
             "tool_count": len(ts.tool_schemas),

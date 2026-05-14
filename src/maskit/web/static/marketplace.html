@@ -224,7 +224,7 @@ function marketplacePage() {
             const res = await fetch('/api/marketplace');
             if (!res.ok) throw new Error('Failed to load marketplace');
             const data = await res.json();
-            this.servers = data.servers.map(s => ({ ...s, installing: false }));
+            this.servers = data.servers.map(s => ({ ...s, installing: false, deactivating: false }));
             this.filterServers();
         },
 

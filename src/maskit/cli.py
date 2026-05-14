@@ -7,23 +7,23 @@ from pathlib import Path
 
 
 def get_version() -> str:
-    """Read version from pyproject.toml."""
+    """Get version from package metadata."""
+    # Try importlib.metadata first (works for installed packages)
+    try:
+        from importlib.metadata import version
+        return version("maskit")
+    except Exception:
+        pass
+
+    # Fallback: read from pyproject.toml (development mode)
     try:
         # Python 3.11+ has tomllib built-in
-        import tomllib
-    except ImportError:
-        # Python 3.10 fallback
         try:
-            import tomli as tomllib
+            import tomllib
         except ImportError:
-            # If tomli not available, try importlib.metadata
-            try:
-                from importlib.metadata import version
-                return version("maskit")
-            except Exception:
-                return "unknown"
+            # Python 3.10 fallback
+            import tomli as tomllib  # type: ignore
 
-    try:
         pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
         if pyproject.exists():
             with open(pyproject, "rb") as f:
