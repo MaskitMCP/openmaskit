@@ -45,6 +45,8 @@ uv sync
 
 ## Usage
 
+### Basic Usage
+
 1. Create a config file (e.g. `maskit.yaml`):
 
 ```yaml
@@ -88,7 +90,33 @@ maskit config.yaml         # custom path
 
 You can also run without a config file — just start `maskit` and add servers through the marketplace or custom servers UI.
 
-3. Connect your AI agent to Maskit's MCP endpoint (per server):
+### CLI Options
+
+Get help:
+
+```bash
+maskit --help              # Show all options and usage
+maskit --version           # Show version
+```
+
+Override configuration:
+
+```bash
+maskit --web-port 8080                # Custom dashboard port
+maskit -w 8080 -m 8081 -o 8082        # Override multiple ports
+maskit --store-path /data/maskit.db   # Custom database location
+maskit config.yaml -w 9000            # Config file + port override
+```
+
+### Environment Variables
+
+```bash
+MASKIT_HOST=0.0.0.0 maskit            # Bind to all interfaces (for Docker)
+```
+
+### Connect AI Agent
+
+Connect your AI agent to Maskit's MCP endpoint (per server):
 
 ```bash
 claude mcp add --scope project maskit-time --transport http http://localhost:9474/time/mcp
@@ -194,9 +222,10 @@ Or a single upstream (legacy format):
 | `upstream.command` / `args` | Command to spawn (stdio mode) |
 | `upstream.url` | Server URL (http mode) |
 | `upstream.oauth` | OAuth 2.1 settings (http mode) |
-| `web_port` | Dashboard port (default: 9473) |
-| `mcp_port` | MCP HTTP endpoint port (default: 9474) |
-| `store_path` | SQLite database path |
+| `web_port` | Dashboard port (default: 9473, override: `--web-port`) |
+| `mcp_port` | MCP HTTP endpoint port (default: 9474, override: `--mcp-port`) |
+| `oauth_port` | OAuth callback port (default: 3131, override: `--oauth-port`) |
+| `store_path` | SQLite database path (override: `--store-path`) |
 | `rules` | List of `{tool_name, field_path, alias_prefix?, action?}` |
 | `guardrails` | List of `{tool_name?, argument_name?, match_type?, pattern, message?}` |
 | `injections` | List of `{tool_name?, argument_name, value, mode?}` |

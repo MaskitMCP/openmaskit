@@ -19,7 +19,7 @@ from maskit.config import load_config
 from maskit.masking.engine import MaskingEngine
 from maskit.masking.rules import ArgumentGuardrail, ArgumentInjection, MaskingRule
 from maskit.masking.store import MaskingStore
-from maskit.oauth.handler import OAUTH_CALLBACK_PORT, OAuthCallbackServer
+from maskit.oauth.handler import OAuthCallbackServer
 from maskit.proxy.core import ProxyState, TargetState, run_proxy_for_target
 from maskit.proxy.http_downstream import create_mcp_app
 from maskit.proxy.manager import TargetManager, _build_upstream_config
@@ -55,11 +55,16 @@ async def async_main():
     logging.getLogger("mcp.client.auth").setLevel(logging.DEBUG)
     logging.getLogger("maskit.proxy.upstream").setLevel(logging.DEBUG)
 
-    config_path = Path("maskit.yaml")
-    if len(sys.argv) > 1:
-        config_path = Path(sys.argv[1])
+    from maskit.cli import parse_args
 
-    config = load_config(config_path)
+    args = parse_args()
+    config = load_config(
+        path=args.config_path,
+        web_port=args.web_port,
+        mcp_port=args.mcp_port,
+        oauth_port=args.oauth_port,
+        store_path=args.store_path,
+    )
     bind_host = os.environ.get("MASKIT_HOST", "127.0.0.1")
 
     store = await MaskingStore.create(config.store_path)
@@ -143,12 +148,12 @@ async def async_main():
     shutdown_event = anyio.Event()
 
     # Shared OAuth callback server (always running)
-    callback_server = OAuthCallbackServer()
+    callback_server = OAuthCallbackServer(port=config.oauth_port)
     callback_app = callback_server.create_app()
     callback_uvicorn_config = uvicorn.Config(
         callback_app,
         host=bind_host,
-        port=OAUTH_CALLBACK_PORT,
+        port=config.oauth_port,
         log_level="warning",
         log_config=None,
     )
@@ -158,7 +163,7 @@ async def async_main():
 
     print("Maskit proxy starting", file=sys.stderr)
     print(f"  Dashboard: http://{bind_host}:{config.web_port}", file=sys.stderr)
-    print(f"  OAuth callback: http://{bind_host}:{OAUTH_CALLBACK_PORT}/callback", file=sys.stderr)
+    print(f"  OAuth callback: http://{bind_host}:{config.oauth_port}/callback", file=sys.stderr)
     print("  MCP servers:", file=sys.stderr)
     for name in state.target_names:
         print(f"    {name}: http://{bind_host}:{config.mcp_port}/{name}/mcp", file=sys.stderr)
