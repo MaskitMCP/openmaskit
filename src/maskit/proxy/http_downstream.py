@@ -42,6 +42,13 @@ async def _handle_mcp_post(request: Request) -> Response:
             status_code=400,
         )
 
+    # Check for batch requests (arrays) - not supported
+    if isinstance(raw, list):
+        return JSONResponse(
+            {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Batch requests not supported"}, "id": None},
+            status_code=400,
+        )
+
     try:
         message = JSONRPCMessage.model_validate(raw)
     except Exception:
