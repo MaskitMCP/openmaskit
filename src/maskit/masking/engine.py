@@ -203,7 +203,15 @@ class MaskingEngine:
         """Apply argument injections. Returns modified arguments."""
         applicable = [i for i in self._injections if i.active and i.matches_tool(tool_name)]
         for injection in applicable:
-            parsed_value = json.loads(injection.value)
+            try:
+                parsed_value = json.loads(injection.value)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "Invalid JSON in injection %d (tool=%s, arg=%s): %s",
+                    injection.id, tool_name, injection.argument_name, exc
+                )
+                continue
+
             if injection.mode == "set":
                 arguments[injection.argument_name] = parsed_value
             elif injection.mode == "default":

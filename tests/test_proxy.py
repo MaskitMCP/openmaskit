@@ -145,14 +145,14 @@ class TestProxyRelay:
         await us_read_send.aclose()
 
         # We need to collect dispatched responses — register waiters for the request IDs
-        event5 = target.response_dispatcher.register(5)
-        event6 = target.response_dispatcher.register(6)
+        event5 = await target.response_dispatcher.register(5)
+        event6 = await target.response_dispatcher.register(6)
 
         async with anyio.create_task_group() as tg:
             tg.start_soon(run_proxy_for_target, target, us_read_recv, us_write_send)
 
         # First response to the agent should have masked host
-        resp1 = target.response_dispatcher.collect(5)
+        resp1 = await target.response_dispatcher.collect(5)
         assert resp1 is not None
         content = json.loads(resp1.message.root.result["content"][0]["text"])
         assert content["host"] == "host_1"

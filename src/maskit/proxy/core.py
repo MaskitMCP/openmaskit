@@ -28,6 +28,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_MAX_PREVIEW_LEN = 1000  # Cap previews at 1000 chars to prevent memory bloat
+
+
+def _truncate_preview(text: str | None) -> str | None:
+    """Truncate preview text to prevent memory bloat."""
+    if text is None:
+        return None
+    if len(text) <= _MAX_PREVIEW_LEN:
+        return text
+    return text[:_MAX_PREVIEW_LEN] + "... (truncated)"
+
 
 class ResponseDispatcher:
     """Routes proxy responses back to HTTP downstream waiters by request ID."""
@@ -36,14 +47,26 @@ class ResponseDispatcher:
 
     def __init__(self):
         self._waiters: dict[str | int, tuple[anyio.Event, list[SessionMessage], float]] = {}
+        self._lock = anyio.Lock()
 
-    def register(self, request_id: str | int) -> anyio.Event:
-        self._evict_stale()
-        event = anyio.Event()
-        self._waiters[request_id] = (event, [], time.time())
-        return event
+    async def register(self, request_id: str | int) -> anyio.Event:
+        async with self._lock:
+            self._evict_stale()
+            event = anyio.Event()
+            self._waiters[request_id] = (event, [], time.time())
+            return event
 
-    def dispatch(self, request_id: str | int, msg: SessionMessage) -> bool:
+    async def dispatch(self, request_id: str | int, msg: SessionMessage) -> bool:
+        async with self._lock:
+            if request_id in self._waiters:
+                event, results, _ = self._waiters[request_id]
+                results.append(msg)
+                event.set()
+                return True
+            return False
+
+    def dispatch_sync(self, request_id: str | int, msg: SessionMessage) -> bool:
+        """Synchronous dispatch for use in sync intercept functions."""
         if request_id in self._waiters:
             event, results, _ = self._waiters[request_id]
             results.append(msg)
@@ -51,12 +74,13 @@ class ResponseDispatcher:
             return True
         return False
 
-    def collect(self, request_id: str | int) -> SessionMessage | None:
-        waiter = self._waiters.pop(request_id, None)
-        if waiter:
-            _, results, _ = waiter
-            return results[0] if results else None
-        return None
+    async def collect(self, request_id: str | int) -> SessionMessage | None:
+        async with self._lock:
+            waiter = self._waiters.pop(request_id, None)
+            if waiter:
+                _, results, _ = waiter
+                return results[0] if results else None
+            return None
 
     def _evict_stale(self):
         now = time.time()
@@ -239,7 +263,7 @@ async def _relay_upstream_to_downstream(
             if modified is not None:
                 root = modified.message.root
                 if isinstance(root, JSONRPCResponse) and root.id is not None:
-                    if target.response_dispatcher.dispatch(root.id, modified):
+                    if await target.response_dispatcher.dispatch(root.id, modified):
                         continue
     except (anyio.ClosedResourceError, anyio.EndOfStream):
         pass
@@ -285,7 +309,7 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
                 id=root.id,
                 error=ErrorData(code=METHOD_NOT_FOUND, message=f"Tool not found: {tool_name}"),
             )))
-            target.response_dispatcher.dispatch(root.id, error_response)
+            target.response_dispatcher.dispatch_sync(root.id, error_response)
             return None
 
         request_ts = time.time()
@@ -327,7 +351,7 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
                         id=root.id,
                         error=ErrorData(code=-32602, message=violation),
                     )))
-                    target.response_dispatcher.dispatch(root.id, error_response)
+                    target.response_dispatcher.dispatch_sync(root.id, error_response)
                     return None
 
                 params["arguments"] = target.engine.apply_injections(tool_name, params["arguments"])
@@ -420,7 +444,7 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
         if result and isinstance(result, dict):
             for block in result.get("content", []):
                 if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
-                    original_preview = block["text"][:200]
+                    original_preview = _truncate_preview(block["text"])
                     break
 
         if target.engine and result:
@@ -437,7 +461,7 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
         if masked_result and isinstance(masked_result, dict):
             for block in masked_result.get("content", []):
                 if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
-                    masked_preview = block["text"][:200]
+                    masked_preview = _truncate_preview(block["text"])
                     break
 
         target.update_traffic_entry(entry_id, {

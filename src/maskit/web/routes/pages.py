@@ -85,17 +85,17 @@ async def api_tools_call(request: Request):
     )
     session_msg = SessionMessage(message=JSONRPCMessage(root=rpc_request))
 
-    event = target.response_dispatcher.register(request_id)
+    event = await target.response_dispatcher.register(request_id)
     await target.ds_read_send.send(session_msg)
 
     try:
         with anyio.fail_after(60):
             await event.wait()
     except TimeoutError:
-        target.response_dispatcher.collect(request_id)
+        await target.response_dispatcher.collect(request_id)
         return JSONResponse({"error": "Timeout waiting for response"}, status_code=504)
 
-    response_msg = target.response_dispatcher.collect(request_id)
+    response_msg = await target.response_dispatcher.collect(request_id)
     if response_msg is None:
         return JSONResponse({"error": "No response received"}, status_code=500)
 

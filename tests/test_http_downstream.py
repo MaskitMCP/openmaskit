@@ -103,7 +103,7 @@ class TestHttpMcpEndpoint:
                     "result": {"tools": target.tool_schemas},
                 })
             )
-            target.response_dispatcher.dispatch(2, response_msg)
+            await target.response_dispatcher.dispatch(2, response_msg)
 
         request = {
             "jsonrpc": "2.0",
@@ -140,7 +140,7 @@ class TestHttpMcpEndpoint:
                     "result": {"data": "test-result"},
                 })
             )
-            target.response_dispatcher.dispatch(3, response_msg)
+            await target.response_dispatcher.dispatch(3, response_msg)
 
         request = {
             "jsonrpc": "2.0",
@@ -286,7 +286,7 @@ class TestResponseDispatcher:
     async def test_dispatcher_routes_response_to_waiter(self, state):
         """Response dispatched to waiting request."""
         target = state.targets["test"]
-        event = target.response_dispatcher.register(request_id=10)
+        event = await target.response_dispatcher.register(request_id=10)
 
         response_msg = SessionMessage(
             JSONRPCMessage.model_validate({
@@ -298,12 +298,12 @@ class TestResponseDispatcher:
 
         async def dispatch_response():
             await anyio.sleep(0.05)
-            target.response_dispatcher.dispatch(10, response_msg)
+            await target.response_dispatcher.dispatch(10, response_msg)
 
         async with anyio.create_task_group() as tg:
             tg.start_soon(dispatch_response)
             await event.wait()
-            response = target.response_dispatcher.collect(request_id=10)
+            response = await target.response_dispatcher.collect(request_id=10)
 
         assert response is not None
         assert response.message.root.id == 10
@@ -313,7 +313,7 @@ class TestResponseDispatcher:
         """Old waiters are evicted."""
         target = state.targets["test"]
         # Register a waiter
-        target.response_dispatcher.register(request_id=20)
+        await target.response_dispatcher.register(request_id=20)
         # Wait long enough for it to become stale (120s default)
         # For testing, we'd need to mock time or reduce timeout
         # Just verify it's registered
@@ -323,7 +323,7 @@ class TestResponseDispatcher:
     async def test_dispatcher_handles_duplicate_ids(self, state):
         """Duplicate request IDs handled correctly."""
         target = state.targets["test"]
-        event1 = target.response_dispatcher.register(request_id=30)
+        event1 = await target.response_dispatcher.register(request_id=30)
         # Registering same ID again should work (overwrite)
-        event2 = target.response_dispatcher.register(request_id=30)
+        event2 = await target.response_dispatcher.register(request_id=30)
         assert event2 is not None

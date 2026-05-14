@@ -75,7 +75,7 @@ async def _handle_mcp_post(request: Request) -> Response:
 
     # For requests that expect a response, register a waiter and forward
     request_id = root.id
-    event = target.response_dispatcher.register(request_id)
+    event = await target.response_dispatcher.register(request_id)
 
     session_msg = SessionMessage(message=message)
     await target.ds_read_send.send(session_msg)
@@ -85,13 +85,13 @@ async def _handle_mcp_post(request: Request) -> Response:
         with anyio.fail_after(60):
             await event.wait()
     except TimeoutError:
-        target.response_dispatcher.collect(request_id)
+        await target.response_dispatcher.collect(request_id)
         return JSONResponse(
             {"jsonrpc": "2.0", "error": {"code": -32603, "message": "Upstream timeout"}, "id": request_id},
             status_code=504,
         )
 
-    response_msg = target.response_dispatcher.collect(request_id)
+    response_msg = await target.response_dispatcher.collect(request_id)
     if response_msg is None:
         return JSONResponse(
             {"jsonrpc": "2.0", "error": {"code": -32603, "message": "No response"}, "id": request_id},

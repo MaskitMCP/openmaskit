@@ -175,6 +175,7 @@ class MaskingStore:
         self, real_value: str, tool_name: str, field_path: str, prefix: str, target_name: str = "default"
     ) -> str:
         """Get existing alias for a real value, or create a new one."""
+        # First try to get existing - this is the common case after warmup
         async with self._db.execute(
             "SELECT alias FROM mappings WHERE real_value = ? AND field_path = ? AND target_name = ?",
             (real_value, field_path, target_name),
@@ -183,17 +184,34 @@ class MaskingStore:
             if row:
                 return row[0]
 
-        # Create new alias
-        counter = self._alias_counters.get(prefix, 0) + 1
-        self._alias_counters[prefix] = counter
-        alias = f"{prefix}_{counter}"
+        # Create new alias - use retry loop to handle concurrent inserts
+        for attempt in range(3):
+            counter = self._alias_counters.get(prefix, 0) + 1
+            self._alias_counters[prefix] = counter
+            alias = f"{prefix}_{counter}"
 
-        await self._db.execute(
-            "INSERT INTO mappings (alias, real_value, tool_name, field_path, target_name) VALUES (?, ?, ?, ?, ?)",
-            (alias, real_value, tool_name, field_path, target_name),
-        )
-        await self._db.commit()
-        return alias
+            try:
+                await self._db.execute(
+                    "INSERT INTO mappings (alias, real_value, tool_name, field_path, target_name) VALUES (?, ?, ?, ?, ?)",
+                    (alias, real_value, tool_name, field_path, target_name),
+                )
+                await self._db.commit()
+                return alias
+            except aiosqlite.IntegrityError:
+                # Another coroutine created an alias for this value concurrently
+                # Try to fetch it
+                async with self._db.execute(
+                    "SELECT alias FROM mappings WHERE real_value = ? AND field_path = ? AND target_name = ?",
+                    (real_value, field_path, target_name),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if row:
+                        return row[0]
+                # If still not found, retry with new counter
+                if attempt < 2:
+                    continue
+                # Last attempt failed - raise
+                raise
 
     async def resolve_alias(self, alias: str) -> str | None:
         """Look up the real value for an alias."""

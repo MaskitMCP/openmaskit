@@ -221,6 +221,12 @@ async def async_main():
                     except Exception as exc:
                         logger.warning("Failed to connect marketplace server %s: %s", name, exc)
                         failed_targets.append(name)
+                        # Deactivate in DB to prevent restart loops
+                        try:
+                            await store.deactivate_server(name)
+                            logger.info("Deactivated server %s in database", name)
+                        except Exception as deactivate_exc:
+                            logger.error("Failed to deactivate server %s: %s", name, deactivate_exc)
             for name in failed_targets:
                 del state.targets[name]
 
