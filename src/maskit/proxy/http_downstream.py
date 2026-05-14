@@ -87,7 +87,14 @@ async def _handle_mcp_post(request: Request) -> Response:
     except TimeoutError:
         await target.response_dispatcher.collect(request_id)
         return JSONResponse(
-            {"jsonrpc": "2.0", "error": {"code": -32603, "message": "Upstream timeout"}, "id": request_id},
+            {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32000,
+                    "message": "Request timed out (server may be shutting down)",
+                },
+                "id": request_id,
+            },
             status_code=504,
         )
 

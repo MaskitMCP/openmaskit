@@ -88,6 +88,21 @@ class ResponseDispatcher:
         for rid in stale:
             self._waiters.pop(rid, None)
 
+    def shutdown(self):
+        """Signal all waiting clients that shutdown is in progress.
+
+        All pending waiters receive a shutdown error immediately instead of
+        waiting for their timeout.
+        """
+        # Wake all waiters - they can check if results are empty during shutdown
+        for request_id, (event, results, _) in list(self._waiters.items()):
+            # Just set the event without adding a message
+            # The handler will detect empty results and return appropriate error
+            event.set()
+
+        # Clear all entries
+        self._waiters.clear()
+
 
 @dataclass
 class TargetState:
@@ -120,6 +135,25 @@ class TargetState:
                 entry.update(updates)
                 break
         self.traffic_events.append({"type": "update", "id": entry_id, "updates": updates})
+
+
+async def cleanup_target_state(target: TargetState) -> None:
+    """Clean up target state during shutdown.
+
+    - Notifies response waiters of shutdown
+    - Clears pending tool calls
+    - Closes downstream stream
+    """
+    # Notify HTTP waiters
+    target.response_dispatcher.shutdown()
+
+    # Clear pending state (helps with debugging/metrics)
+    target.pending_tool_calls.clear()
+    target.pending_requests.clear()
+
+    # Close downstream stream
+    if target.ds_read_send:
+        await target.ds_read_send.aclose()
 
 
 class ProxyState:

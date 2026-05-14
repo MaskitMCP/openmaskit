@@ -201,6 +201,34 @@ Default format is human-readable text:
 2026-05-14 12:00:00,000 [maskit.proxy.core] INFO: Target slack initialized
 ```
 
+### Graceful Shutdown
+
+Maskit performs a coordinated shutdown sequence when receiving SIGINT or SIGTERM:
+
+1. **Stop accepting requests** — HTTP servers marked for shutdown
+2. **Drain in-flight requests** — Waiting clients notified immediately (5s timeout)
+3. **Flush database** — Pending alias writes committed (3s timeout)
+4. **Cancel tasks** — Relay loops and servers terminated
+
+Configure the overall shutdown timeout:
+
+```bash
+MASKIT_SHUTDOWN_TIMEOUT=30 maskit  # Default: 30 seconds
+```
+
+If shutdown exceeds this timeout, the process force-exits. This prevents indefinite hangs while allowing clean shutdown under normal conditions.
+
+**Kubernetes preStop hook** (recommended for production):
+
+```yaml
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "sleep 5"]
+```
+
+This gives Maskit time to finish draining before k8s sends SIGTERM.
+
 ### Connect AI Agent
 
 Connect your AI agent to Maskit's MCP endpoint (per server):

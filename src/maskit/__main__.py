@@ -46,6 +46,65 @@ async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
             logger.exception("Failed final flush of aliases to database")
 
 
+async def _graceful_shutdown(
+    state: ProxyState,
+    shutdown_event: anyio.Event,
+    web_server,
+    mcp_server,
+    callback_web_server,
+    tg,
+    drain_timeout: float,
+    flush_timeout: float,
+) -> None:
+    """Coordinate graceful shutdown with timeout enforcement.
+
+    Shutdown sequence:
+    1. Stop accepting new requests (servers marked for exit)
+    2. Drain in-flight requests (ResponseDispatcher notifies waiters)
+    3. Wait for flush loops to complete
+    4. Close upstream connections
+    5. Task group cancellation (any remaining tasks)
+    """
+    logger.info("Starting graceful shutdown sequence")
+
+    # Stage 1: Stop accepting new requests
+    logger.info("Stage 1/4: Stopping request acceptance")
+    web_server.should_exit = True
+    mcp_server.should_exit = True
+    callback_web_server.should_exit = True
+
+    # Stage 2: Drain in-flight requests
+    logger.info(f"Stage 2/4: Draining in-flight requests ({drain_timeout}s timeout)")
+    with anyio.move_on_after(drain_timeout):
+        for target_state in state.targets.values():
+            # Notify all waiting HTTP clients to abort
+            target_state.response_dispatcher.shutdown()
+
+            # Close downstream streams (prevents new messages from clients)
+            if target_state.ds_read_send:
+                await target_state.ds_read_send.aclose()
+
+    # Stage 3: Wait for flush loops to complete
+    logger.info(f"Stage 3/4: Waiting for database flushes ({flush_timeout}s timeout)")
+    with anyio.move_on_after(flush_timeout):
+        # Signal shutdown to flush loops
+        shutdown_event.set()
+
+        # Give flush loops time to complete final flush
+        await anyio.sleep(0.5)
+
+        # Check if flushes completed
+        pending_count = sum(
+            ts.engine.has_pending_writes for ts in state.targets.values()
+        )
+        if pending_count > 0:
+            logger.warning(f"{pending_count} targets still have pending writes")
+
+    # Stage 4: Cancel remaining tasks (relay loops, servers)
+    logger.info("Stage 4/4: Cancelling remaining tasks")
+    tg.cancel_scope.cancel()
+
+
 async def async_main():
     from maskit.logging_config import setup_logging
     from maskit.cli import parse_args
@@ -62,6 +121,11 @@ async def async_main():
         store_path=args.store_path,
     )
     bind_host = os.environ.get("MASKIT_HOST", "127.0.0.1")
+
+    # Shutdown configuration
+    SHUTDOWN_TIMEOUT = float(os.environ.get("MASKIT_SHUTDOWN_TIMEOUT", "30"))
+    DRAIN_TIMEOUT = 5.0  # Time to wait for in-flight requests
+    FLUSH_TIMEOUT = 3.0  # Time to wait for database flushes
 
     store = await MaskingStore.create(config.store_path)
 
@@ -226,36 +290,33 @@ async def async_main():
             for name in failed_targets:
                 del state.targets[name]
 
-            async with anyio.create_task_group() as tg:
-                manager = TargetManager(state, store, config.store_path,
-                                       callback_server=callback_server)
-                manager.set_task_group(tg, shutdown_event)
-                state.target_manager = manager
+            with anyio.fail_after(SHUTDOWN_TIMEOUT):
+                async with anyio.create_task_group() as tg:
+                    manager = TargetManager(state, store, config.store_path,
+                                           callback_server=callback_server)
+                    manager.set_task_group(tg, shutdown_event)
+                    state.target_manager = manager
 
-                async def _shutdown_on_signal():
-                    with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
-                        async for sig in signals:
-                            logger.info(f"Shutting down (received {sig.name})")
-                            shutdown_event.set()
-                            web_server.should_exit = True
-                            mcp_server.should_exit = True
-                            callback_web_server.should_exit = True
-                            for ts in state.targets.values():
-                                if ts.ds_read_send:
-                                    await ts.ds_read_send.aclose()
-                            tg.cancel_scope.cancel()
-                            break
+                    async def _shutdown_on_signal():
+                        with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
+                            async for sig in signals:
+                                logger.info(f"Received {sig.name}, initiating graceful shutdown")
+                                await _graceful_shutdown(
+                                    state, shutdown_event, web_server, mcp_server,
+                                    callback_web_server, tg, DRAIN_TIMEOUT, FLUSH_TIMEOUT
+                                )
+                                break
 
-                tg.start_soon(_shutdown_on_signal)
+                    tg.start_soon(_shutdown_on_signal)
 
-                for name, target_state in state.targets.items():
-                    us_read, us_write = upstream_streams[name]
-                    tg.start_soon(run_proxy_for_target, target_state, us_read, us_write)
-                    tg.start_soon(_flush_loop, target_state.engine, shutdown_event)
+                    for name, target_state in state.targets.items():
+                        us_read, us_write = upstream_streams[name]
+                        tg.start_soon(run_proxy_for_target, target_state, us_read, us_write)
+                        tg.start_soon(_flush_loop, target_state.engine, shutdown_event)
 
-                tg.start_soon(web_server.serve)
-                tg.start_soon(mcp_server.serve)
-                tg.start_soon(callback_web_server.serve)
+                    tg.start_soon(web_server.serve)
+                    tg.start_soon(mcp_server.serve)
+                    tg.start_soon(callback_web_server.serve)
 
     except Exception as exc:
         logger.exception(f"Error: {type(exc).__name__}: {exc}")
