@@ -20,6 +20,35 @@
 
 AI coding agents see everything your MCP tools return — database hostnames, API keys, emails, internal URLs. Maskit sits between the agent and the real MCP server, replacing sensitive values with opaque aliases (`host_1`, `email_2`) so the model never sees the real data.
 
+## What Maskit Defends Against
+
+Maskit helps protect against common risks when using AI coding agents with internal tools:
+
+### Data Leakage to AI Models
+- **Problem**: Tool responses containing production database hostnames, internal URLs, API endpoints, and customer data get sent to AI providers
+- **Protection**: Sensitive fields are masked with aliases before reaching the AI's context window
+- **Result**: AI models never see your real infrastructure details or customer information
+
+### Prompt Injection Attacks
+- **Problem**: An attacker could craft prompts to trick the AI into calling destructive operations (e.g., `DROP TABLE`, `rm -rf /`)
+- **Protection**: Argument guardrails block tool calls containing dangerous patterns
+- **Result**: Operations matching blocklist patterns (SQL DROP, file deletion, force push) are rejected before reaching upstream
+
+### Accidental Data Exposure
+- **Problem**: Developers forget which tools expose sensitive data, leading to unintentional leaks during agent-assisted coding
+- **Protection**: Fields can be stripped entirely from responses (SSNs, credit card numbers, etc.)
+- **Result**: Sensitive fields never appear in tool responses, even if upstream returns them
+
+### Over-Privileged Tool Access
+- **Problem**: AI agents with full tool access can perform write operations when only read is needed
+- **Protection**: Argument injections force safe defaults (e.g., always set `read_only: true`)
+- **Result**: Agents operate with least-privilege access, reducing blast radius of mistakes
+
+### Context Window Poisoning
+- **Problem**: Legitimate tools returning PII/credentials could poison the agent's context across sessions
+- **Protection**: Stable aliasing ensures the same real value gets the same alias across tool calls
+- **Result**: Agents can reference values without seeing real data, preserving functionality
+
 ## What Maskit is NOT
 
 Maskit is a **data masking proxy** focused on keeping sensitive values out of AI context windows. It is not:
