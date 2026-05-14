@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/shared.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -83,6 +84,7 @@
                             <button x-show="!server.installed"
                                     class="btn-primary btn-install"
                                     :disabled="server.installing"
+                                    :aria-label="'Install ' + server.name"
                                     @click.stop="installServer(server)">
                                 <span x-show="!server.installing">Install</span>
                                 <span x-show="server.installing" class="spinner spinner-sm"></span>
@@ -90,13 +92,20 @@
 
                             <button x-show="server.installed && server.active"
                                     class="btn-danger"
+                                    :disabled="server.deactivating"
+                                    :aria-label="'Deactivate ' + server.name"
                                     @click.stop="deactivateServer(server)">
-                                Deactivate
+                                <span x-show="!server.deactivating">Deactivate</span>
+                                <span x-show="server.deactivating" class="btn-loading">
+                                    <span class="spinner spinner-sm"></span>
+                                    Deactivating...
+                                </span>
                             </button>
 
                             <button x-show="server.installed && !server.active"
                                     class="btn-activate"
                                     :disabled="server.installing"
+                                    :aria-label="'Activate ' + server.name"
                                     @click.stop="activateServer(server)">
                                 <span x-show="!server.installing">Activate</span>
                                 <span x-show="server.installing" class="spinner spinner-sm"></span>
@@ -276,6 +285,7 @@ function marketplacePage() {
 
         async deactivateServer(server) {
             if (!confirm(`Deactivate ${server.name}? This will disconnect the server.`)) return;
+            server.deactivating = true;
             try {
                 const res = await fetch('/api/marketplace/deactivate', {
                     method: 'POST',
@@ -285,13 +295,16 @@ function marketplacePage() {
                 if (res.ok) {
                     server.active = false;
                     server.connected = false;
+                    server.deactivating = false;
                     this.showToast(`${server.name} deactivated`);
                 } else {
                     const data = await res.json();
                     this.showToast(data.error || 'Deactivation failed', 'error');
+                    server.deactivating = false;
                 }
             } catch (e) {
                 this.showToast('Network error: ' + e.message, 'error');
+                server.deactivating = false;
             }
         },
 

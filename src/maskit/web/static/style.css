@@ -338,15 +338,52 @@ code {
     border: 1px solid var(--border-subtle);
 }
 
-/* --- Blur effect for sensitive values --- */
+/* --- Blur effect for sensitive values (accessible toggle) --- */
+.sensitive-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .blur {
     filter: blur(4px);
     transition: filter var(--transition-base);
-    cursor: pointer;
+    user-select: none;
 }
 
-.blur:hover {
+.blur.revealed {
     filter: none;
+}
+
+.btn-reveal {
+    background: transparent;
+    border: 1px solid var(--border-default);
+    color: var(--text-secondary);
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.btn-reveal:hover {
+    background: var(--bg-hover);
+    border-color: var(--teal);
+    color: var(--teal);
+}
+
+.btn-reveal:active {
+    transform: scale(0.95);
+}
+
+.btn-reveal svg {
+    width: 12px;
+    height: 12px;
 }
 
 /* --- Buttons --- */

@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/shared.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -63,7 +64,8 @@
                         </a>
                         <button class="tool-hide-btn"
                                 @click="toggleHidden(tool.name, $event)"
-                                :title="isHidden(tool.name) ? 'Show tool to agent' : 'Hide tool from agent'">
+                                :title="isHidden(tool.name) ? 'Show tool to agent' : 'Hide tool from agent'"
+                                :aria-label="isHidden(tool.name) ? 'Show tool to agent' : 'Hide tool from agent'">
                             <svg x-show="!isHidden(tool.name)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
                                 <circle cx="12" cy="12" r="3"/>
@@ -102,7 +104,15 @@
                             <tr>
                                 <td><code x-text="rule.field_path"></code></td>
                                 <td x-text="rule.alias_prefix || ('_masked_' + rule.field_path.split('.').pop())"></td>
-                                <td><button class="btn-danger" @click="deleteRule(rule.id)">Delete</button></td>
+                                <td>
+                                    <button class="btn-danger" @click="deleteRule(rule.id)" :disabled="rule.deleting" aria-label="Delete rule">
+                                        <span x-show="!rule.deleting">Delete</span>
+                                        <span x-show="rule.deleting" class="btn-loading">
+                                            <span class="spinner spinner-sm"></span>
+                                            Deleting...
+                                        </span>
+                                    </button>
+                                </td>
                             </tr>
                         </template>
                     </tbody>
@@ -126,7 +136,15 @@
                                 <td><code x-text="mapper.pattern"></code></td>
                                 <td x-text="mapper.alias_prefix"></td>
                                 <td x-text="mapper.order"></td>
-                                <td><button class="btn-danger" @click="deleteMapper(mapper.id)">Delete</button></td>
+                                <td>
+                                    <button class="btn-danger" @click="deleteMapper(mapper.id)" :disabled="mapper.deleting" aria-label="Delete mapper">
+                                        <span x-show="!mapper.deleting">Delete</span>
+                                        <span x-show="mapper.deleting" class="btn-loading">
+                                            <span class="spinner spinner-sm"></span>
+                                            Deleting...
+                                        </span>
+                                    </button>
+                                </td>
                             </tr>
                         </template>
                     </tbody>
@@ -178,7 +196,22 @@
                     <template x-for="m in mappings" :key="m.alias">
                         <tr>
                             <td><code x-text="m.alias"></code></td>
-                            <td class="blur" x-text="m.real_value"></td>
+                            <td>
+                                <div class="sensitive-value">
+                                    <span class="blur" :class="{ 'revealed': m.revealed }" x-text="m.real_value"></span>
+                                    <button class="btn-reveal" @click="toggleReveal(m)" :aria-label="m.revealed ? 'Hide value' : 'Reveal value'">
+                                        <svg x-show="!m.revealed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                            <circle cx="12" cy="12" r="3"/>
+                                        </svg>
+                                        <svg x-show="m.revealed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                                            <line x1="1" y1="1" x2="23" y2="23"/>
+                                        </svg>
+                                        <span x-text="m.revealed ? 'Hide' : 'Show'"></span>
+                                    </button>
+                                </div>
+                            </td>
                             <td x-text="m.tool_name"></td>
                             <td x-text="m.field_path"></td>
                         </tr>
@@ -216,7 +249,7 @@
                         <div>
                             <div class="detail-header">
                                 <h3 x-text="selectedEntry.tool_name || 'tools/list'"></h3>
-                                <button class="detail-close" @click="selectedEntry = null">&times;</button>
+                                <button class="detail-close" @click="selectedEntry = null" aria-label="Close details">&times;</button>
                             </div>
 
                             <div class="detail-meta">
@@ -277,7 +310,7 @@
         <div class="modal modal-target modal-integration" @click.outside="closeIntegration()">
             <div class="modal-header-bar">
                 <h3>Connect to <span x-text="targetName"></span></h3>
-                <button class="modal-close-btn" @click="closeIntegration()" title="Close">
+                <button class="modal-close-btn" @click="closeIntegration()" title="Close" aria-label="Close integration modal">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
             </div>
@@ -331,28 +364,11 @@ function toolsPage() {
         loading: true,
         ws: null,
         _mappingsInterval: null,
-        _mcpPortCache: null,
         newRule: { field_path: '', alias_prefix: '' },
         newMapper: { pattern: '', alias_prefix: '' },
         toasts: [],
 
-        agents: [
-            { id: 'claude-code', label: 'Claude Code' },
-            { id: 'cursor', label: 'Cursor' },
-            { id: 'vscode', label: 'VS Code' },
-            { id: 'windsurf', label: 'Windsurf' },
-            { id: 'jetbrains', label: 'JetBrains' },
-            { id: 'codex', label: 'Codex' },
-            { id: 'opencode', label: 'OpenCode' },
-        ],
-
-        integration: {
-            visible: false,
-            agent: 'claude-code',
-            mode: 'cli',
-            mcpPort: 9474,
-            copied: false,
-        },
+        ...integrationHelper(),
 
         showToast(msg, type = 'success') {
             this.toasts.push({ id: Date.now(), msg, type });
@@ -455,8 +471,13 @@ function toolsPage() {
                 const res = await fetch(`${this.apiBase()}/mappings`);
                 if (!res.ok) return;
                 const data = await res.json();
-                this.mappings = data.mappings;
+                // Add revealed state to each mapping for accessibility toggle
+                this.mappings = data.mappings.map(m => ({ ...m, revealed: false }));
             } catch {}
+        },
+
+        toggleReveal(mapping) {
+            mapping.revealed = !mapping.revealed;
         },
 
         async addGlobalRule() {
@@ -503,23 +524,31 @@ function toolsPage() {
 
         async deleteRule(id) {
             if (!confirm('Delete this rule?')) return;
+            // Find the rule and add deleting state
+            const rule = this.rules.find(r => r.id === id);
+            if (rule) rule.deleting = true;
             try {
                 await fetch(`${this.apiBase()}/rules/${id}/delete`, { method: 'DELETE' });
                 await this.loadRules();
                 this.showToast('Rule deleted');
             } catch (e) {
                 this.showToast('Failed to delete rule', 'error');
+                if (rule) rule.deleting = false;
             }
         },
 
         async deleteMapper(id) {
             if (!confirm('Delete this mapper?')) return;
+            // Find the mapper and add deleting state
+            const mapper = this.mappers.find(m => m.id === id);
+            if (mapper) mapper.deleting = true;
             try {
                 await fetch(`${this.apiBase()}/mappers/${id}/delete`, { method: 'DELETE' });
                 await this.loadMappers();
                 this.showToast('Mapper deleted');
             } catch (e) {
                 this.showToast('Failed to delete mapper', 'error');
+                if (mapper) mapper.deleting = false;
             }
         },
 
@@ -574,100 +603,8 @@ function toolsPage() {
         },
 
         async openIntegration() {
-            if (!this._mcpPortCache) {
-                try {
-                    const r = await fetch('/api/config');
-                    const data = await r.json();
-                    this._mcpPortCache = data.mcp_port;
-                } catch { this._mcpPortCache = 9474; }
-            }
-            this.integration = {
-                visible: true,
-                agent: 'claude-code',
-                mode: 'cli',
-                mcpPort: this._mcpPortCache,
-                copied: false,
-            };
-        },
-
-        closeIntegration() {
-            this.integration.visible = false;
-        },
-
-        integrationUrl() {
-            return `http://localhost:${this.integration.mcpPort}/${this.targetName}/mcp`;
-        },
-
-        hasCli() {
-            return ['claude-code', 'codex'].includes(this.integration.agent);
-        },
-
-        getCliSnippet() {
-            const url = this.integrationUrl();
-            const name = `maskit-${this.targetName}`;
-            switch (this.integration.agent) {
-                case 'claude-code':
-                    return `claude mcp add --scope project ${name} --transport http ${url}`;
-                case 'codex':
-                    return `codex --mcp-config mcp.json`;
-                default:
-                    return '';
-            }
-        },
-
-        getSnippet() {
-            const url = this.integrationUrl();
-            const name = this.targetName;
-            switch (this.integration.agent) {
-                case 'claude-code':
-                    return JSON.stringify({ mcpServers: { [name]: { type: 'streamable-http', url } } }, null, 2);
-                case 'cursor':
-                    return JSON.stringify({ mcpServers: { [name]: { url } } }, null, 2);
-                case 'vscode':
-                    return JSON.stringify({ servers: { [name]: { type: 'http', url } } }, null, 2);
-                case 'windsurf':
-                    return JSON.stringify({ mcpServers: { [name]: { serverUrl: url } } }, null, 2);
-                case 'jetbrains':
-                    return JSON.stringify({ servers: { [name]: { type: 'http', url } } }, null, 2);
-                case 'codex':
-                    return JSON.stringify({ mcpServers: { [name]: { type: 'url', url } } }, null, 2);
-                case 'opencode':
-                    return JSON.stringify({ mcp: { servers: { [name]: { type: 'streamable-http', url } } } }, null, 2);
-                default:
-                    return '';
-            }
-        },
-
-        getNote() {
-            switch (this.integration.agent) {
-                case 'claude-code':
-                    return 'Add to <code>.mcp.json</code> in your project root, or <code>~/.claude.json</code> globally.';
-                case 'cursor':
-                    return 'Add to <code>.cursor/mcp.json</code> in your project root.';
-                case 'vscode':
-                    return 'Add to <code>.vscode/mcp.json</code> in your workspace.';
-                case 'windsurf':
-                    return 'Add to <code>~/.codeium/windsurf/mcp_config.json</code>.';
-                case 'jetbrains':
-                    return 'Go to <code>Settings &gt; Tools &gt; AI Assistant &gt; MCP Servers</code>, click \'+\', select \'As JSON\', and paste.';
-                case 'codex':
-                    return 'Add to <code>~/.codex/config.json</code> or pass via <code>--mcp-config</code>.';
-                case 'opencode':
-                    return 'Add to your <code>opencode.json</code> config file.';
-                default:
-                    return '';
-            }
-        },
-
-        async copySnippet() {
-            try {
-                const text = this.integration.mode === 'cli' ? this.getCliSnippet() : this.getSnippet();
-                await navigator.clipboard.writeText(text);
-                this.integration.copied = true;
-                setTimeout(() => this.integration.copied = false, 2000);
-            } catch {
-                this.showToast('Failed to copy to clipboard', 'error');
-            }
+            // Pass a mock target object with name property
+            await integrationHelper().openIntegration.call(this, { name: this.targetName });
         },
     };
 }
