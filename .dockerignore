@@ -1,0 +1,47 @@
+# Version control
+.git
+.gitignore
+
+# Python virtual environment
+.venv
+venv
+env
+*.egg-info
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Testing
+tests
+.pytest_cache
+.coverage
+htmlcov
+.tox
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude Code
+.claude
+
+# CI/CD
+.github
+
+# Documentation (not needed in image)
+CONTRIBUTING.md
+
+# Misc
+*.log
+*.db
+*.sqlite
+.env
+.env.*

@@ -282,12 +282,14 @@ docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 \
   maskit
 ```
 
-Ports:
+**Ports:**
 - **9473** — Web dashboard
 - **9474** — MCP endpoint (where AI agents connect)
 - **3131** — OAuth callback (for servers requiring OAuth)
 
 The container binds to `0.0.0.0` by default. Set `MASKIT_HOST` to override.
+
+**⚠️ Docker Limitation:** The Docker image only supports **HTTP-based MCP servers** (`transport: http`). Stdio-based servers (`transport: stdio`) require the MCP server executables to be installed in the container, which is not practical. For stdio servers (e.g., `uvx mcp-server-time`, `npx @modelcontextprotocol/server-*`), run Maskit natively on your host machine using `uv run maskit` instead.
 
 ## Marketplace
 

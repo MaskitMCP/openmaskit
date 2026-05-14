@@ -290,33 +290,32 @@ async def async_main():
             for name in failed_targets:
                 del state.targets[name]
 
-            with anyio.fail_after(SHUTDOWN_TIMEOUT):
-                async with anyio.create_task_group() as tg:
-                    manager = TargetManager(state, store, config.store_path,
-                                           callback_server=callback_server)
-                    manager.set_task_group(tg, shutdown_event)
-                    state.target_manager = manager
+            async with anyio.create_task_group() as tg:
+                manager = TargetManager(state, store, config.store_path,
+                                       callback_server=callback_server)
+                manager.set_task_group(tg, shutdown_event)
+                state.target_manager = manager
 
-                    async def _shutdown_on_signal():
-                        with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
-                            async for sig in signals:
-                                logger.info(f"Received {sig.name}, initiating graceful shutdown")
-                                await _graceful_shutdown(
-                                    state, shutdown_event, web_server, mcp_server,
-                                    callback_web_server, tg, DRAIN_TIMEOUT, FLUSH_TIMEOUT
-                                )
-                                break
+                async def _shutdown_on_signal():
+                    with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
+                        async for sig in signals:
+                            logger.info(f"Received {sig.name}, initiating graceful shutdown")
+                            await _graceful_shutdown(
+                                state, shutdown_event, web_server, mcp_server,
+                                callback_web_server, tg, DRAIN_TIMEOUT, FLUSH_TIMEOUT
+                            )
+                            break
 
-                    tg.start_soon(_shutdown_on_signal)
+                tg.start_soon(_shutdown_on_signal)
 
-                    for name, target_state in state.targets.items():
-                        us_read, us_write = upstream_streams[name]
-                        tg.start_soon(run_proxy_for_target, target_state, us_read, us_write)
-                        tg.start_soon(_flush_loop, target_state.engine, shutdown_event)
+                for name, target_state in state.targets.items():
+                    us_read, us_write = upstream_streams[name]
+                    tg.start_soon(run_proxy_for_target, target_state, us_read, us_write)
+                    tg.start_soon(_flush_loop, target_state.engine, shutdown_event)
 
-                    tg.start_soon(web_server.serve)
-                    tg.start_soon(mcp_server.serve)
-                    tg.start_soon(callback_web_server.serve)
+                tg.start_soon(web_server.serve)
+                tg.start_soon(mcp_server.serve)
+                tg.start_soon(callback_web_server.serve)
 
     except Exception as exc:
         logger.exception(f"Error: {type(exc).__name__}: {exc}")
