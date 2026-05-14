@@ -47,15 +47,11 @@ async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
 
 
 async def async_main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        stream=sys.stderr,
-    )
-    logging.getLogger("mcp.client.auth").setLevel(logging.DEBUG)
-    logging.getLogger("maskit.proxy.upstream").setLevel(logging.DEBUG)
-
+    from maskit.logging_config import setup_logging
     from maskit.cli import parse_args
+
+    setup_logging()
+    logger = logging.getLogger(__name__)
 
     args = parse_args()
     config = load_config(
@@ -161,12 +157,12 @@ async def async_main():
     callback_web_server.install_signal_handlers = lambda: None
     state.callback_server = callback_server
 
-    print("Maskit proxy starting", file=sys.stderr)
-    print(f"  Dashboard: http://{bind_host}:{config.web_port}", file=sys.stderr)
-    print(f"  OAuth callback: http://{bind_host}:{config.oauth_port}/callback", file=sys.stderr)
-    print("  MCP servers:", file=sys.stderr)
+    logger.info("Maskit proxy starting")
+    logger.info(f"Dashboard: http://{bind_host}:{config.web_port}")
+    logger.info(f"OAuth callback: http://{bind_host}:{config.oauth_port}/callback")
+    logger.info("MCP servers:")
     for name in state.target_names:
-        print(f"    {name}: http://{bind_host}:{config.mcp_port}/{name}/mcp", file=sys.stderr)
+        logger.info(f"  {name}: http://{bind_host}:{config.mcp_port}/{name}/mcp")
 
     web_app = create_app(state)
     mcp_app = create_mcp_app(state)
@@ -239,7 +235,7 @@ async def async_main():
                 async def _shutdown_on_signal():
                     with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
                         async for sig in signals:
-                            print(f"\nShutting down (received {sig.name})...", file=sys.stderr)
+                            logger.info(f"Shutting down (received {sig.name})")
                             shutdown_event.set()
                             web_server.should_exit = True
                             mcp_server.should_exit = True
@@ -262,12 +258,10 @@ async def async_main():
                 tg.start_soon(callback_web_server.serve)
 
     except Exception as exc:
-        print(f"Error: {type(exc).__name__}: {exc}", file=sys.stderr)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+        logger.exception(f"Error: {type(exc).__name__}: {exc}")
 
     await store.close()
-    print("Maskit stopped.", file=sys.stderr)
+    logger.info("Maskit stopped")
 
 
 def main():

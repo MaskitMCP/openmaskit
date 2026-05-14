@@ -63,10 +63,12 @@ def create_app(state: ProxyState) -> Starlette:
     )
     from maskit.web.routes.rules import rules_create, rules_delete, rules_list, rules_update
     from maskit.web.routes.traffic import TrafficWebSocket, api_mappings
+    from maskit.web.health import health_check
 
     routes = [
         Route("/", targets_page),
         Route("/marketplace", marketplace_page),
+        Route("/health", health_check, methods=["GET"]),
         Route("/api/marketplace", marketplace_list),
         Route("/api/marketplace/install", marketplace_install, methods=["POST"]),
         Route("/api/marketplace/deactivate", marketplace_deactivate, methods=["POST"]),

@@ -133,6 +133,74 @@ maskit config.yaml -w 9000            # Config file + port override
 MASKIT_HOST=0.0.0.0 maskit            # Bind to all interfaces (for Docker)
 ```
 
+### Health Endpoint
+
+Maskit exposes a `/health` endpoint for monitoring and orchestration:
+
+```bash
+curl http://127.0.0.1:9473/health
+```
+
+Response format:
+```json
+{
+  "status": "healthy",
+  "uptime_seconds": 123.45,
+  "targets": [
+    {
+      "name": "slack",
+      "initialized": true,
+      "tools_count": 12,
+      "pending_calls": 0,
+      "status": "healthy"
+    }
+  ],
+  "database": {
+    "connected": true,
+    "status": "healthy"
+  }
+}
+```
+
+Status codes:
+- **200** - System healthy or degraded (some targets down but database OK)
+- **503** - System unhealthy (database unreachable or all targets down)
+
+#### Kubernetes Readiness Probe
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 9473
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+### Structured JSON Logging
+
+Enable JSON logging for production log aggregation:
+
+```bash
+MASKIT_LOG_FORMAT=json maskit
+```
+
+JSON log format:
+```json
+{
+  "timestamp": "2026-05-14T12:00:00.000000+00:00",
+  "level": "INFO",
+  "logger": "maskit.proxy.core",
+  "message": "Target slack initialized",
+  "target_name": "slack"
+}
+```
+
+Default format is human-readable text:
+```
+2026-05-14 12:00:00,000 [maskit.proxy.core] INFO: Target slack initialized
+```
+
 ### Connect AI Agent
 
 Connect your AI agent to Maskit's MCP endpoint (per server):
