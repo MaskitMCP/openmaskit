@@ -8,11 +8,30 @@
   <em>Drop-in MCP proxy that keeps your secrets out of the context window.</em>
 </p>
 
+<p align="center">
+  <strong>⚠️ Early Stage Project — Not Production-Ready</strong><br>
+  Maskit is under active development. Expect breaking changes, incomplete features, and bugs.<br>
+  <strong>Do not use in production environments.</strong> Contributions and feedback are welcome!
+</p>
+
 ---
 
 ## Why
 
 AI coding agents see everything your MCP tools return — database hostnames, API keys, emails, internal URLs. Maskit sits between the agent and the real MCP server, replacing sensitive values with opaque aliases (`host_1`, `email_2`) so the model never sees the real data.
+
+## What Maskit is NOT
+
+Maskit is a **data masking proxy** focused on keeping sensitive values out of AI context windows. It is not:
+
+- **End-to-end encryption** — Data is masked, not encrypted. Real values exist in memory and SQLite.
+- **Authentication/authorization layer** — Maskit assumes the upstream MCP server handles auth. It does not verify user identity.
+- **Audit logging system** — Basic traffic logging exists, but no tamper-proof audit trail for compliance (SOC 2, HIPAA, etc.).
+- **Production-hardened** — This is an early-stage project. Expect bugs, edge cases, and breaking changes.
+
+**Use Maskit for**: Local development, prototyping, and exploring MCP integrations where you want basic data masking.
+
+**Do not use Maskit for**: Production systems handling regulated data (PII, PHI, PCI) without thorough security review and hardening.
 
 ## How it works
 
@@ -280,3 +299,11 @@ Mappers are created per-tool via the dashboard and apply to all future responses
 ```bash
 uv run pytest tests/ -v
 ```
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting issues, submitting pull requests, and areas where we need help.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
