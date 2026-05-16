@@ -98,7 +98,10 @@
                                 </template>
                             </div>
                         </div>
-                        <h3 class="tgt-card-name" x-text="target.name"></h3>
+                        <div class="tgt-card-title">
+                            <img x-show="target.icon_url" :src="target.icon_url" :alt="target.display_name + ' icon'" width="32" height="32" class="tgt-card-icon">
+                            <h3 class="tgt-card-name" x-text="target.display_name"></h3>
+                        </div>
                         <div class="tgt-card-meta">
                             <span class="tgt-meta-badge">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
@@ -265,7 +268,7 @@
                     <pre x-text="integration.mode === 'cli' ? getCliSnippet() : getSnippet()"></pre>
                 </div>
 
-                <p x-show="integration.mode === 'json'" class="integration-note" x-html="getNote()"></p>
+                <p x-show="integration.mode === 'json'" class="integration-note" x-text="getNote()"></p>
             </div>
         </div>
     </div>

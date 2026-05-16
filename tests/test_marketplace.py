@@ -3,12 +3,88 @@
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from unittest.mock import AsyncMock, MagicMock
 
 from maskit.masking.engine import MaskingEngine
 from maskit.masking.rules import MaskingRule
 from maskit.masking.store import MaskingStore
 from maskit.proxy.core import ProxyState, TargetState
 from maskit.web.app import create_app
+
+
+# Mock catalog data matching the old marketplace.json structure
+MOCK_CATALOG = [
+    {
+        "id": "slack-uuid",
+        "handle": "slack",
+        "name": "Slack",
+        "description": "Interact with Slack workspaces",
+        "icon_url": "https://example.com/slack.png",
+        "requires_oauth": True,
+        "transport_type": "http",
+        "mcp_host": "https://mcp.slack.com/mcp",
+        "tags": ["communication", "official"],
+        "official": True,
+    },
+    {
+        "id": "github-uuid",
+        "handle": "github",
+        "name": "GitHub",
+        "description": "Interact with GitHub repositories",
+        "icon_url": "https://example.com/github.png",
+        "requires_oauth": True,
+        "transport_type": "http",
+        "mcp_host": "https://mcp.github.com/mcp",
+        "tags": ["development", "official"],
+        "official": True,
+    },
+    {
+        "id": "docker-uuid",
+        "handle": "docker",
+        "name": "Docker",
+        "description": "Manage Docker containers",
+        "icon_url": "https://example.com/docker.png",
+        "requires_oauth": False,
+        "transport_type": "stdio",
+        "meta": {
+            "command": "uvx",
+            "args": ["mcp-server-docker"],
+            "env": {},
+        },
+        "tags": ["infrastructure"],
+        "official": True,
+    },
+    {
+        "id": "postgres-uuid",
+        "handle": "postgres",
+        "name": "PostgreSQL",
+        "description": "Interact with PostgreSQL databases",
+        "requires_oauth": False,
+        "transport_type": "stdio",
+        "meta": {
+            "command": "uvx",
+            "args": ["mcp-server-postgres"],
+            "env": {"DATABASE_URI": "Placeholder for database URI"},
+        },
+        "tags": ["database"],
+        "official": False,
+    },
+    # Add 6 more to reach 10 total
+    *[
+        {
+            "id": f"server{i}-uuid",
+            "handle": f"server{i}",
+            "name": f"Server {i}",
+            "description": f"Test server {i}",
+            "requires_oauth": False,
+            "transport_type": "stdio",
+            "meta": {"command": "test", "args": [], "env": {}},
+            "tags": ["test"],
+            "official": False,
+        }
+        for i in range(5, 11)
+    ],
+]
 
 
 @pytest_asyncio.fixture
@@ -19,7 +95,33 @@ async def store(tmp_path):
 
 
 @pytest_asyncio.fixture
-async def state(store):
+def mock_backend_client():
+    """Mock backend client for marketplace tests."""
+    client = AsyncMock()
+
+    # Mock get_catalog to return our test catalog
+    client.get_catalog = AsyncMock(return_value=MOCK_CATALOG)
+
+    # Mock get_server_info to return specific server details
+    async def mock_get_server_info(server_id):
+        # Find by UUID
+        for entry in MOCK_CATALOG:
+            if entry["id"] == server_id:
+                return entry
+        return None
+
+    client.get_server_info = AsyncMock(side_effect=mock_get_server_info)
+
+    # Mock OAuth URL generation
+    client.get_oauth_authorize_url = MagicMock(
+        return_value="https://oauth.example.com/authorize"
+    )
+
+    return client
+
+
+@pytest_asyncio.fixture
+async def state(store, mock_backend_client):
     proxy_state = ProxyState()
     proxy_state.store = store
     proxy_state.target_manager = None
@@ -27,8 +129,11 @@ async def state(store):
 
 
 @pytest_asyncio.fixture
-async def client(state):
+async def client(state, mock_backend_client):
     app = create_app(state)
+    # Inject mock backend client into app state
+    app.state.backend_client = mock_backend_client
+    app.state.oauth_states = {}  # For OAuth flow tracking
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -52,11 +157,10 @@ class TestMarketplaceList:
         resp = await client.get("/api/marketplace")
         data = resp.json()
         for server in data["servers"]:
-            assert "id" in server
+            assert "id" in server  # handle used as local ID
+            assert "backend_id" in server  # UUID from backend
             assert "name" in server
             assert "description" in server
-            assert "official" in server
-            assert "tags" in server
             assert "installed" in server
             assert "active" in server
 
@@ -74,32 +178,30 @@ class TestMarketplaceList:
 class TestMarketplaceInstall:
     @pytest.mark.anyio
     async def test_install_server_no_env_vars(self, client, state):
+        """Install a stdio server with no env vars required."""
         resp = await client.post(
             "/api/marketplace/install",
-            json={"server_id": "docker", "env_vars": {}},
+            json={"server_id": "docker", "backend_id": "docker-uuid"},
         )
         assert resp.status_code == 201
         data = resp.json()
         assert data["ok"] is True
+        assert data["connected"] is False  # No manager, can't connect
 
         record = await state.store.get_server("docker")
         assert record is not None
         assert record["name"] == "Docker"
 
     @pytest.mark.anyio
-    async def test_install_missing_env_vars(self, client):
-        resp = await client.post(
-            "/api/marketplace/install",
-            json={"server_id": "postgres", "env_vars": {}},
-        )
-        assert resp.status_code == 400
-        assert "DATABASE_URI" in resp.json()["error"]
-
-    @pytest.mark.anyio
     async def test_install_with_env_vars(self, client, state):
+        """Install stdio server with env vars."""
         resp = await client.post(
             "/api/marketplace/install",
-            json={"server_id": "postgres", "env_vars": {"DATABASE_URI": "postgresql://localhost/test"}},
+            json={
+                "server_id": "postgres",
+                "backend_id": "postgres-uuid",
+                "env_vars": {"DATABASE_URI": "postgresql://localhost/test"},
+            },
         )
         assert resp.status_code == 201
 
@@ -109,66 +211,83 @@ class TestMarketplaceInstall:
 
     @pytest.mark.anyio
     async def test_install_already_installed(self, client, state):
-        await state.store.install_server("docker", "Docker", {"transport": "stdio", "command": "uvx", "args": ["mcp-server-docker"]})
+        """Cannot install server that's already installed."""
+        await state.store.install_server(
+            "docker", "Docker", {"transport": "stdio", "command": "uvx", "args": ["mcp-server-docker"]}
+        )
         resp = await client.post(
             "/api/marketplace/install",
-            json={"server_id": "docker", "env_vars": {}},
+            json={"server_id": "docker", "backend_id": "docker-uuid"},
         )
         assert resp.status_code == 409
 
     @pytest.mark.anyio
     async def test_install_unknown_server(self, client):
+        """Installing unknown server returns 404."""
         resp = await client.post(
             "/api/marketplace/install",
-            json={"server_id": "nonexistent", "env_vars": {}},
+            json={"server_id": "nonexistent", "backend_id": "nonexistent-uuid"},
         )
         assert resp.status_code == 404
 
     @pytest.mark.anyio
     async def test_install_conflicts_with_config_target(self, client, state):
+        """Cannot install marketplace server if config target exists with same name."""
+        # Mark slack as a config target
+        state.config_target_ids.add("slack")
         engine = MaskingEngine([], state.store, target_name="slack")
         target = TargetState(name="slack", engine=engine)
         state.targets["slack"] = target
 
         resp = await client.post(
             "/api/marketplace/install",
-            json={"server_id": "slack", "env_vars": {}},
+            json={"server_id": "slack", "backend_id": "slack-uuid"},
         )
         assert resp.status_code == 409
-        assert "conflicts" in resp.json()["error"]
+        assert "conflicts" in resp.json()["error"].lower()
 
     @pytest.mark.anyio
     async def test_install_missing_server_id(self, client):
+        """Missing server_id returns 400."""
         resp = await client.post(
             "/api/marketplace/install",
-            json={"env_vars": {}},
+            json={"backend_id": "some-uuid"},
         )
         assert resp.status_code == 400
+
+    @pytest.mark.anyio
+    async def test_install_missing_env_vars(self, client):
+        """This test is deprecated - new flow doesn't validate env vars upfront."""
+        # In the new backend-driven flow, env vars are just passed through
+        # Validation happens at connection time, not install time
+        # So we skip this test or change it to test connection failure
+        pass
 
     @pytest.mark.anyio
     async def test_install_missing_oauth_vars(self, client):
-        resp = await client.post(
-            "/api/marketplace/install",
-            json={"server_id": "slack", "env_vars": {}, "oauth_vars": {}},
-        )
-        assert resp.status_code == 400
-        assert "client_id" in resp.json()["error"]
+        """This test is deprecated - OAuth handled by backend, not frontend."""
+        # New flow: OAuth servers return requires_oauth=True and oauth_url
+        # Frontend doesn't collect OAuth credentials manually
+        pass
 
     @pytest.mark.anyio
     async def test_install_with_oauth_vars(self, client, state):
+        """OAuth servers initiate OAuth flow instead of direct install."""
         resp = await client.post(
             "/api/marketplace/install",
-            json={
-                "server_id": "slack",
-                "env_vars": {},
-                "oauth_vars": {"client_id": "test_id", "client_secret": "test_secret"},
-            },
+            json={"server_id": "slack", "backend_id": "slack-uuid"},
         )
-        assert resp.status_code == 201
+        # Should return requires_oauth=True with oauth_url
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["requires_oauth"] is True
+        assert "oauth_url" in data
+        assert data["oauth_url"] == "https://oauth.example.com/authorize"
+
+        # Server should NOT be installed yet (happens after OAuth callback)
         record = await state.store.get_server("slack")
-        assert record is not None
-        assert record["config"]["oauth"]["client_id"] == "test_id"
-        assert record["config"]["oauth"]["client_secret"] == "test_secret"
+        assert record is None
 
 
 class TestMarketplaceDeactivate:

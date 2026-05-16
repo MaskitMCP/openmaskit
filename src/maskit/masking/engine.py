@@ -132,6 +132,13 @@ class MaskingEngine:
             except re.error:
                 pass
 
+    def get_guardrail(self, guardrail_id: int) -> ArgumentGuardrail | None:
+        """Get guardrail by ID."""
+        for g in self._guardrails:
+            if g.id == guardrail_id:
+                return g
+        return None
+
     def remove_guardrail(self, guardrail_id: int):
         self._guardrails = [g for g in self._guardrails if g.id != guardrail_id]
         self._compiled_guardrails.pop(guardrail_id, None)

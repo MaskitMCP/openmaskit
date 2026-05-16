@@ -335,7 +335,7 @@
                     <pre x-text="integration.mode === 'cli' ? getCliSnippet() : getSnippet()"></pre>
                 </div>
 
-                <p x-show="integration.mode === 'json'" class="integration-note" x-html="getNote()"></p>
+                <p x-show="integration.mode === 'json'" class="integration-note" x-text="getNote()"></p>
             </div>
         </div>
     </div>

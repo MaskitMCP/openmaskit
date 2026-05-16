@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     name TEXT NOT NULL,
     config TEXT NOT NULL,
     active BOOLEAN NOT NULL DEFAULT 1,
+    icon_url TEXT,
     installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -174,8 +175,8 @@ class MaskingStore:
     async def get_or_create_alias(
         self, real_value: str, tool_name: str, field_path: str, prefix: str, target_name: str = "default"
     ) -> str:
-        """Get existing alias for a real value, or create a new one."""
-        # First try to get existing - this is the common case after warmup
+        """Get or create alias for a real value (handles concurrent requests)."""
+        # Check existing first - this handles the common case after warmup
         async with self._db.execute(
             "SELECT alias FROM mappings WHERE real_value = ? AND field_path = ? AND target_name = ?",
             (real_value, field_path, target_name),
@@ -185,6 +186,7 @@ class MaskingStore:
                 return row[0]
 
         # Create new alias - use retry loop to handle concurrent inserts
+        # This is the standard pattern for handling races in optimistic concurrency
         for attempt in range(3):
             counter = self._alias_counters.get(prefix, 0) + 1
             self._alias_counters[prefix] = counter
@@ -337,14 +339,23 @@ class MaskingStore:
         if not fields:
             return False
         allowed = {"tool_name", "argument_name", "match_type", "pattern", "message", "active"}
-        updates = {k: v for k, v in fields.items() if k in allowed}
-        if not updates:
+
+        # Build SET clauses and values list with explicit validation
+        set_clauses = []
+        values = []
+        for k, v in fields.items():
+            if k in allowed:
+                set_clauses.append(f"{k} = ?")
+                values.append(v)
+
+        if not set_clauses:
             return False
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [guardrail_id]
-        cursor = await self._db.execute(
-            f"UPDATE guardrails SET {set_clause} WHERE id = ?", values
-        )
+
+        # Construct query with validated field names only
+        query = f"UPDATE guardrails SET {', '.join(set_clauses)} WHERE id = ?"
+        values.append(guardrail_id)
+
+        cursor = await self._db.execute(query, values)
         await self._db.commit()
         return cursor.rowcount > 0
 
@@ -389,14 +400,23 @@ class MaskingStore:
         if not fields:
             return False
         allowed = {"tool_name", "argument_name", "value", "mode", "active"}
-        updates = {k: v for k, v in fields.items() if k in allowed}
-        if not updates:
+
+        # Build SET clauses and values list with explicit validation
+        set_clauses = []
+        values = []
+        for k, v in fields.items():
+            if k in allowed:
+                set_clauses.append(f"{k} = ?")
+                values.append(v)
+
+        if not set_clauses:
             return False
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [injection_id]
-        cursor = await self._db.execute(
-            f"UPDATE injections SET {set_clause} WHERE id = ?", values
-        )
+
+        # Construct query with validated field names only
+        query = f"UPDATE injections SET {', '.join(set_clauses)} WHERE id = ?"
+        values.append(injection_id)
+
+        cursor = await self._db.execute(query, values)
         await self._db.commit()
         return cursor.rowcount > 0
 
@@ -497,11 +517,11 @@ class MaskingStore:
 
     # --- Marketplace Servers ---
 
-    async def install_server(self, server_id: str, name: str, config: dict) -> None:
+    async def install_server(self, server_id: str, name: str, config: dict, icon_url: str | None = None) -> None:
         config_json = json.dumps(config)
         await self._db.execute(
-            "INSERT OR REPLACE INTO mcp_servers (id, name, config, active) VALUES (?, ?, ?, 1)",
-            (server_id, name, config_json),
+            "INSERT OR REPLACE INTO mcp_servers (id, name, config, active, icon_url) VALUES (?, ?, ?, 1, ?)",
+            (server_id, name, config_json, icon_url),
         )
         await self._db.commit()
 
@@ -537,9 +557,9 @@ class MaskingStore:
 
     async def get_installed_servers(self, active_only: bool = False) -> list[dict]:
         if active_only:
-            query = "SELECT id, name, config, active, installed_at FROM mcp_servers WHERE active = 1"
+            query = "SELECT id, name, config, active, icon_url, installed_at FROM mcp_servers WHERE active = 1"
         else:
-            query = "SELECT id, name, config, active, installed_at FROM mcp_servers"
+            query = "SELECT id, name, config, active, icon_url, installed_at FROM mcp_servers"
 
         async with self._db.execute(query) as cursor:
             rows = await cursor.fetchall()
@@ -549,7 +569,8 @@ class MaskingStore:
                     "name": r[1],
                     "config": json.loads(r[2]),
                     "active": bool(r[3]),
-                    "installed_at": r[4],
+                    "icon_url": r[4],
+                    "installed_at": r[5],
                 }
                 for r in rows
             ]

@@ -40,6 +40,7 @@ def create_app(state: ProxyState) -> Starlette:
         marketplace_list,
         marketplace_page,
     )
+    from maskit.web.routes.oauth_callback import oauth_callback
     from maskit.web.routes.pages import (
         api_config,
         api_targets,
@@ -73,6 +74,7 @@ def create_app(state: ProxyState) -> Starlette:
         Route("/api/marketplace/install", marketplace_install, methods=["POST"]),
         Route("/api/marketplace/deactivate", marketplace_deactivate, methods=["POST"]),
         Route("/api/marketplace/activate", marketplace_activate, methods=["POST"]),
+        Route("/oauth/callback/{handle}", oauth_callback, methods=["GET"]),
         Route("/targets/{target_name}/tools", tools_page),
         Route("/api/config", api_config),
         Route("/api/targets/custom", custom_target_create, methods=["POST"]),

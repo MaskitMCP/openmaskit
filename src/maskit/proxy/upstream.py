@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -19,6 +20,23 @@ if TYPE_CHECKING:
     from maskit.oauth.handler import OAuthCallbackServer
 
 logger = logging.getLogger(__name__)
+
+
+def _load_backend_oauth_token(server_id: str, store_path: str) -> str | None:
+    """Load OAuth access token from backend-managed token file."""
+    oauth_dir = Path(store_path).expanduser().parent / "oauth"
+    token_path = oauth_dir / f"{server_id}.json"
+
+    if not token_path.exists():
+        return None
+
+    try:
+        with open(token_path) as f:
+            data = json.load(f)
+            return data.get("tokens", {}).get("access_token")
+    except Exception as e:
+        logger.warning(f"Failed to load OAuth token for {server_id}: {e}")
+        return None
 
 
 @asynccontextmanager
@@ -45,7 +63,24 @@ async def connect_upstream(
             yield read_stream, write_stream
 
     elif isinstance(upstream, UpstreamHttpConfig):
-        if upstream.oauth:
+        # Check if there's a backend-managed OAuth token first
+        access_token = None
+        if upstream.oauth and server_id:
+            access_token = _load_backend_oauth_token(server_id, store_path)
+
+        if access_token:
+            # Backend-managed OAuth: use simple Bearer token auth
+            logger.info(f"Using backend-managed OAuth token for {server_id}")
+            headers = {"Authorization": f"Bearer {access_token}"}
+            http_client = httpx.AsyncClient(headers=headers, follow_redirects=True)
+            async with http_client:
+                async with streamable_http_client(
+                    upstream.url, http_client=http_client
+                ) as (read_stream, write_stream, _get_session_id):
+                    yield read_stream, write_stream
+
+        elif upstream.oauth:
+            # Self-managed OAuth: use OAuth provider (original behavior for local servers)
             from maskit.oauth.handler import create_oauth_provider
 
             oauth_dir = Path(store_path).expanduser().parent / "oauth"
@@ -60,7 +95,7 @@ async def connect_upstream(
                 callback_server=callback_server,
             )
 
-            http_client = httpx.AsyncClient(auth=provider)
+            http_client = httpx.AsyncClient(auth=provider, follow_redirects=True)
             async with http_client:
                 async with streamable_http_client(
                     upstream.url, http_client=http_client
@@ -68,12 +103,13 @@ async def connect_upstream(
                     yield read_stream, write_stream
 
         else:
-            async with streamable_http_client(upstream.url) as (
-                read_stream,
-                write_stream,
-                _get_session_id,
-            ):
-                yield read_stream, write_stream
+            # No OAuth: simple HTTP connection
+            http_client = httpx.AsyncClient(follow_redirects=True)
+            async with http_client:
+                async with streamable_http_client(
+                    upstream.url, http_client=http_client
+                ) as (read_stream, write_stream, _get_session_id):
+                    yield read_stream, write_stream
 
     else:
         raise ValueError(f"Unknown upstream config type: {type(upstream)}")

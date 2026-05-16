@@ -45,6 +45,8 @@ class FileTokenStorage:
 
     def _write(self, data: dict):
         self._path.write_text(json.dumps(data, indent=2, default=str))
+        # Restrict permissions to owner-only (0o600 = rw-------)
+        self._path.chmod(0o600)
 
     async def get_tokens(self) -> OAuthToken | None:
         data = self._read()

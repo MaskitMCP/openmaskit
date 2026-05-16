@@ -223,7 +223,9 @@ class TestHttpMcpEndpoint:
         assert response.status_code == 504
         data = response.json()
         assert "error" in data
-        assert "timeout" in data["error"]["message"].lower()
+        # Accept either "timeout" or "timed out" in the error message
+        error_msg = data["error"]["message"].lower()
+        assert "timeout" in error_msg or "timed out" in error_msg
 
     def test_post_mcp_method_not_found_error(self, client, state):
         """Hidden tool returns METHOD_NOT_FOUND."""

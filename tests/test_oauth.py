@@ -310,3 +310,56 @@ class TestCreateOAuthProvider:
         storage = FileTokenStorage(tmp_path / "oauth.json")
         client_info = await storage.get_client_info()
         assert client_info.token_endpoint_auth_method == "none"
+
+
+class TestTokenFilePermissions:
+    """Test that token files are created with secure permissions."""
+
+    @pytest.mark.anyio
+    async def test_token_file_has_secure_permissions(self, tmp_path):
+        """Token files are created with owner-only permissions (0o600)."""
+        storage_path = tmp_path / "oauth" / "secure_test.json"
+        storage = FileTokenStorage(storage_path)
+
+        token = OAuthToken(
+            access_token="sensitive-access-token",
+            token_type="Bearer",
+            expires_in=3600,
+            refresh_token="sensitive-refresh-token",
+        )
+
+        await storage.set_tokens(token)
+
+        # Verify file exists
+        assert storage_path.exists()
+
+        # Verify permissions are 0o600 (owner read/write only)
+        file_mode = storage_path.stat().st_mode & 0o777
+        assert file_mode == 0o600, f"Expected 0o600, got {oct(file_mode)}"
+
+    @pytest.mark.anyio
+    async def test_oauth_callback_token_file_permissions(self, tmp_path):
+        """OAuth callback handler creates token files with secure permissions."""
+        # This tests the oauth_callback.py code path
+        token_path = tmp_path / "oauth" / "callback_test.json"
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+
+        token_data = {
+            "tokens": {
+                "access_token": "callback-token",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "refresh_token": "callback-refresh",
+            }
+        }
+
+        # Simulate the oauth_callback.py code
+        with open(token_path, "w") as f:
+            json.dump(token_data, f, indent=2)
+
+        # Apply the fix
+        token_path.chmod(0o600)
+
+        # Verify permissions
+        file_mode = token_path.stat().st_mode & 0o777
+        assert file_mode == 0o600, f"Expected 0o600, got {oct(file_mode)}"

@@ -8,6 +8,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from maskit.masking.rules import ArgumentGuardrail
+from .mappers import _check_regex_safety
 
 MAX_PATTERN_LENGTH = 500
 MAX_MESSAGE_LENGTH = 500
@@ -59,10 +60,10 @@ async def guardrails_create(request: Request):
         return JSONResponse({"error": f"message too long (max {MAX_MESSAGE_LENGTH})"}, status_code=400)
 
     if match_type == "regex":
-        try:
-            re.compile(pattern)
-        except re.error as exc:
-            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+        # Safety check
+        is_safe, error = _check_regex_safety(pattern)
+        if not is_safe:
+            return JSONResponse({"error": error}, status_code=400)
 
     guardrail = ArgumentGuardrail(
         tool_name=tool_name,
@@ -104,11 +105,18 @@ async def guardrails_update(request: Request):
     if "match_type" in body and body["match_type"] not in ("regex", "contains", "equals"):
         return JSONResponse({"error": "match_type must be 'regex', 'contains', or 'equals'"}, status_code=400)
 
-    if "pattern" in body and body.get("match_type", "") == "regex":
-        try:
-            re.compile(body["pattern"])
-        except re.error as exc:
-            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+    # Get existing guardrail to check match_type
+    guardrail = target.engine.get_guardrail(guardrail_id)
+    if not guardrail:
+        return JSONResponse({"error": "Guardrail not found"}, status_code=404)
+
+    # Check if updating pattern with regex match_type
+    current_match_type = body.get("match_type", guardrail.match_type)
+    if "pattern" in body and current_match_type == "regex":
+        # Safety check
+        is_safe, error = _check_regex_safety(body["pattern"])
+        if not is_safe:
+            return JSONResponse({"error": error}, status_code=400)
 
     fields = {}
     for key in ("tool_name", "argument_name", "match_type", "pattern", "message", "active"):

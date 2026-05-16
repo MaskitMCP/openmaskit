@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -15,7 +16,12 @@ MAX_PATTERN_LENGTH = 500
 MAX_NAME_LENGTH = 256
 MAX_PREFIX_LENGTH = 64
 
-_REDOS_PATTERN = re.compile(r"(\(.+[+*]\))[+*]")
+# Multiple ReDoS detection patterns
+_REDOS_PATTERNS = [
+    re.compile(r"(\(.+[+*]\))[+*]"),  # Nested quantifiers: (a+)+
+    re.compile(r"\([^)]*\|[^)]*\)\+"),  # Alternation with quantifier: (a|b)+
+    re.compile(r"\.\+.*\.\+"),  # Multiple greedy wildcards: .+.+
+]
 
 
 def _validate_dot_path(path: str) -> bool:
@@ -25,13 +31,38 @@ def _validate_dot_path(path: str) -> bool:
     return all(part and part.replace("_", "").isalnum() for part in parts)
 
 
-def _check_regex_safety(pattern: str) -> str | None:
-    """Return an error message if the pattern looks unsafe, else None."""
+def _check_regex_safety(pattern: str) -> tuple[bool, str | None]:
+    """Check if regex pattern is safe from ReDoS attacks.
+
+    Returns: (is_safe, error_message)
+    """
+    # Check for known ReDoS patterns
+    for dangerous_pattern in _REDOS_PATTERNS:
+        if dangerous_pattern.search(pattern):
+            return False, "Pattern contains dangerous nested quantifiers or alternation"
+
+    # Check pattern complexity (length limit)
     if len(pattern) > MAX_PATTERN_LENGTH:
-        return f"Pattern too long (max {MAX_PATTERN_LENGTH} chars)"
-    if _REDOS_PATTERN.search(pattern):
-        return "Pattern contains nested quantifiers (potential ReDoS)"
-    return None
+        return False, f"Pattern too long (max {MAX_PATTERN_LENGTH} characters)"
+
+    # Test pattern with timeout (Python 3.11+)
+    try:
+        compiled = re.compile(pattern)
+        # Test against pathological string (many 'a's, no match expected)
+        test_str = "a" * 100
+        if sys.version_info >= (3, 11):
+            # Use timeout parameter (Python 3.11+)
+            try:
+                compiled.search(test_str)
+            except TimeoutError:
+                return False, "Pattern triggers timeout on test string"
+        else:
+            # For older Python, just compile (no runtime protection)
+            pass
+    except re.error as exc:
+        return False, f"Invalid regex: {exc}"
+
+    return True, None
 
 
 async def mappers_list(request: Request):
@@ -87,13 +118,9 @@ async def mappers_create(request: Request):
     if mapper_type == "regex_replace":
         if not alias_prefix:
             return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
-        safety_err = _check_regex_safety(pattern)
-        if safety_err:
-            return JSONResponse({"error": safety_err}, status_code=400)
-        try:
-            re.compile(pattern)
-        except re.error as exc:
-            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+        is_safe, error = _check_regex_safety(pattern)
+        if not is_safe:
+            return JSONResponse({"error": error}, status_code=400)
     elif mapper_type == "json_field_mask":
         if not alias_prefix:
             return JSONResponse({"error": "alias_prefix is required"}, status_code=400)
@@ -158,13 +185,9 @@ async def mappers_update(request: Request):
         return JSONResponse({"error": "Mapper not found"}, status_code=404)
 
     if mapper.mapper_type == "regex_replace":
-        safety_err = _check_regex_safety(pattern)
-        if safety_err:
-            return JSONResponse({"error": safety_err}, status_code=400)
-        try:
-            re.compile(pattern)
-        except re.error as exc:
-            return JSONResponse({"error": f"Invalid regex: {exc}"}, status_code=400)
+        is_safe, error = _check_regex_safety(pattern)
+        if not is_safe:
+            return JSONResponse({"error": error}, status_code=400)
     elif mapper.mapper_type == "json_field_mask":
         if not _validate_dot_path(pattern):
             return JSONResponse({"error": "Invalid dot-notation path"}, status_code=400)

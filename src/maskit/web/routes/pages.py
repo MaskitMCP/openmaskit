@@ -36,21 +36,24 @@ async def api_targets(request: Request):
     state = request.app.state.proxy_state
     store = state.store
 
-    # Load marketplace catalog to check if servers are from marketplace
-    from maskit.web.routes.marketplace import _load_catalog
-    catalog_ids = {entry["id"] for entry in _load_catalog()}
+    # Check which servers are from marketplace (stored in DB)
+    installed_servers = await store.get_installed_servers()
+    marketplace_map = {s["id"]: s for s in installed_servers}
 
     targets = []
     for name, ts in state.targets.items():
         # A target is editable only if it's NOT from config file AND NOT from marketplace
-        editable = name not in state.config_target_ids and name not in catalog_ids
+        editable = name not in state.config_target_ids and name not in marketplace_map
+        server_record = marketplace_map.get(name)
         targets.append({
             "name": name,
+            "display_name": server_record["name"] if server_record else name,
             "tool_count": len(ts.tool_schemas),
             "rule_count": len(ts.engine.rules),
             "mapper_count": len(ts.engine.mappers),
             "initialized": ts.initialized,
             "editable": editable,
+            "icon_url": server_record["icon_url"] if server_record else None,
         })
     return JSONResponse({"targets": targets})
 

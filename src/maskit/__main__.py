@@ -221,14 +221,26 @@ async def async_main():
     callback_web_server.install_signal_handlers = lambda: None
     state.callback_server = callback_server
 
+    # Initialize backend client for marketplace and auth integration
+    from maskit.backend_client import BackendClient
+
+    backend_client = BackendClient()
+    oauth_states: dict[str, dict] = {}  # {csrf_state: {server_id, handle, timestamp}}
+
     logger.info("Maskit proxy starting")
     logger.info(f"Dashboard: http://{bind_host}:{config.web_port}")
     logger.info(f"OAuth callback: http://{bind_host}:{config.oauth_port}/callback")
+    if backend_client.enabled:
+        logger.info(f"Backend integration enabled:")
+        logger.info(f"  Auth backend: {backend_client.auth_url}")
+        logger.info(f"  Marketplace API: {backend_client.marketplace_url}")
     logger.info("MCP servers:")
     for name in state.target_names:
         logger.info(f"  {name}: http://{bind_host}:{config.mcp_port}/{name}/mcp")
 
     web_app = create_app(state)
+    web_app.state.backend_client = backend_client
+    web_app.state.oauth_states = oauth_states
     mcp_app = create_mcp_app(state)
 
     uvicorn_config = uvicorn.Config(
@@ -296,6 +308,11 @@ async def async_main():
                 manager.set_task_group(tg, shutdown_event)
                 state.target_manager = manager
 
+                # Start OAuth state cleanup task if backend is enabled
+                if backend_client.enabled:
+                    from maskit.web.routes.oauth_callback import cleanup_expired_oauth_states
+                    tg.start_soon(cleanup_expired_oauth_states, oauth_states)
+
                 async def _shutdown_on_signal():
                     with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
                         async for sig in signals:
@@ -319,8 +336,10 @@ async def async_main():
 
     except Exception as exc:
         logger.exception(f"Error: {type(exc).__name__}: {exc}")
+    finally:
+        await backend_client.close()
+        await store.close()
 
-    await store.close()
     logger.info("Maskit stopped")
 
 

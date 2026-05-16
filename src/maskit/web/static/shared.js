@@ -97,19 +97,19 @@ function getJsonSnippet(targetName, mcpPort, agentId) {
 function getIntegrationNote(agentId) {
     switch (agentId) {
         case 'claude-code':
-            return 'Add to <code>.mcp.json</code> in your project root, or <code>~/.claude.json</code> globally.';
+            return 'Add to .mcp.json in your project root, or ~/.claude.json globally.';
         case 'cursor':
-            return 'Add to <code>.cursor/mcp.json</code> in your project root.';
+            return 'Add to .cursor/mcp.json in your project root.';
         case 'vscode':
-            return 'Add to <code>.vscode/mcp.json</code> in your workspace.';
+            return 'Add to .vscode/mcp.json in your workspace.';
         case 'windsurf':
-            return 'Add to <code>~/.codeium/windsurf/mcp_config.json</code>.';
+            return 'Add to ~/.codeium/windsurf/mcp_config.json.';
         case 'jetbrains':
-            return 'Go to <code>Settings &gt; Tools &gt; AI Assistant &gt; MCP Servers</code>, click \'+\', select \'As JSON\', and paste.';
+            return 'Go to Settings > Tools > AI Assistant > MCP Servers, click \'+\', select \'As JSON\', and paste.';
         case 'codex':
-            return 'Add to <code>~/.codex/config.json</code> or pass via <code>--mcp-config</code>.';
+            return 'Add to ~/.codex/config.json or pass via --mcp-config.';
         case 'opencode':
-            return 'Add to your <code>opencode.json</code> config file.';
+            return 'Add to your opencode.json config file.';
         default:
             return '';
     }
