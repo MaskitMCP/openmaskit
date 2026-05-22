@@ -233,7 +233,7 @@
         <section class="panel">
             <h2>
                 Output Masking
-                <button class="help-icon" onclick="startTutorial('output-mappers')"
+                <button class="help-icon" @click="startTutorial(tryResult ? 'output-mappers-with-result' : 'output-mappers')"
                         title="Show tutorial" aria-label="Show output mappers tutorial"></button>
             </h2>
             <p class="section-hint">Apply regex patterns to mask sensitive values in tool responses.</p>

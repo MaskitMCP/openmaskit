@@ -3,18 +3,33 @@
     "title": "Argument Guardrails",
     "steps": [
         {
-            "text": "Guardrails block dangerous calls. Select an argument, match type ('contains', 'equals', 'regex'), and pattern to block.",
-            "target": ".add-guardrail-form",
+            "text": "Guardrails block dangerous operations before they reach your servers. Example: prevent 'DROP TABLE' commands or operations on production databases.",
+            "target": "section.panel:contains('Argument Guardrails')",
+            "position": "bottom"
+        },
+        {
+            "text": "Select which argument to check. Use '*' to scan all arguments recursively, or pick a specific field from your tool's schema.",
+            "target": "select[x-model='newGuardrail.argument_name']",
+            "position": "bottom"
+        },
+        {
+            "text": "Choose match type: 'contains' (case-insensitive substring), 'equals' (exact match), or 'regex' (pattern matching).",
+            "target": "select[x-model='newGuardrail.match_type']",
+            "position": "bottom"
+        },
+        {
+            "text": "Enter the pattern to block (e.g., 'DROP TABLE', 'prod', '.*DELETE.*'). Tool calls matching this pattern will be rejected.",
+            "target": "input[x-model='newGuardrail.pattern']",
             "position": "top"
         },
         {
-            "text": "Example: Block 'database_name' containing 'prod'. Use '*' to scan all arguments for your pattern.",
-            "target": ".add-guardrail-form",
+            "text": "Set a clear error message that the AI will see when blocked. Example: 'Cannot operate on production database'.",
+            "target": "input[x-model='newGuardrail.message']",
             "position": "top"
         },
         {
-            "text": "Set a clear error message ('Cannot operate on production database'). Add guardrail - matching calls are now blocked!",
-            "target": ".add-guardrail-form",
+            "text": "Click 'Add Guardrail' to save. Test it in 'Try It Out' below - dangerous calls are now blocked with your custom message!",
+            "target": "button:contains('Add Guardrail')",
             "position": "top"
         }
     ]

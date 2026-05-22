@@ -70,6 +70,32 @@ class Tutorial {
         this.currentStep = 0;
         this.createOverlay();
         this.showStep(0);
+        this.setupScrollTracking();
+    }
+
+    setupScrollTracking() {
+        // Track scroll and window resize to update positions
+        this.scrollHandler = () => {
+            if (this.overlay && this.currentStep < this.steps.length) {
+                this.updatePositions();
+            }
+        };
+        this.resizeHandler = () => {
+            if (this.overlay && this.currentStep < this.steps.length) {
+                this.updatePositions();
+            }
+        };
+
+        window.addEventListener('scroll', this.scrollHandler, true); // Use capture to catch all scrolls
+        window.addEventListener('resize', this.resizeHandler);
+    }
+
+    updatePositions() {
+        const step = this.steps[this.currentStep];
+        if (step.target) {
+            this.highlightElement(step.target);
+            this.positionPopover(step.target, step.position || 'bottom');
+        }
     }
 
     createOverlay() {
@@ -113,10 +139,12 @@ class Tutorial {
         popover.querySelector('.tutorial-step-text').textContent = step.text;
         popover.querySelector('.tutorial-progress').textContent = `Step ${index + 1} of ${this.steps.length}`;
 
-        // Highlight target element
+        // Highlight target element and scroll to it if needed
         if (step.target) {
-            this.highlightElement(step.target);
-            this.positionPopover(step.target, step.position || 'bottom');
+            this.scrollToTarget(step.target, () => {
+                this.highlightElement(step.target);
+                this.positionPopover(step.target, step.position || 'bottom');
+            });
         } else {
             this.clearHighlight();
             this.positionPopover(null, 'center');
@@ -136,8 +164,66 @@ class Tutorial {
         }
     }
 
+    scrollToTarget(selector, callback) {
+        // Resolve selector (handle :contains())
+        let element;
+        const containsMatch = selector.match(/^(.+):contains\(['"](.+)['"]\)$/);
+
+        if (containsMatch) {
+            const [, baseSelector, textContent] = containsMatch;
+            const candidates = document.querySelectorAll(baseSelector);
+            for (const candidate of candidates) {
+                if (candidate.textContent.includes(textContent)) {
+                    element = candidate;
+                    break;
+                }
+            }
+        } else {
+            element = document.querySelector(selector);
+        }
+
+        if (!element) {
+            callback();
+            return;
+        }
+
+        const rect = element.getBoundingClientRect();
+        const isVisible = (
+            rect.top >= 0 &&
+            rect.left >= 0 &&
+            rect.bottom <= window.innerHeight &&
+            rect.right <= window.innerWidth
+        );
+
+        if (!isVisible) {
+            // Scroll element into view
+            element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            // Wait for scroll animation, then position popover
+            setTimeout(callback, 500);
+        } else {
+            // Already visible, proceed immediately
+            callback();
+        }
+    }
+
     highlightElement(selector) {
-        const element = document.querySelector(selector);
+        // Support text-matching pseudo-selector: .class:contains('text')
+        let element;
+        const containsMatch = selector.match(/^(.+):contains\(['"](.+)['"]\)$/);
+
+        if (containsMatch) {
+            const [, baseSelector, textContent] = containsMatch;
+            const candidates = document.querySelectorAll(baseSelector);
+            for (const candidate of candidates) {
+                if (candidate.textContent.includes(textContent)) {
+                    element = candidate;
+                    break;
+                }
+            }
+        } else {
+            element = document.querySelector(selector);
+        }
+
         if (!element) {
             console.warn('Tutorial target not found:', selector);
             this.clearHighlight();
@@ -251,7 +337,23 @@ class Tutorial {
             return;
         }
 
-        const target = document.querySelector(targetSelector);
+        // Support text-matching pseudo-selector (same as highlightElement)
+        let target;
+        const containsMatch = targetSelector.match(/^(.+):contains\(['"](.+)['"]\)$/);
+
+        if (containsMatch) {
+            const [, baseSelector, textContent] = containsMatch;
+            const candidates = document.querySelectorAll(baseSelector);
+            for (const candidate of candidates) {
+                if (candidate.textContent.includes(textContent)) {
+                    target = candidate;
+                    break;
+                }
+            }
+        } else {
+            target = document.querySelector(targetSelector);
+        }
+
         if (!target) {
             // Fallback to center if target not found
             this.positionPopover(null, 'center');
@@ -260,32 +362,95 @@ class Tutorial {
 
         const rect = target.getBoundingClientRect();
         const popoverWidth = 440;
-        const popoverHeight = 250; // estimated
-        const gap = 32;
+        const popoverHeight = 300; // Increased estimate for safety
+        const gap = 55; // Increased gap to prevent overlap with highlighted elements
+        const margin = 10; // Margin from viewport edges
 
         popover.style.position = 'fixed';
         popover.style.transform = 'none';
 
+        let top, left;
+        let finalPosition = position;
+
+        // Smart positioning: try requested position first, fallback if doesn't fit
         switch (position) {
             case 'bottom':
-                popover.style.top = `${rect.bottom + gap}px`;
-                popover.style.left = `${Math.max(20, Math.min(rect.left, window.innerWidth - popoverWidth - 20))}px`;
+                top = rect.bottom + gap;
+                // If popover would go below viewport, try above
+                if (top + popoverHeight > window.innerHeight - margin) {
+                    top = rect.top - popoverHeight - gap;
+                    finalPosition = 'top';
+                    // If still doesn't fit, center it vertically
+                    if (top < margin) {
+                        top = Math.max(margin, (window.innerHeight - popoverHeight) / 2);
+                        finalPosition = 'center-vertical';
+                    }
+                }
+                left = Math.max(margin, Math.min(rect.left, window.innerWidth - popoverWidth - margin));
                 break;
+
             case 'top':
-                popover.style.top = `${Math.max(20, rect.top - popoverHeight - gap)}px`;
-                popover.style.left = `${Math.max(20, Math.min(rect.left, window.innerWidth - popoverWidth - 20))}px`;
+                top = rect.top - popoverHeight - gap;
+                // If popover would go above viewport, try below
+                if (top < margin) {
+                    top = rect.bottom + gap;
+                    finalPosition = 'bottom';
+                    // If still doesn't fit, center it vertically
+                    if (top + popoverHeight > window.innerHeight - margin) {
+                        top = Math.max(margin, (window.innerHeight - popoverHeight) / 2);
+                        finalPosition = 'center-vertical';
+                    }
+                }
+                left = Math.max(margin, Math.min(rect.left, window.innerWidth - popoverWidth - margin));
                 break;
+
             case 'right':
-                popover.style.top = `${Math.max(20, Math.min(rect.top, window.innerHeight - popoverHeight - 20))}px`;
-                popover.style.left = `${Math.min(rect.right + gap, window.innerWidth - popoverWidth - 20)}px`;
+                left = rect.right + gap;
+                // If popover would go off right edge, try left
+                if (left + popoverWidth > window.innerWidth - margin) {
+                    left = rect.left - popoverWidth - gap;
+                    finalPosition = 'left';
+                    // If still doesn't fit, center horizontally
+                    if (left < margin) {
+                        left = Math.max(margin, (window.innerWidth - popoverWidth) / 2);
+                    }
+                }
+                top = Math.max(margin, Math.min(rect.top, window.innerHeight - popoverHeight - margin));
                 break;
+
             case 'left':
-                popover.style.top = `${Math.max(20, Math.min(rect.top, window.innerHeight - popoverHeight - 20))}px`;
-                popover.style.left = `${Math.max(20, rect.left - popoverWidth - gap)}px`;
+                left = rect.left - popoverWidth - gap;
+                // If popover would go off left edge, try right
+                if (left < margin) {
+                    left = rect.right + gap;
+                    finalPosition = 'right';
+                    // If still doesn't fit, center horizontally
+                    if (left + popoverWidth > window.innerWidth - margin) {
+                        left = Math.max(margin, (window.innerWidth - popoverWidth) / 2);
+                    }
+                }
+                top = Math.max(margin, Math.min(rect.top, window.innerHeight - popoverHeight - margin));
                 break;
+
             default:
                 // Default to center
                 this.positionPopover(null, 'center');
+                return;
+        }
+
+        popover.style.top = `${top}px`;
+        popover.style.left = `${left}px`;
+
+        // Scroll target into view if it's partially off-screen
+        if (rect.top < 0 || rect.bottom > window.innerHeight ||
+            rect.left < 0 || rect.right > window.innerWidth) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            // Recalculate after scroll animation
+            setTimeout(() => {
+                if (this.overlay && this.steps[this.currentStep]?.target === targetSelector) {
+                    this.updatePositions();
+                }
+            }, 500);
         }
 
         // Draw connector line after positioning
@@ -345,6 +510,14 @@ class Tutorial {
         if (this.escapeHandler) {
             document.removeEventListener('keydown', this.escapeHandler);
             this.escapeHandler = null;
+        }
+        if (this.scrollHandler) {
+            window.removeEventListener('scroll', this.scrollHandler, true);
+            this.scrollHandler = null;
+        }
+        if (this.resizeHandler) {
+            window.removeEventListener('resize', this.resizeHandler);
+            this.resizeHandler = null;
         }
     }
 }

@@ -22,8 +22,8 @@
     position: absolute;
     inset: 0;
     background:
-        radial-gradient(ellipse at center, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.85) 100%),
-        rgba(0, 0, 0, 0.7);
+        radial-gradient(ellipse at center, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.7) 100%),
+        rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(3px) saturate(0.8);
     pointer-events: auto;
     transition: clip-path 0.4s cubic-bezier(0.4, 0, 0.2, 1);

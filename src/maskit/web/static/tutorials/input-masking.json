@@ -3,18 +3,33 @@
     "title": "Input Masking Rules",
     "steps": [
         {
-            "text": "Input masking replaces sensitive values with aliases. Example: 'prod-db.internal.net' → 'db_1'. Click a field's 'Mask' button to protect it.",
+            "text": "Input masking replaces sensitive field values with aliases before sending to AI. Example: 'prod-db.internal.net' becomes 'db_1'.",
+            "target": "section.panel:contains('Input Masking')",
+            "position": "bottom"
+        },
+        {
+            "text": "This is your tool's input schema. Each field can be protected by clicking its 'Mask' button, or manually enter a field path below.",
             "target": ".schema-fields",
             "position": "bottom"
         },
         {
-            "text": "Choose 'mask' (reversible aliases) or 'strip' (remove entirely). Set a prefix like 'db_' to generate 'db_1', 'db_2', etc.",
-            "target": ".custom-field-form",
+            "text": "Enter the field path using dot notation (e.g., 'database.host', 'connection_string'). This identifies which field to mask.",
+            "target": "input[x-model='newRule.field_path']",
+            "position": "bottom"
+        },
+        {
+            "text": "Choose action: 'mask' creates reversible aliases (recommended), 'strip' removes the field entirely (non-reversible, use for sensitive metadata).",
+            "target": "select[x-model='newRule.action']",
+            "position": "bottom"
+        },
+        {
+            "text": "Set an alias prefix like 'db_' to generate meaningful aliases: 'db_1', 'db_2', etc. Make it descriptive!",
+            "target": "input[x-model='newRule.alias_prefix']",
             "position": "top"
         },
         {
-            "text": "Click 'Add Rule' to save. Test in 'Try It Out' below - the AI sees your alias, not the real value!",
-            "target": ".custom-field-form",
+            "text": "Click 'Add Rule' to save. Now test in 'Try It Out' below - enter a real value, the AI sees only your alias!",
+            "target": "button:contains('Add Rule')",
             "position": "top"
         }
     ]

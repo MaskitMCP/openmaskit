@@ -3,18 +3,28 @@
     "title": "Argument Injections",
     "steps": [
         {
-            "text": "Injections auto-add/override argument values. Select argument, enter JSON value (\"string\", 42, true, etc.).",
-            "target": ".add-injection-form",
-            "position": "top"
+            "text": "Injections silently add or override argument values before forwarding to servers. Use them to inject credentials, set defaults, or enforce policies.",
+            "target": "section.panel:contains('Argument Injections')",
+            "position": "bottom"
         },
         {
-            "text": "Choose mode: 'set' (always override), 'default' (if missing), 'append' (add to arrays/strings).",
-            "target": ".add-injection-form",
-            "position": "top"
+            "text": "Select which argument to inject. Pick a field from your tool's schema - this is where the value will be inserted.",
+            "target": "select[x-model='newInjection.argument_name']",
+            "position": "bottom"
         },
         {
-            "text": "Example: Inject 'api_key' with \"sk-proj-TOKEN\" in 'default' mode. AI doesn't provide it - Maskit does!",
-            "target": ".add-injection-form",
+            "text": "Enter the value as JSON: \"string\" (quoted), 42 (number), true (boolean), [1,2,3] (array). This exact value will be injected.",
+            "target": "input[x-model='newInjection.value']",
+            "position": "bottom"
+        },
+        {
+            "text": "Choose mode: 'set' (always override, even if AI provides value), 'default' (only if missing), 'append' (add to existing arrays/strings).",
+            "target": "select[x-model='newInjection.mode']",
+            "position": "bottom"
+        },
+        {
+            "text": "Click 'Add Injection' to save. Try calling the tool without providing this argument - Maskit injects it automatically!",
+            "target": "button:contains('Add Injection')",
             "position": "top"
         }
     ]
