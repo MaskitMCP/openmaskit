@@ -55,6 +55,10 @@ class TargetManager:
     def set_task_group(self, tg: anyio.abc.TaskGroup, shutdown_event: anyio.Event):
         self._task_group = tg
         self._shutdown_event = shutdown_event
+        # Start refresh monitor only if we have a task group AND backend client
+        # (backend_client is needed for token refresh, and is only set in production)
+        if tg is not None and hasattr(self._state, 'backend_client'):
+            tg.start_soon(self._monitor_token_refresh)
 
     async def add_target(self, server_id: str, config: dict) -> TargetState:
         """Hot-add a new target: create state, connect upstream, start relay.
@@ -78,6 +82,7 @@ class TargetManager:
             hidden_tools=set(hidden),
             ds_read_send=ds_read_send,
             ds_read_recv=ds_read_recv,
+            server_id=server_id,  # Set server_id for OAuth refresh
         )
 
         stack = AsyncExitStack()
@@ -102,7 +107,25 @@ class TargetManager:
             raise
 
         if self._task_group:
-            self._task_group.start_soon(run_proxy_for_target, target, us_read, us_write)
+            # Wrap proxy task to handle failures gracefully
+            async def run_proxy_with_error_handling():
+                try:
+                    await run_proxy_for_target(target, us_read, us_write)
+                except Exception as exc:
+                    logger.error(
+                        "Target '%s' proxy crashed, disconnecting: %s",
+                        server_id, exc, exc_info=True
+                    )
+                    # Auto-disconnect on crash
+                    try:
+                        await self.remove_target(server_id)
+                    except Exception as cleanup_exc:
+                        logger.error(
+                            "Failed to cleanup crashed target '%s': %s",
+                            server_id, cleanup_exc
+                        )
+
+            self._task_group.start_soon(run_proxy_with_error_handling)
             self._task_group.start_soon(self._flush_loop, engine)
 
         return target
@@ -138,3 +161,55 @@ class TargetManager:
                 await engine.flush_pending()
             except Exception:
                 logger.exception("Failed final flush for hot-added target")
+
+    async def _monitor_token_refresh(self) -> None:
+        """Background task that monitors targets for refresh needs."""
+        from maskit.proxy.upstream import refresh_backend_oauth_token
+
+        # Use shorter sleep for tests
+        check_interval = 0.1 if getattr(self, '_test_mode', False) else 5.0
+
+        while self._shutdown_event and not self._shutdown_event.is_set():
+            await anyio.sleep(check_interval)  # Will be cancelled by task group exit
+
+            for server_id, target in list(self._state.targets.items()):
+                if target.needs_token_refresh and target.server_id:
+                    logger.info(f"Attempting automatic token refresh for {server_id}")
+
+                    try:
+                        # Get backend client from state
+                        backend_client = getattr(self._state, 'backend_client', None)
+                        if not backend_client:
+                            logger.error("No backend client available for refresh")
+                            target.needs_token_refresh = False
+                            continue
+
+                        # Call refresh
+                        new_token = await refresh_backend_oauth_token(
+                            target.server_id,
+                            self._store_path,
+                            backend_client,
+                        )
+
+                        if new_token:
+                            # Success! Reconnect the target
+                            logger.info(f"Token refreshed, reconnecting {server_id}")
+                            config = (await self._store.get_server(server_id))["config"]
+
+                            # Remove old connection
+                            await self.remove_target(server_id)
+
+                            # Re-add with new token
+                            await self.add_target(server_id, config)
+
+                            logger.info(f"Successfully reconnected {server_id} with refreshed token")
+                        else:
+                            # Refresh failed - user must re-auth
+                            logger.error(
+                                f"Token refresh failed for {server_id} - user must re-authenticate"
+                            )
+                            target.needs_token_refresh = False  # Don't retry
+
+                    except Exception as e:
+                        logger.error(f"Error during token refresh for {server_id}: {e}")
+                        target.needs_token_refresh = False

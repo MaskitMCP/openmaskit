@@ -22,6 +22,7 @@ from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
 from maskit.models import HttpOAuthConfig
+from maskit.security import TokenEncryption
 
 logger = logging.getLogger(__name__)
 
@@ -34,18 +35,31 @@ class FileTokenStorage:
     def __init__(self, path: Path):
         self._path = path
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._encryption = TokenEncryption()
 
     def _read(self) -> dict:
+        """Read and decrypt token file."""
         if self._path.exists():
             try:
-                return json.loads(self._path.read_text())
-            except (json.JSONDecodeError, OSError):
-                pass
+                ciphertext = self._path.read_text()
+                plaintext = self._encryption.decrypt(ciphertext)
+                data = json.loads(plaintext)
+
+                # Auto-migrate plaintext
+                if not ciphertext.startswith("ENCRYPTED:"):
+                    logger.info(f"Migrating plaintext token file: {self._path}")
+                    self._write(data)
+
+                return data
+            except (json.JSONDecodeError, OSError, Exception) as e:
+                logger.warning(f"Failed to read token file: {e}")
         return {}
 
     def _write(self, data: dict):
-        self._path.write_text(json.dumps(data, indent=2, default=str))
-        # Restrict permissions to owner-only (0o600 = rw-------)
+        """Encrypt and write token file."""
+        plaintext = json.dumps(data, indent=2, default=str)
+        ciphertext = self._encryption.encrypt(plaintext)
+        self._path.write_text(ciphertext)
         self._path.chmod(0o600)
 
     async def get_tokens(self) -> OAuthToken | None:

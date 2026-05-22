@@ -11,6 +11,8 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
+from maskit.security import validate_server_id, write_token_file
+
 logger = logging.getLogger(__name__)
 
 # OAuth state expiry (15 minutes)
@@ -41,6 +43,17 @@ async def oauth_callback(request: Request):
     oauth_states = request.app.state.oauth_states
 
     handle = request.path_params["handle"]
+
+    # Validate handle before using in file paths
+    try:
+        handle = validate_server_id(handle)
+    except ValueError as e:
+        logger.error(f"Invalid handle in OAuth callback: {e}")
+        return RedirectResponse(
+            "/marketplace?error=invalid_handle&message=Invalid server identifier",
+            status_code=302,
+        )
+
     code = request.query_params.get("code")
     csrf_state = request.query_params.get("state")
     error = request.query_params.get("error")
@@ -62,13 +75,16 @@ async def oauth_callback(request: Request):
             status_code=302,
         )
 
-    state_data = oauth_states.pop(csrf_state)
+    # Get state data but don't pop yet (avoid race condition)
+    state_data = oauth_states.get(csrf_state)
     server_uuid = state_data["server_id"]
     expected_handle = state_data["handle"]
 
     # Check state not expired (15 min)
     if time.time() - state_data["timestamp"] > 900:
         logger.error(f"Expired OAuth state for {handle}")
+        # Clean up expired state
+        oauth_states.pop(csrf_state, None)
         return RedirectResponse(
             "/marketplace?error=expired_state&message=OAuth session expired",
             status_code=302,
@@ -77,17 +93,19 @@ async def oauth_callback(request: Request):
     # Validate handle matches
     if handle != expected_handle:
         logger.error(f"Handle mismatch: expected {expected_handle}, got {handle}")
+        # Don't pop state - might be user error, allow retry
         return RedirectResponse(
             "/marketplace?error=invalid_handle&message=Server handle mismatch",
             status_code=302,
         )
 
+    # All validations passed - now pop the state (consume it)
+    oauth_states.pop(csrf_state, None)
+
     # Exchange code for token
     try:
-        base_url = f"{request.url.scheme}://{request.url.netloc}"
-        redirect_uri = f"{base_url}/oauth/callback/{handle}"
         token_data = await backend_client.exchange_code(
-            server_id=server_uuid, code=code, redirect_uri=redirect_uri
+            server_id=server_uuid, code=code
         )
         logger.info(f"Successfully exchanged code for token: {handle}")
     except Exception as e:
@@ -121,13 +139,8 @@ async def oauth_callback(request: Request):
         # No client_info - backend manages OAuth client credentials
     }
 
-    with open(token_path, "w") as f:
-        json.dump(token_file_data, f, indent=2)
-
-    # Restrict permissions to owner-only (0o600 = rw-------)
-    token_path.chmod(0o600)
-
-    logger.info(f"Token stored at {token_path}")
+    write_token_file(token_path, token_file_data)
+    logger.info(f"Encrypted token stored at {token_path}")
 
     # Fetch server details from backend (includes mcp_host)
     try:

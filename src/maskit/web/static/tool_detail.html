@@ -9,6 +9,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/tutorial.css">
+    <script src="/static/tutorial.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -135,7 +137,11 @@
 
         <!-- Input Masking -->
         <section class="panel">
-            <h2>Input Masking</h2>
+            <h2>
+                Input Masking
+                <button class="help-icon" onclick="startTutorial('input-masking')"
+                        title="Show tutorial" aria-label="Show input masking tutorial"></button>
+            </h2>
             <p class="section-hint">Mask specific input fields so the AI agent sees aliases instead of real values.</p>
 
             <div x-show="toolRules.length > 0" style="margin-bottom: 1rem;">
@@ -225,7 +231,11 @@
 
         <!-- Output Masking -->
         <section class="panel">
-            <h2>Output Masking</h2>
+            <h2>
+                Output Masking
+                <button class="help-icon" onclick="startTutorial('output-mappers')"
+                        title="Show tutorial" aria-label="Show output mappers tutorial"></button>
+            </h2>
             <p class="section-hint">Apply regex patterns to mask sensitive values in tool responses.</p>
 
             <div x-show="toolMappers.length > 0" style="margin-bottom: 1rem;">
@@ -329,7 +339,11 @@
 
         <!-- Argument Guardrails -->
         <section class="panel">
-            <h2>Argument Guardrails</h2>
+            <h2>
+                Argument Guardrails
+                <button class="help-icon" onclick="startTutorial('guardrails')"
+                        title="Show tutorial" aria-label="Show guardrails tutorial"></button>
+            </h2>
             <p class="section-hint">Block tool calls whose arguments match dangerous patterns.</p>
 
             <div x-show="toolGuardrails.length > 0" style="margin-bottom: 1rem;">
@@ -393,7 +407,11 @@
 
         <!-- Argument Injections -->
         <section class="panel">
-            <h2>Argument Injections</h2>
+            <h2>
+                Argument Injections
+                <button class="help-icon" onclick="startTutorial('injections')"
+                        title="Show tutorial" aria-label="Show injections tutorial"></button>
+            </h2>
             <p class="section-hint">Silently inject or override argument values before forwarding to upstream.</p>
 
             <div x-show="toolInjections.length > 0" style="margin-bottom: 1rem;">

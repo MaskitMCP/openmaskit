@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import anyio
+import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from mcp.shared.message import SessionMessage
@@ -44,10 +45,13 @@ class ResponseDispatcher:
     """Routes proxy responses back to HTTP downstream waiters by request ID."""
 
     _WAITER_TTL = 120.0
+    _EVICTION_INTERVAL = 60.0  # Run cleanup every 60 seconds
 
     def __init__(self):
         self._waiters: dict[str | int, tuple[anyio.Event, list[SessionMessage], float]] = {}
         self._lock = anyio.Lock()
+        self._shutdown_event: anyio.Event | None = None
+        self._eviction_task: anyio.abc.CancelScope | None = None
 
     async def register(self, request_id: str | int) -> anyio.Event:
         async with self._lock:
@@ -87,6 +91,24 @@ class ResponseDispatcher:
         stale = [rid for rid, (_, _, ts) in self._waiters.items() if now - ts > self._WAITER_TTL]
         for rid in stale:
             self._waiters.pop(rid, None)
+        if stale:
+            logger.debug(f"Evicted {len(stale)} stale waiters from ResponseDispatcher")
+
+    async def start_background_eviction(self, shutdown_event: anyio.Event):
+        """Start background task to periodically evict stale waiters.
+
+        This prevents memory leaks in long-running instances with infrequent requests.
+        """
+        self._shutdown_event = shutdown_event
+
+        async def _eviction_loop():
+            while not shutdown_event.is_set():
+                await anyio.sleep(self._EVICTION_INTERVAL)
+                async with self._lock:
+                    self._evict_stale()
+
+        # Run in background (caller should start this in task group)
+        await _eviction_loop()
 
     def shutdown(self):
         """Signal all waiting clients that shutdown is in progress.
@@ -121,6 +143,8 @@ class TargetState:
     init_result: dict[str, Any] | None = None
     ds_read_send: MemoryObjectSendStream[SessionMessage | Exception] | None = None
     ds_read_recv: MemoryObjectReceiveStream[SessionMessage | Exception] | None = None
+    needs_token_refresh: bool = False
+    server_id: str | None = None
 
     def cache_tool_schemas(self, schemas: list[dict[str, Any]]):
         self.tool_schemas = schemas
@@ -258,9 +282,18 @@ async def run_proxy_for_target(
         except Exception as exc:
             logger.error("[%s] Bootstrap failed: %s", target.name, exc, exc_info=True)
 
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(_relay_downstream_to_upstream, target, us_write)
-        tg.start_soon(_relay_upstream_to_downstream, target, us_read, us_write)
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_relay_downstream_to_upstream, target, us_write)
+            tg.start_soon(_relay_upstream_to_downstream, target, us_read, us_write)
+    except Exception as exc:
+        # Catch any unhandled exceptions from relay tasks (e.g., OAuth 401 errors)
+        logger.error(
+            "[%s] Proxy relay crashed (possibly due to OAuth token expiration): %s",
+            target.name, exc, exc_info=True
+        )
+        target.initialized = False
+        raise  # Re-raise to let the manager handle cleanup
 
 
 async def _relay_downstream_to_upstream(
@@ -279,6 +312,24 @@ async def _relay_downstream_to_upstream(
                 await us_write.send(modified)
     except (anyio.ClosedResourceError, anyio.EndOfStream):
         pass
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401 and target.server_id:
+            logger.warning(
+                "[%s] OAuth 401 error, flagging for token refresh",
+                target.name
+            )
+            target.needs_token_refresh = True
+        else:
+            logger.error("[%s] HTTP error %s: %s", target.name, e.response.status_code, e)
+        target.initialized = False
+    except Exception as e:
+        # Catch any other exceptions (including network issues)
+        logger.error(
+            "[%s] Downstream relay error: %s",
+            target.name, e
+        )
+        # Close the target gracefully
+        target.initialized = False
 
 
 async def _relay_upstream_to_downstream(
@@ -301,6 +352,24 @@ async def _relay_upstream_to_downstream(
                         continue
     except (anyio.ClosedResourceError, anyio.EndOfStream):
         pass
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401 and target.server_id:
+            logger.warning(
+                "[%s] OAuth 401 error, flagging for token refresh",
+                target.name
+            )
+            target.needs_token_refresh = True
+        else:
+            logger.error("[%s] HTTP error %s: %s", target.name, e.response.status_code, e)
+        target.initialized = False
+    except Exception as e:
+        # Catch any other exceptions (including network issues)
+        logger.error(
+            "[%s] Upstream relay error: %s",
+            target.name, e
+        )
+        # Close the target gracefully
+        target.initialized = False
 
 
 def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessage | None:

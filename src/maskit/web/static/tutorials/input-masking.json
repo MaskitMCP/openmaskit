@@ -1,0 +1,21 @@
+{
+    "id": "input-masking",
+    "title": "Input Masking Rules",
+    "steps": [
+        {
+            "text": "Input masking replaces sensitive values with aliases. Example: 'prod-db.internal.net' → 'db_1'. Click a field's 'Mask' button to protect it.",
+            "target": ".schema-fields",
+            "position": "bottom"
+        },
+        {
+            "text": "Choose 'mask' (reversible aliases) or 'strip' (remove entirely). Set a prefix like 'db_' to generate 'db_1', 'db_2', etc.",
+            "target": ".custom-field-form",
+            "position": "top"
+        },
+        {
+            "text": "Click 'Add Rule' to save. Test in 'Try It Out' below - the AI sees your alias, not the real value!",
+            "target": ".custom-field-form",
+            "position": "top"
+        }
+    ]
+}

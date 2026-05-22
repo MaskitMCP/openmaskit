@@ -1,0 +1,36 @@
+{
+    "id": "hide-tool",
+    "title": "Hide Tools from AI",
+    "steps": [
+        {
+            "text": "Hiding tools removes them from AI agent access without deleting your configuration. It's like putting a tool in maintenance mode - still configured, just not available to agents.",
+            "target": null,
+            "position": "center"
+        },
+        {
+            "text": "See the eye icon? That's the hide/show toggle. When the eye is open (visible), agents can call this tool. Click it to hide the tool from agents.",
+            "target": ".tool-card",
+            "position": "bottom"
+        },
+        {
+            "text": "When you hide a tool, the card grays out and shows a 'Hidden' badge. The tool is still configured - your masking rules, mappers, everything stays intact.",
+            "target": ".tool-card",
+            "position": "bottom"
+        },
+        {
+            "text": "What happens when an agent tries to call a hidden tool? They get a clean 'METHOD_NOT_FOUND' error, as if the tool doesn't exist. No access, no data leak!",
+            "target": null,
+            "position": "center"
+        },
+        {
+            "text": "When should you hide tools? Dangerous operations (delete_database, drop_table), deprecated tools, or tools you're testing. Better safe than sorry!",
+            "target": null,
+            "position": "center"
+        },
+        {
+            "text": "To unhide, just click the eye icon again. The tool becomes immediately available to agents. Toggle as needed - it's instant!",
+            "target": ".tool-card",
+            "position": "bottom"
+        }
+    ]
+}

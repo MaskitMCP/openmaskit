@@ -1,0 +1,21 @@
+{
+    "id": "injections",
+    "title": "Argument Injections",
+    "steps": [
+        {
+            "text": "Injections auto-add/override argument values. Select argument, enter JSON value (\"string\", 42, true, etc.).",
+            "target": ".add-injection-form",
+            "position": "top"
+        },
+        {
+            "text": "Choose mode: 'set' (always override), 'default' (if missing), 'append' (add to arrays/strings).",
+            "target": ".add-injection-form",
+            "position": "top"
+        },
+        {
+            "text": "Example: Inject 'api_key' with \"sk-proj-TOKEN\" in 'default' mode. AI doesn't provide it - Maskit does!",
+            "target": ".add-injection-form",
+            "position": "top"
+        }
+    ]
+}

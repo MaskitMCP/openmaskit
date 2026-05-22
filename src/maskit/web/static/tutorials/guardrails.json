@@ -1,0 +1,21 @@
+{
+    "id": "guardrails",
+    "title": "Argument Guardrails",
+    "steps": [
+        {
+            "text": "Guardrails block dangerous calls. Select an argument, match type ('contains', 'equals', 'regex'), and pattern to block.",
+            "target": ".add-guardrail-form",
+            "position": "top"
+        },
+        {
+            "text": "Example: Block 'database_name' containing 'prod'. Use '*' to scan all arguments for your pattern.",
+            "target": ".add-guardrail-form",
+            "position": "top"
+        },
+        {
+            "text": "Set a clear error message ('Cannot operate on production database'). Add guardrail - matching calls are now blocked!",
+            "target": ".add-guardrail-form",
+            "position": "top"
+        }
+    ]
+}

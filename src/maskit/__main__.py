@@ -8,6 +8,8 @@ import signal
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
+import random
+import string
 
 import anyio
 import uvicorn
@@ -28,6 +30,32 @@ from maskit.web.app import create_app
 
 logger = logging.getLogger(__name__)
 
+def print_banner():
+    # https://patorjk.com/software/taag
+    # DOS Rebel for maskit
+    # Pagga for version
+    banner = """
+     ██████   ██████                   █████       ███   █████   
+    ░░██████ ██████                   ░░███       ░░░   ░░███    
+     ░███░█████░███   ██████    █████  ░███ █████ ████  ███████  
+     ░███░░███ ░███  ░░░░░███  ███░░   ░███░░███ ░░███ ░░░███░   
+     ░███ ░░░  ░███   ███████ ░░█████  ░██████░   ░███   ░███    
+     ░███      ░███  ███░░███  ░░░░███ ░███░░███  ░███   ░███ ███
+     █████     █████░░████████ ██████  ████ █████ █████  ░░█████ 
+    ░░░░░     ░░░░░  ░░░░░░░░ ░░░░░░  ░░░░ ░░░░░ ░░░░░    ░░░░░   ░▄▀▄░░░░▀█░░░░░▄▀▄
+                                                                  ░█/█░░░░░█░░░░░█/█
+                                                                  ░░▀░░▀░░▀▀▀░▀░░░▀░
+    """
+    print(banner)
+
+def _get_version() -> str:
+    """Get version from package metadata."""
+    # Try importlib.metadata first (works for installed packages)
+    try:
+        from importlib.metadata import version
+        return version("maskit")
+    except Exception:
+        pass
 
 async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
     """Periodically flush pending alias writes to the database."""
@@ -104,6 +132,22 @@ async def _graceful_shutdown(
     logger.info("Stage 4/4: Cancelling remaining tasks")
     tg.cancel_scope.cancel()
 
+def _generate_installation_id() -> str:
+    length = 25
+    random_string = ''.join(
+        random.choices(string.ascii_letters + string.digits, k=length)
+    )
+    return random_string
+
+def _load_installation_id() -> str:
+    id_path = Path("~/.maskit/.installation_id").expanduser()
+    if id_path.exists():
+        return id_path.read_bytes().strip().decode('utf-8')
+
+    key = _generate_installation_id()
+    id_path.parent.mkdir(parents=True, exist_ok=True)
+    id_path.write_bytes(bytes(key, 'utf-8'))
+    id_path.chmod(0o600)
 
 async def async_main():
     from maskit.logging_config import setup_logging
@@ -201,6 +245,7 @@ async def async_main():
             hidden_tools=set(hidden),
             ds_read_send=ds_read_send,
             ds_read_recv=ds_read_recv,
+            server_id=server_id,  # Set server_id for OAuth refresh
         )
         state.targets[server_id] = target_state
         marketplace_configs[server_id] = record["config"]
@@ -221,11 +266,20 @@ async def async_main():
     callback_web_server.install_signal_handlers = lambda: None
     state.callback_server = callback_server
 
+    installation_id = _load_installation_id()
+    maskit_version = _get_version()
+    print('----------------------------------------------------------------------------------------')
+    print_banner()
+    print('----------------------------------------------------------------------------------------')
+
     # Initialize backend client for marketplace and auth integration
     from maskit.backend_client import BackendClient
 
-    backend_client = BackendClient()
+    backend_client = BackendClient(installation_id=installation_id, maskit_version=maskit_version)
     oauth_states: dict[str, dict] = {}  # {csrf_state: {server_id, handle, timestamp}}
+
+    # Store backend_client in state for token refresh
+    state.backend_client = backend_client
 
     logger.info("Maskit proxy starting")
     logger.info(f"Dashboard: http://{bind_host}:{config.web_port}")
@@ -329,6 +383,8 @@ async def async_main():
                     us_read, us_write = upstream_streams[name]
                     tg.start_soon(run_proxy_for_target, target_state, us_read, us_write)
                     tg.start_soon(_flush_loop, target_state.engine, shutdown_event)
+                    # Start background eviction to prevent memory leaks
+                    tg.start_soon(target_state.response_dispatcher.start_background_eviction, shutdown_event)
 
                 tg.start_soon(web_server.serve)
                 tg.start_soon(mcp_server.serve)

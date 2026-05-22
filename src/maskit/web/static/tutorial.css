@@ -1,0 +1,377 @@
+/**
+ * Tutorial System Styles
+ * Cinematic spotlight with elevated highlights and animated connections
+ */
+
+/* ===== Tutorial Overlay System ===== */
+.tutorial-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    pointer-events: none;
+    animation: tutorial-overlay-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tutorial-overlay-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Radial vignette backdrop - darkens from edges to center */
+.tutorial-spotlight {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(ellipse at center, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.85) 100%),
+        rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(3px) saturate(0.8);
+    pointer-events: auto;
+    transition: clip-path 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Elevated highlight box with floating effect */
+.tutorial-highlight-box {
+    position: fixed;
+    pointer-events: none;
+    border-radius: 12px;
+    z-index: 10002;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: tutorial-highlight-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s backwards;
+
+    /* Sophisticated elevation with glow */
+    box-shadow:
+        0 0 0 2px rgba(96, 165, 250, 0.6),
+        0 0 0 4px rgba(96, 165, 250, 0.2),
+        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 0 64px rgba(96, 165, 250, 0.3),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+@keyframes tutorial-highlight-in {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Subtle breathing animation */
+@keyframes tutorial-pulse {
+    0%, 100% {
+        box-shadow:
+            0 0 0 2px rgba(96, 165, 250, 0.6),
+            0 0 0 4px rgba(96, 165, 250, 0.2),
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 64px rgba(96, 165, 250, 0.3),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    }
+    50% {
+        box-shadow:
+            0 0 0 2px rgba(96, 165, 250, 0.8),
+            0 0 0 6px rgba(96, 165, 250, 0.3),
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 80px rgba(96, 165, 250, 0.5),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+    }
+}
+
+.tutorial-highlight-box.breathing {
+    animation: tutorial-pulse 2.5s ease-in-out infinite;
+}
+
+/* Connection line between popover and highlighted element */
+.tutorial-connector {
+    position: fixed;
+    pointer-events: none;
+    z-index: 10001;
+    stroke: rgba(96, 165, 250, 0.5);
+    stroke-width: 2;
+    fill: none;
+    stroke-dasharray: 8 4;
+    animation: tutorial-connector-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.4s backwards;
+}
+
+.tutorial-connector path {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: tutorial-draw-line 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
+}
+
+@keyframes tutorial-connector-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes tutorial-draw-line {
+    to { stroke-dashoffset: 0; }
+}
+
+.tutorial-popover {
+    position: fixed;
+    width: 440px;
+    max-width: calc(100vw - 40px);
+    background: linear-gradient(to bottom, #1e293b 0%, #0f172a 100%);
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    border-radius: 16px;
+    box-shadow:
+        0 0 0 1px rgba(96, 165, 250, 0.1),
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        0 0 100px rgba(96, 165, 250, 0.15);
+    pointer-events: auto;
+    z-index: 10003;
+    animation: tutorial-popover-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.3s backwards;
+    backdrop-filter: blur(20px) saturate(1.2);
+}
+
+@keyframes tutorial-popover-in {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ===== Popover Header ===== */
+.tutorial-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.5rem 2rem 1.25rem;
+    border-bottom: 1px solid rgba(96, 165, 250, 0.15);
+    background: linear-gradient(to bottom, rgba(96, 165, 250, 0.08), transparent);
+}
+
+.tutorial-popover-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0;
+    color: #f1f5f9;
+    letter-spacing: -0.01em;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.tutorial-close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+    line-height: 1;
+}
+
+.tutorial-close-btn:hover {
+    background: var(--hover-bg);
+    color: var(--text);
+}
+
+/* ===== Popover Body ===== */
+.tutorial-popover-body {
+    padding: 2rem;
+    min-height: 100px;
+}
+
+.tutorial-step-text {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: #cbd5e1;
+    margin: 0;
+    font-weight: 400;
+}
+
+/* ===== Popover Footer ===== */
+.tutorial-popover-footer {
+    padding: 1.25rem 2rem 1.5rem;
+    border-top: 1px solid rgba(96, 165, 250, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.2), transparent);
+}
+
+.tutorial-progress {
+    font-size: 0.8125rem;
+    color: #94a3b8;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.tutorial-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+/* ===== Tutorial Buttons ===== */
+.btn-tutorial-skip {
+    padding: 0.625rem 1.125rem;
+    background: transparent;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 8px;
+    color: #94a3b8;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+}
+
+.btn-tutorial-skip:hover {
+    border-color: rgba(148, 163, 184, 0.6);
+    background: rgba(148, 163, 184, 0.1);
+    color: #cbd5e1;
+    transform: translateY(-1px);
+}
+
+.btn-tutorial-prev,
+.btn-tutorial-next {
+    padding: 0.625rem 1.25rem;
+    background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+    box-shadow:
+        0 0 0 1px rgba(96, 165, 250, 0.3),
+        0 4px 12px rgba(96, 165, 250, 0.3);
+}
+
+.btn-tutorial-prev:hover,
+.btn-tutorial-next:hover {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    transform: translateY(-1px);
+    box-shadow:
+        0 0 0 1px rgba(96, 165, 250, 0.4),
+        0 6px 20px rgba(96, 165, 250, 0.4);
+}
+
+.btn-tutorial-prev {
+    background: transparent;
+    border: 1px solid rgba(96, 165, 250, 0.4);
+    color: #60a5fa;
+    box-shadow: none;
+}
+
+.btn-tutorial-prev:hover {
+    background: rgba(96, 165, 250, 0.15);
+    border-color: rgba(96, 165, 250, 0.6);
+    box-shadow: 0 0 20px rgba(96, 165, 250, 0.2);
+}
+
+/* ===== Help Icon ===== */
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1.5px solid var(--text-muted);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.help-icon:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.help-icon::before {
+    content: 'i';
+    font-style: italic;
+    line-height: 1;
+}
+
+/* Help Icon Completed State */
+.help-icon.tutorial-completed {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.help-icon.tutorial-completed::before {
+    content: '✓';
+    font-style: normal;
+}
+
+.help-icon.tutorial-completed:hover {
+    background: rgba(52, 211, 153, 0.15);
+}
+
+/* ===== Responsive Design ===== */
+@media (max-width: 768px) {
+    .tutorial-popover {
+        width: calc(100vw - 40px);
+        max-width: 380px;
+    }
+
+    .tutorial-popover-header {
+        padding: 1rem 1.25rem;
+    }
+
+    .tutorial-popover-body {
+        padding: 1.25rem;
+    }
+
+    .tutorial-popover-footer {
+        padding: 0.875rem 1.25rem;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .tutorial-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .btn-tutorial-skip,
+    .btn-tutorial-prev,
+    .btn-tutorial-next {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .tutorial-popover {
+        max-width: calc(100vw - 20px);
+    }
+
+    .tutorial-step-text {
+        font-size: 0.875rem;
+    }
+
+    /* Always center popover on mobile */
+    .tutorial-popover {
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+    }
+}

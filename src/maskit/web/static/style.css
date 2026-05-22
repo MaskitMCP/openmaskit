@@ -2090,16 +2090,261 @@ code {
     transform: translateY(0) scale(0.97);
 }
 
-/* Empty state */
+/* Empty State - Clean Minimal Background */
 .targets-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 5rem 2rem;
-    text-align: center;
+    position: relative;
+    min-height: calc(100vh - 180px);
+    padding: 4rem 2rem;
+    background: radial-gradient(ellipse at center top, rgba(96, 165, 250, 0.03) 0%, transparent 50%);
 }
 
+.empty-state-cards {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.5rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 0;
+}
+
+/* Individual action cards - diagonal cascade */
+.empty-state-card {
+    position: relative;
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
+    border: 1px solid rgba(96, 165, 250, 0.15);
+    border-radius: 16px;
+    padding: 2rem;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(12px) saturate(1.1);
+    overflow: hidden;
+    animation: card-cascade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.empty-state-card:nth-child(1) { animation-delay: 0.1s; }
+.empty-state-card:nth-child(2) { animation-delay: 0.2s; }
+.empty-state-card:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes card-cascade-in {
+    from {
+        opacity: 0;
+        transform: translateY(40px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Hover effect with glow */
+.empty-state-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(96, 165, 250, 0.4);
+    box-shadow:
+        0 0 0 1px rgba(96, 165, 250, 0.2),
+        0 20px 40px rgba(0, 0, 0, 0.3),
+        0 0 60px rgba(96, 165, 250, 0.15);
+}
+
+/* Accent corner decorations */
+.empty-state-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 120px;
+    height: 120px;
+    background: radial-gradient(circle at top right, rgba(96, 165, 250, 0.15), transparent 60%);
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+.empty-state-card:hover::before {
+    opacity: 1.5;
+}
+
+/* Status indicator dots */
+.empty-state-card::after {
+    content: '';
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(96, 165, 250, 0.4);
+    box-shadow: 0 0 12px rgba(96, 165, 250, 0.6);
+    animation: status-pulse 2s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+    }
+}
+
+/* Card-specific accent colors */
+.card-marketplace::after {
+    background: rgba(96, 165, 250, 0.5);
+    box-shadow: 0 0 12px rgba(96, 165, 250, 0.7);
+}
+
+.card-custom::after {
+    background: rgba(52, 211, 153, 0.5);
+    box-shadow: 0 0 12px rgba(52, 211, 153, 0.7);
+}
+
+.card-help::after {
+    background: rgba(168, 85, 247, 0.5);
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.7);
+}
+
+/* Icon styling */
+.empty-card-icon {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background: rgba(96, 165, 250, 0.1);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    color: #60a5fa;
+    margin-bottom: 1.5rem;
+    transition: all 0.3s;
+}
+
+.empty-state-card:hover .empty-card-icon {
+    background: rgba(96, 165, 250, 0.15);
+    border-color: rgba(96, 165, 250, 0.3);
+    transform: scale(1.05);
+}
+
+.card-marketplace .empty-card-icon {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.2);
+    color: #60a5fa;
+}
+
+.card-custom .empty-card-icon {
+    background: rgba(52, 211, 153, 0.1);
+    border-color: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+}
+
+.card-help .empty-card-icon {
+    background: rgba(168, 85, 247, 0.1);
+    border-color: rgba(168, 85, 247, 0.2);
+    color: #a855f7;
+}
+
+.empty-card-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* Title styling */
+.empty-card-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f1f5f9;
+    margin: 0 0 0.75rem 0;
+    letter-spacing: -0.02em;
+}
+
+/* Description styling */
+.empty-card-desc {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: #94a3b8;
+    margin: 0 0 1.5rem 0;
+}
+
+/* Action button */
+.empty-card-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background: transparent;
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    border-radius: 8px;
+    color: #60a5fa;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.empty-card-action:hover {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.5);
+    transform: translateX(2px);
+}
+
+.card-marketplace .empty-card-action {
+    border-color: rgba(96, 165, 250, 0.3);
+    color: #60a5fa;
+}
+
+.card-marketplace .empty-card-action:hover {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.5);
+}
+
+.card-custom .empty-card-action {
+    border-color: rgba(52, 211, 153, 0.3);
+    color: #34d399;
+}
+
+.card-custom .empty-card-action:hover {
+    background: rgba(52, 211, 153, 0.1);
+    border-color: rgba(52, 211, 153, 0.5);
+}
+
+.card-help .empty-card-action {
+    border-color: rgba(168, 85, 247, 0.3);
+    color: #a855f7;
+}
+
+.card-help .empty-card-action:hover {
+    background: rgba(168, 85, 247, 0.1);
+    border-color: rgba(168, 85, 247, 0.5);
+}
+
+.empty-card-action svg {
+    transition: transform 0.2s;
+}
+
+.empty-card-action:hover svg {
+    transform: translateX(3px);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .targets-empty {
+        padding: 2rem 1rem;
+        min-height: auto;
+    }
+
+    .empty-state-cards {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .empty-state-card {
+        padding: 1.5rem;
+    }
+}
+
+/* Legacy empty state styles (for backwards compatibility) */
 .targets-empty-icon {
     width: 72px;
     height: 72px;
@@ -2763,6 +3008,25 @@ code {
     max-width: 580px;
 }
 
+/* Integration modal help section */
+.integration-help {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+
+.integration-help strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
 .integration-agents {
     display: flex;
     flex-wrap: wrap;
@@ -2869,4 +3133,78 @@ code {
 ::selection {
     background: var(--accent-dim);
     color: var(--text-primary);
+}
+
+/* --- Pagination Controls --- */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 2rem;
+    padding: 1rem 0;
+    border-top: 1px solid var(--border);
+}
+
+.pagination-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: var(--hover-bg);
+    border-color: var(--primary);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.pagination-btn svg {
+    flex-shrink: 0;
+}
+
+.pagination-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.pagination-current {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.pagination-total {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Responsive pagination */
+@media (max-width: 640px) {
+    .pagination {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .pagination-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .pagination-info {
+        order: -1;
+    }
 }

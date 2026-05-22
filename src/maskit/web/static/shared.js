@@ -128,6 +128,62 @@ async function copyToClipboard(text) {
 }
 
 /**
+ * Onboarding state management
+ */
+const OnboardingHelper = {
+    STORAGE_KEY: 'maskit_onboarding_state',
+
+    getState() {
+        try {
+            const stored = localStorage.getItem(this.STORAGE_KEY);
+            return stored ? JSON.parse(stored) : { completed: false, skipped: false, timestamp: null };
+        } catch {
+            return { completed: false, skipped: false, timestamp: null };
+        }
+    },
+
+    markCompleted() {
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+                completed: true,
+                skipped: false,
+                timestamp: Date.now()
+            }));
+        } catch (e) {
+            console.warn('Failed to save onboarding state:', e);
+        }
+    },
+
+    markSkipped() {
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+                completed: false,
+                skipped: true,
+                timestamp: Date.now()
+            }));
+        } catch (e) {
+            console.warn('Failed to save onboarding state:', e);
+        }
+    },
+
+    reset() {
+        try {
+            localStorage.removeItem(this.STORAGE_KEY);
+        } catch (e) {
+            console.warn('Failed to reset onboarding state:', e);
+        }
+    },
+
+    shouldShow() {
+        const state = this.getState();
+        return !state.completed && !state.skipped;
+    }
+};
+
+// Export onboarding helper
+window.OnboardingHelper = OnboardingHelper;
+
+/**
  * Create an integration helper mixin for Alpine.js
  * Usage: x-data="{ ...integrationHelper(), ...yourData }"
  */
@@ -191,3 +247,20 @@ function integrationHelper() {
         },
     };
 }
+
+/**
+ * Global toast notification helper
+ * Compatible with Alpine.js toast systems in pages
+ */
+window.showToast = function(msg, type = 'success') {
+    // Dispatch custom event that Alpine.js components can listen to
+    const event = new CustomEvent('show-toast', {
+        detail: { msg, type }
+    });
+    window.dispatchEvent(event);
+
+    // Also try to call page-level showToast if available
+    if (typeof window.pageShowToast === 'function') {
+        window.pageShowToast(msg, type);
+    }
+};

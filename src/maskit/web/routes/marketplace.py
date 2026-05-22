@@ -10,6 +10,8 @@ from uuid import uuid4
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 
+from maskit.security import validate_server_id
+
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
@@ -60,10 +62,21 @@ async def marketplace_list(request: Request):
     backend_client = getattr(request.app.state, "backend_client", None)
 
     if not backend_client:
-        return JSONResponse({"servers": []})
+        return JSONResponse({
+            "servers": [],
+            "meta": {"total": 0, "page": 1, "size": 12, "total_pages": 0}
+        })
 
-    # Fetch from backend only - no local file
-    backend_catalog = await backend_client.get_catalog()
+    # Extract pagination and search params
+    page = int(request.query_params.get("page", 1))
+    size = int(request.query_params.get("size", 12))
+    query = request.query_params.get("q", "").strip() or None
+
+    # Fetch from backend with pagination and search
+    catalog_response = await backend_client.get_catalog(page=page, size=size, query=query)
+    backend_catalog = catalog_response["data"]
+    meta = catalog_response["meta"]
+
     installed = await store.get_installed_servers()
     installed_map = {s["id"]: s for s in installed}
 
@@ -78,8 +91,8 @@ async def marketplace_list(request: Request):
         target = state.get_target(server_id)
 
         # Extract env var names from meta.env (keys are var names, values are placeholders)
-        meta = entry.get("meta", {})
-        env_vars = list(meta.get("env", {}).keys()) if meta else []
+        meta_env = entry.get("meta", {})
+        env_vars = list(meta_env.get("env", {}).keys()) if meta_env else []
 
         servers.append({
             "id": server_id,
@@ -96,7 +109,7 @@ async def marketplace_list(request: Request):
             "connected": target is not None and target.initialized if record and record["active"] else False,
         })
 
-    return JSONResponse({"servers": servers})
+    return JSONResponse({"servers": servers, "meta": meta})
 
 
 async def marketplace_install(request: Request):
@@ -115,6 +128,14 @@ async def marketplace_install(request: Request):
 
     if not server_id or not backend_id:
         return JSONResponse({"error": "server_id and backend_id required"}, status_code=400)
+
+    try:
+        server_id = validate_server_id(server_id)
+    except ValueError:
+        return JSONResponse(
+            {"error": "Invalid server_id format"},
+            status_code=400
+        )
 
     # Check if server already installed in DB
     existing = await store.get_server(server_id)

@@ -99,8 +99,37 @@ def mock_backend_client():
     """Mock backend client for marketplace tests."""
     client = AsyncMock()
 
-    # Mock get_catalog to return our test catalog
-    client.get_catalog = AsyncMock(return_value=MOCK_CATALOG)
+    # Mock get_catalog to return our test catalog in the new format (with data and meta)
+    async def mock_get_catalog(page=1, size=12, query=None):
+        # Filter by query if provided
+        filtered_catalog = MOCK_CATALOG
+        if query:
+            query_lower = query.lower()
+            filtered_catalog = [
+                entry for entry in MOCK_CATALOG
+                if query_lower in entry["name"].lower()
+                or query_lower in entry.get("description", "").lower()
+                or any(query_lower in tag.lower() for tag in entry.get("tags", []))
+            ]
+
+        # Calculate pagination
+        total = len(filtered_catalog)
+        start_idx = (page - 1) * size
+        end_idx = start_idx + size
+        paginated_data = filtered_catalog[start_idx:end_idx]
+        total_pages = (total + size - 1) // size  # ceil division
+
+        return {
+            "data": paginated_data,
+            "meta": {
+                "total": total,
+                "page": page,
+                "size": size,
+                "total_pages": total_pages,
+            }
+        }
+
+    client.get_catalog = AsyncMock(side_effect=mock_get_catalog)
 
     # Mock get_server_info to return specific server details
     async def mock_get_server_info(server_id):

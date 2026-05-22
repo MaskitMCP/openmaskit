@@ -35,15 +35,15 @@
                        class="search-input"
                        placeholder="Search servers by name, description, or tag..."
                        x-model="search"
-                       @input="filterServers()">
+                       @input="onSearchInput()">
             </div>
 
             <div x-show="loading" class="loading-overlay">
                 <span class="spinner"></span> Loading marketplace...
             </div>
 
-            <div class="tools-grid" x-show="!loading && filteredServers.length > 0">
-                <template x-for="server in filteredServers" :key="server.id">
+            <div class="tools-grid" x-show="!loading && servers.length > 0">
+                <template x-for="server in servers" :key="server.id">
                     <div class="marketplace-card" :class="{ 'marketplace-card-active': server.active && server.connected }"
                          @click="if (server.active && server.connected) window.location.href = '/targets/' + encodeURIComponent(server.id) + '/tools'"
                          :style="(server.active && server.connected) ? 'cursor: pointer' : ''">
@@ -106,9 +106,40 @@
                 </template>
             </div>
 
-            <p x-show="!loading && filteredServers.length === 0 && search" class="muted">
+            <p x-show="!loading && servers.length === 0 && search" class="muted">
                 No servers match your search.
             </p>
+            <p x-show="!loading && servers.length === 0 && !search" class="muted">
+                No servers available.
+            </p>
+
+            <!-- Pagination Controls -->
+            <div x-show="!loading && totalPages > 1" class="pagination">
+                <button @click="prevPage()"
+                        :disabled="currentPage === 1"
+                        class="pagination-btn"
+                        aria-label="Previous page">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                    Previous
+                </button>
+
+                <div class="pagination-info">
+                    <span class="pagination-current" x-text="`Page ${currentPage} of ${totalPages}`"></span>
+                    <span class="pagination-total muted" x-text="`${totalServers} total servers`"></span>
+                </div>
+
+                <button @click="nextPage()"
+                        :disabled="currentPage === totalPages"
+                        class="pagination-btn"
+                        aria-label="Next page">
+                    Next
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </button>
+            </div>
         </section>
     </main>
 
@@ -159,13 +190,19 @@
 <script>
 function marketplacePage() {
     let _modalResolve = null;
+    let _searchDebounceTimer = null;
 
     return {
         servers: [],
-        filteredServers: [],
         search: '',
         loading: true,
         toasts: [],
+
+        // Pagination state
+        currentPage: 1,
+        pageSize: 12,
+        totalPages: 0,
+        totalServers: 0,
 
         modal: {
             visible: false,
@@ -227,25 +264,60 @@ function marketplacePage() {
             }
         },
 
-        async loadCatalog() {
-            const res = await fetch('/api/marketplace');
-            if (!res.ok) throw new Error('Failed to load marketplace');
-            const data = await res.json();
-            this.servers = data.servers.map(s => ({ ...s, installing: false, deactivating: false }));
-            this.filterServers();
+        async loadCatalog(page = 1) {
+            this.loading = true;
+            try {
+                const params = new URLSearchParams({
+                    page: page.toString(),
+                    size: this.pageSize.toString(),
+                });
+                if (this.search.trim()) {
+                    params.set('q', this.search.trim());
+                }
+
+                const res = await fetch(`/api/marketplace?${params}`);
+                if (!res.ok) throw new Error('Failed to load marketplace');
+
+                const data = await res.json();
+                this.servers = data.servers.map(s => ({ ...s, installing: false, deactivating: false }));
+
+                // Update pagination metadata
+                if (data.meta) {
+                    this.currentPage = data.meta.page;
+                    this.totalPages = data.meta.total_pages;
+                    this.totalServers = data.meta.total;
+                }
+            } finally {
+                this.loading = false;
+            }
         },
 
-        filterServers() {
-            const q = this.search.toLowerCase().trim();
-            if (!q) {
-                this.filteredServers = [...this.servers];
-                return;
+        onSearchInput() {
+            // Debounce search: wait 400ms after user stops typing
+            clearTimeout(_searchDebounceTimer);
+            _searchDebounceTimer = setTimeout(() => {
+                this.currentPage = 1; // Reset to page 1 on new search
+                this.loadCatalog(1);
+            }, 400);
+        },
+
+        async goToPage(page) {
+            if (page < 1 || page > this.totalPages || page === this.currentPage) return;
+            await this.loadCatalog(page);
+            // Scroll to top of marketplace section
+            document.querySelector('.panel').scrollIntoView({ behavior: 'smooth' });
+        },
+
+        async nextPage() {
+            if (this.currentPage < this.totalPages) {
+                await this.goToPage(this.currentPage + 1);
             }
-            this.filteredServers = this.servers.filter(s =>
-                s.name.toLowerCase().includes(q) ||
-                s.description.toLowerCase().includes(q) ||
-                (s.tags || []).some(t => t.toLowerCase().includes(q))
-            );
+        },
+
+        async prevPage() {
+            if (this.currentPage > 1) {
+                await this.goToPage(this.currentPage - 1);
+            }
         },
 
         async installServer(server) {

@@ -24,7 +24,6 @@ ENV UV_SYSTEM_PYTHON=1
 RUN uv pip install .
 
 # Copy remaining runtime files
-COPY marketplace.json ./
 COPY assets ./assets
 
 # Bind to all interfaces for container networking

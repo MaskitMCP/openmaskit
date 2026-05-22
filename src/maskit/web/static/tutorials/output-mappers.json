@@ -1,0 +1,21 @@
+{
+    "id": "output-mappers",
+    "title": "Output Masking with Regex",
+    "steps": [
+        {
+            "text": "Output mappers use regex to auto-mask patterns in responses. Example: '\\b[A-Z0-9]{32}\\b' catches 32-char API keys.",
+            "target": ".add-mapper-form",
+            "position": "top"
+        },
+        {
+            "text": "Set a prefix like 'api_key_' to generate 'api_key_1', 'api_key_2', etc. Add your mapper.",
+            "target": ".add-mapper-form",
+            "position": "top"
+        },
+        {
+            "text": "Use 'Preview' to test your regex before applying - paste sample output to see what gets masked!",
+            "target": ".active-mappers",
+            "position": "bottom"
+        }
+    ]
+}

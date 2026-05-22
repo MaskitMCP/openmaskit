@@ -363,3 +363,56 @@ class TestTokenFilePermissions:
         # Verify permissions
         file_mode = token_path.stat().st_mode & 0o777
         assert file_mode == 0o600, f"Expected 0o600, got {oct(file_mode)}"
+
+
+class TestOAuthEncryption:
+    """Test OAuth flow with encryption."""
+
+    async def test_file_token_storage_encrypts(self, tmp_path):
+        from maskit.oauth.handler import FileTokenStorage
+        from mcp.shared.auth import OAuthToken
+
+        storage = FileTokenStorage(tmp_path / "test.json")
+        token = OAuthToken(
+            access_token="secret123",
+            token_type="Bearer",
+            refresh_token="refresh456"
+        )
+
+        await storage.set_tokens(token)
+
+        # File should contain encrypted data
+        content = (tmp_path / "test.json").read_text()
+        assert content.startswith("ENCRYPTED:")
+        assert "secret123" not in content
+        assert "refresh456" not in content
+
+        # Should decrypt correctly
+        loaded = await storage.get_tokens()
+        assert loaded.access_token == "secret123"
+        assert loaded.refresh_token == "refresh456"
+
+    async def test_migration_preserves_tokens(self, tmp_path):
+        import json
+        from maskit.oauth.handler import FileTokenStorage
+
+        path = tmp_path / "legacy.json"
+        legacy_data = {
+            "tokens": {
+                "access_token": "legacy_access",
+                "refresh_token": "legacy_refresh",
+                "token_type": "Bearer"
+            }
+        }
+        path.write_text(json.dumps(legacy_data))
+
+        storage = FileTokenStorage(path)
+        tokens = await storage.get_tokens()
+
+        assert tokens.access_token == "legacy_access"
+        assert tokens.refresh_token == "legacy_refresh"
+
+        # Should now be encrypted
+        content = path.read_text()
+        assert content.startswith("ENCRYPTED:")
+        assert "legacy_access" not in content

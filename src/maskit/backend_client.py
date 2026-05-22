@@ -16,19 +16,27 @@ class BackendClient:
 
     def __init__(
         self,
+        installation_id: str,
+        maskit_version: str,
         auth_url: str | None = None,
         marketplace_url: str | None = None,
         timeout: float = 10.0,
     ):
         self.auth_url = auth_url or os.getenv(
-            "MASKIT_AUTH_BACKEND_URL", "http://localhost:3134"
+            "MASKIT_AUTH_BACKEND_URL", "https://auth.maskitmcp.com"
         )
         self.marketplace_url = marketplace_url or os.getenv(
-            "MASKIT_MARKETPLACE_API_URL", "http://localhost:9800"
+            "MASKIT_MARKETPLACE_API_URL", "https://api.maskitmcp.com"
         )
         self.client = httpx.AsyncClient(timeout=timeout)
         # Always enabled (we have defaults for localhost)
         self.enabled = True
+        self.installation_id = installation_id
+        self.maskit_version = maskit_version
+        self.required_headers = {
+            'User-Agent': f"Maskit/{self.maskit_version}",
+            'X-Maskit-Installation-Id': self.installation_id
+        }
 
     async def close(self):
         """Close the HTTP client."""
@@ -36,28 +44,46 @@ class BackendClient:
 
     # Marketplace API
 
-    async def get_catalog(self, page: int = 1, size: int = 100) -> list[dict[str, Any]]:
+    async def get_catalog(
+        self, page: int = 1, size: int = 12, query: str | None = None
+    ) -> dict[str, Any]:
         """Fetch marketplace catalog from backend.
 
-        Returns empty list on error (fallback to local catalog).
+        Args:
+            page: Page number (1-indexed)
+            size: Items per page
+            query: Optional text search query
+
+        Returns:
+            Dict with 'data' (list of servers) and 'meta' (pagination info).
+            Returns empty result on error: {"data": [], "meta": {"total": 0, "page": 1, "size": size, "total_pages": 0}}
         """
         if not self.marketplace_url:
-            return []
+            return {"data": [], "meta": {"total": 0, "page": 1, "size": size, "total_pages": 0}}
 
         try:
+            params = {"page": page, "size": size}
+            if query:
+                params["q"] = query
+
             resp = await self.client.get(
                 f"{self.marketplace_url}/api/marketplace/catalog",
-                params={"page": page, "size": size},
+                params=params,
+                headers=self.required_headers
             )
             resp.raise_for_status()
-            data = resp.json()
-            # Backend returns array directly, not wrapped in {"servers": [...]}
-            if isinstance(data, list):
-                return data
-            return []
+            response_data = resp.json()
+
+            # Backend returns object with data and meta
+            if isinstance(response_data, dict) and "data" in response_data and "meta" in response_data:
+                return response_data
+            else:
+                logger.warning(f"Unexpected catalog response format: {type(response_data)}")
+                return {"data": [], "meta": {"total": 0, "page": 1, "size": size, "total_pages": 0}}
+
         except Exception as e:
             logger.warning(f"Failed to fetch backend catalog: {e}")
-            return []
+            return {"data": [], "meta": {"total": 0, "page": 1, "size": size, "total_pages": 0}}
 
     async def get_server_info(self, server_id: str) -> dict[str, Any] | None:
         """Get server details by UUID.
@@ -69,7 +95,8 @@ class BackendClient:
 
         try:
             resp = await self.client.get(
-                f"{self.marketplace_url}/api/marketplace/servers/{server_id}"
+                f"{self.marketplace_url}/api/marketplace/servers/{server_id}",
+                headers=self.required_headers
             )
             resp.raise_for_status()
             return resp.json()
@@ -89,7 +116,7 @@ class BackendClient:
         return f"{self.auth_url}/auth/authorize/{server_id}?{params}"
 
     async def exchange_code(
-        self, server_id: str, code: str, redirect_uri: str
+        self, server_id: str, code: str
     ) -> dict[str, Any]:
         """Exchange authorization code for access token.
 
@@ -97,7 +124,39 @@ class BackendClient:
         """
         resp = await self.client.post(
             f"{self.auth_url}/api/oauth/exchange",
-            json={"server_id": server_id, "code": code, "redirect_uri": redirect_uri},
+            json={"server_id": server_id, "code": code},
         )
         resp.raise_for_status()
         return resp.json()
+
+    async def refresh_oauth_token(
+        self, server_id: str, refresh_token: str
+    ) -> dict[str, Any] | None:
+        """Refresh OAuth access token using refresh token.
+
+        Args:
+            server_id: Backend server UUID or handle
+            refresh_token: Current refresh token
+
+        Returns:
+            New token dict with access_token, refresh_token, etc.
+            Returns None if refresh fails.
+        """
+        try:
+            resp = await self.client.post(
+                f"{self.auth_url}/api/oauth/refresh",
+                json={"server_id": server_id, "refresh_token": refresh_token},
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                logger.warning(
+                    f"Refresh token expired for {server_id} - user must re-authenticate"
+                )
+            else:
+                logger.error(f"Token refresh failed for {server_id}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Token refresh request failed for {server_id}: {e}")
+            return None
