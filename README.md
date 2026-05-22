@@ -173,37 +173,9 @@ MASKIT_LOG_FORMAT=json maskit  # For log aggregation systems
 **Graceful Shutdown:**
 Maskit drains in-flight requests, flushes database, and exits cleanly on SIGINT/SIGTERM.
 
-**Kubernetes:**
-```yaml
-readinessProbe:
-  httpGet:
-    path: /health
-    port: 9473
-lifecycle:
-  preStop:
-    exec:
-      command: ["/bin/sh", "-c", "sleep 5"]
-```
-
 ### Connect AI Agents
 
-Connect via the dashboard's "Connect Agent" button, or manually:
-
-**Claude Code:**
-```bash
-claude mcp add --scope project maskit-slack --transport http http://localhost:9474/slack/mcp
-```
-
-**Cursor/VS Code** (`.cursor/mcp.json` or `.vscode/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "slack": { "url": "http://localhost:9474/slack/mcp" }
-  }
-}
-```
-
-Each server has its own endpoint: `http://localhost:9474/{server-name}/mcp`
+The "Connect Agent" in the dashboard helps you connect your MCP servers to your AI agents.
 
 ## Docker
 
