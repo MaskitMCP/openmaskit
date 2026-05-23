@@ -162,7 +162,7 @@ async def connect_upstream(
                     name = upstream.url.replace("https://", "").replace("/", "_")[:64].lower()
             oauth_store_path = oauth_dir / f"{name}.json"
 
-            provider = create_oauth_provider(
+            provider = await create_oauth_provider(
                 upstream.url,
                 upstream.oauth,
                 oauth_store_path,

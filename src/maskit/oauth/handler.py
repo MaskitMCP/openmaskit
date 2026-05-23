@@ -11,8 +11,10 @@ import logging
 import sys
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
 
 import anyio
+import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
@@ -86,6 +88,132 @@ class FileTokenStorage:
         data["client_info"] = client_info.model_dump(exclude_none=True)
         self._write(data)
 
+    async def discover_oauth_metadata(self, issuer: str, mcp_url: str | None = None) -> dict | None:
+        """Discover OAuth/OIDC metadata from issuer.
+
+        Args:
+            issuer: OAuth issuer URL (e.g., https://gitlab.com)
+            mcp_url: Full MCP URL (e.g., https://gitlab.com/api/v4/mcp) for RFC 8707 resource discovery
+
+        Returns:
+            dict with authorization_endpoint, token_endpoint, registration_endpoint, etc.
+            None if discovery fails
+        """
+        issuer = issuer.rstrip("/")
+        oidc_metadata = None
+        resource_metadata = None
+
+        # Try OIDC first
+        oidc_url = f"{issuer}/.well-known/openid-configuration"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                logger.info(f"Attempting OIDC discovery at {oidc_url}")
+                resp = await client.get(oidc_url)
+                resp.raise_for_status()
+                oidc_metadata = resp.json()
+                logger.info(f"OIDC discovery successful")
+
+                # If OIDC has registration_endpoint, we can return early
+                if oidc_metadata.get("registration_endpoint"):
+                    return oidc_metadata
+            except Exception as e:
+                logger.debug(f"OIDC discovery failed: {e}")
+
+        # Try RFC 8707 Protected Resource discovery if we have the MCP URL
+        if mcp_url:
+            parsed = urlparse(mcp_url)
+            if parsed.path:
+                resource_path = parsed.path.lstrip('/')
+                resource_url = f"{issuer}/.well-known/oauth-protected-resource/{resource_path}"
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    try:
+                        logger.info(f"Attempting OAuth Protected Resource discovery at {resource_url}")
+                        resp = await client.get(resource_url)
+                        resp.raise_for_status()
+                        resource_metadata = resp.json()
+                        logger.info(f"OAuth Protected Resource discovery successful")
+                    except Exception as e:
+                        logger.debug(f"OAuth Protected Resource discovery failed: {e}")
+
+        # Try OAuth 2.0 discovery
+        oauth_url = f"{issuer}/.well-known/oauth-authorization-server"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                logger.info(f"Attempting OAuth 2.0 discovery at {oauth_url}")
+                resp = await client.get(oauth_url)
+                resp.raise_for_status()
+                oauth_metadata = resp.json()
+                logger.info(f"OAuth 2.0 discovery successful")
+
+                # Merge metadata: prefer OIDC endpoints, but take registration_endpoint from OAuth 2.0
+                if oidc_metadata:
+                    merged = oidc_metadata.copy()
+                    if oauth_metadata.get("registration_endpoint"):
+                        merged["registration_endpoint"] = oauth_metadata["registration_endpoint"]
+                    # Merge scopes from resource metadata if available
+                    if resource_metadata and resource_metadata.get("scopes_supported"):
+                        merged["scopes_supported"] = resource_metadata["scopes_supported"]
+                    return merged
+                else:
+                    # Only OAuth 2.0 succeeded
+                    if resource_metadata and resource_metadata.get("scopes_supported"):
+                        oauth_metadata["scopes_supported"] = resource_metadata["scopes_supported"]
+                    return oauth_metadata
+
+            except Exception as e:
+                logger.debug(f"OAuth 2.0 discovery failed: {e}")
+
+        # If we got OIDC but no OAuth 2.0, return OIDC (even without registration_endpoint)
+        if oidc_metadata:
+            logger.info(f"Returning OIDC metadata (OAuth 2.0 discovery failed)")
+            # Merge resource scopes if available
+            if resource_metadata and resource_metadata.get("scopes_supported"):
+                oidc_metadata["scopes_supported"] = resource_metadata["scopes_supported"]
+            return oidc_metadata
+
+        logger.error(f"All OAuth discovery methods failed for {issuer}")
+        return None
+
+    async def register_dynamic_client(
+        self,
+        registration_endpoint: str,
+        client_metadata: dict,
+        registration_token: str | None = None
+    ) -> dict | None:
+        """Register OAuth client via DCR (RFC 7591).
+
+        Args:
+            registration_endpoint: URL for client registration
+            client_metadata: Client metadata (name, redirect_uris, etc.)
+            registration_token: Optional bearer token for authenticated DCR
+
+        Returns:
+            dict with client_id, client_secret, etc.
+            None if registration fails
+        """
+        headers = {"Content-Type": "application/json"}
+        if registration_token:
+            headers["Authorization"] = f"Bearer {registration_token}"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                logger.info(f"Attempting DCR at {registration_endpoint}")
+                resp = await client.post(
+                    registration_endpoint,
+                    json=client_metadata,
+                    headers=headers
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                logger.info(f"DCR successful, client_id: {result.get('client_id')}")
+                return result
+            except Exception as e:
+                logger.error(f"DCR failed: {e}")
+                return None
+
 
 class OAuthCallbackServer:
     """Always-on HTTP server that receives OAuth callbacks for all targets."""
@@ -150,7 +278,7 @@ class OAuthCallbackServer:
         return self._auth_code or "", self._state
 
 
-def create_oauth_provider(
+async def create_oauth_provider(
     server_url: str,
     oauth_config: HttpOAuthConfig,
     store_path: Path,
@@ -158,43 +286,128 @@ def create_oauth_provider(
 ) -> OAuthClientProvider:
     """Create an OAuthClientProvider configured for the given MCP server.
 
-    If oauth_config has a client_id, pre-seeds storage to skip Dynamic Client
-    Registration.  Otherwise, leaves storage empty so the SDK will attempt DCR
-    automatically via the server's registration_endpoint.
+    If oauth_config has issuer (DCR mode), performs OAuth discovery and DCR.
+    If oauth_config has a client_id (manual mode), pre-seeds storage to skip DCR.
     """
 
     storage = FileTokenStorage(store_path)
-
     redirect_uri = callback_server.redirect_uri
 
-    auth_method = "none"
-    if oauth_config.client_secret:
-        auth_method = "client_secret_post"
+    # DCR mode: issuer provided
+    if oauth_config.issuer:
+        logger.info(f"DCR mode: discovering OAuth metadata for issuer {oauth_config.issuer}")
 
-    client_metadata = OAuthClientMetadata(
-        client_name="Maskit",
-        redirect_uris=[redirect_uri],
-        grant_types=["authorization_code", "refresh_token"],
-        response_types=["code"],
-        token_endpoint_auth_method=auth_method,
-        scope=oauth_config.scope,
-    )
+        # Discover OAuth metadata (pass server_url for RFC 8707 resource discovery)
+        metadata = await storage.discover_oauth_metadata(oauth_config.issuer, server_url)
+        if not metadata:
+            raise RuntimeError(f"Failed to discover OAuth metadata for issuer: {oauth_config.issuer}")
 
-    if oauth_config.client_id:
-        data = storage._read()
-        stored_id = (data.get("client_info") or {}).get("client_id")
-        if stored_id != oauth_config.client_id:
-            client_info = OAuthClientInformationFull(
-                client_id=oauth_config.client_id,
-                client_secret=oauth_config.client_secret,
+        # Prepare scope
+        scope = " ".join(oauth_config.scopes) if oauth_config.scopes else ""
+
+        # Check if we already have DCR-registered client info
+        existing_client_info = await storage.get_client_info()
+
+        if existing_client_info:
+            logger.info("Using existing DCR client from storage")
+            auth_method = "none"
+            if existing_client_info.client_secret:
+                auth_method = "client_secret_post"
+
+            client_metadata = OAuthClientMetadata(
                 client_name="Maskit",
                 redirect_uris=[redirect_uri],
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
                 token_endpoint_auth_method=auth_method,
+                scope=scope,
             )
-            data["client_info"] = client_info.model_dump(exclude_none=True)
-            storage._write(data)
+        else:
+            # Perform DCR if registration_endpoint available
+            registration_endpoint = metadata.get("registration_endpoint")
+            if not registration_endpoint:
+                raise RuntimeError(f"DCR requested but issuer {oauth_config.issuer} does not support DCR (no registration_endpoint)")
+
+            dcr_metadata = {
+                "client_name": "Maskit",
+                "redirect_uris": [redirect_uri],
+                "grant_types": ["authorization_code", "refresh_token"],
+                "response_types": ["code"],
+                "token_endpoint_auth_method": "client_secret_post",
+            }
+            if scope:
+                dcr_metadata["scope"] = scope
+
+            client_info_dict = await storage.register_dynamic_client(
+                registration_endpoint,
+                dcr_metadata,
+                oauth_config.registration_token
+            )
+
+            if not client_info_dict:
+                raise RuntimeError(f"Failed to register client via DCR at {registration_endpoint}")
+
+            # Store the DCR result
+            client_info = OAuthClientInformationFull(
+                client_id=client_info_dict["client_id"],
+                client_secret=client_info_dict.get("client_secret"),
+                client_name="Maskit",
+                redirect_uris=[redirect_uri],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                token_endpoint_auth_method="client_secret_post",
+            )
+            await storage.set_client_info(client_info)
+            logger.info(f"Stored DCR client info: {client_info.client_id}")
+
+            auth_method = "none"
+            if client_info.client_secret:
+                auth_method = "client_secret_post"
+
+            client_metadata = OAuthClientMetadata(
+                client_name="Maskit",
+                redirect_uris=[redirect_uri],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                token_endpoint_auth_method=auth_method,
+                scope=scope,
+            )
+
+    # Manual mode: client_id provided
+    else:
+        logger.info(f"Manual mode: using provided client_id {oauth_config.client_id}")
+
+        auth_method = "none"
+        if oauth_config.client_secret:
+            auth_method = "client_secret_post"
+
+        # Prepare scope
+        scope = oauth_config.scope or ""
+
+        client_metadata = OAuthClientMetadata(
+            client_name="Maskit",
+            redirect_uris=[redirect_uri],
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            token_endpoint_auth_method=auth_method,
+            scope=scope,
+        )
+
+        if oauth_config.client_id:
+            data = storage._read()
+            stored_id = (data.get("client_info") or {}).get("client_id")
+            if stored_id != oauth_config.client_id:
+                client_info = OAuthClientInformationFull(
+                    client_id=oauth_config.client_id,
+                    client_secret=oauth_config.client_secret,
+                    client_name="Maskit",
+                    redirect_uris=[redirect_uri],
+                    grant_types=["authorization_code", "refresh_token"],
+                    response_types=["code"],
+                    token_endpoint_auth_method=auth_method,
+                )
+                data["client_info"] = client_info.model_dump(exclude_none=True)
+                storage._write(data)
 
     async def redirect_handler(auth_url: str) -> None:
         print(
@@ -207,6 +420,7 @@ def create_oauth_provider(
     async def callback_handler() -> tuple[str, str | None]:
         return await callback_server.wait_for_callback()
 
+    # Always use the full server_url - the MCP SDK handles OAuth discovery internally
     provider = OAuthClientProvider(
         server_url=server_url,
         client_metadata=client_metadata,

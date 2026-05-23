@@ -4,9 +4,15 @@ from pydantic import BaseModel, Field
 
 
 class HttpOAuthConfig(BaseModel):
+    # Manual mode fields
     client_id: str | None = None
     client_secret: str | None = None
     scope: str | None = None
+
+    # DCR mode fields
+    issuer: str | None = None
+    scopes: list[str] | None = None
+    registration_token: str | None = None
 
 
 class UpstreamStdioConfig(BaseModel):

@@ -127,6 +127,8 @@ async def marketplace_list(request: Request):
             "description": entry.get("description", ""),
             "icon_url": entry.get("icon_url"),
             "category": entry.get("category"),
+            "official": entry.get("official", False),
+            "tags": entry.get("tags", []),
             "requires_oauth": entry.get("requires_oauth", False),
             "env_vars": env_vars,  # Array of env var names to prompt for
             "meta": entry.get("meta", {}),  # Include meta for configurable_args

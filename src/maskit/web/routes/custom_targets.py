@@ -39,7 +39,10 @@ def _build_config(body: dict) -> tuple[dict | None, str | None]:
             return None, "url is required for http transport"
         config: dict = {"transport": "http", "url": url}
         oauth = body.get("oauth")
+        oauth_mode = body.get("oauth_mode", "manual")
+
         if oauth and isinstance(oauth, dict) and any(oauth.values()):
+            # Preserve all OAuth fields (DCR or manual)
             config["oauth"] = {
                 k: v for k, v in oauth.items() if v
             }

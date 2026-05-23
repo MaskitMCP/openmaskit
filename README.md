@@ -43,8 +43,26 @@ AI coding assistants see everything your MCP tools return — production databas
 
 ### 🔐 Token Security
 - **Encrypted storage**: OAuth tokens encrypted at rest with Fernet (AES-128)
+- **Encryption key**: Stored at `~/.maskit/.key` (auto-generated on first run)
 - **Auto-refresh**: Expired OAuth tokens automatically refreshed via backend
 - **Path validation**: Server IDs validated to prevent directory traversal
+
+**⚠️ Important: Backup Your Encryption Key**
+
+Your OAuth tokens are encrypted using a key at `~/.maskit/.key`. If you lose this key, **you will lose access to all stored OAuth tokens** and will need to re-authenticate.
+
+```bash
+# Backup your encryption key (KEEP THIS SECURE!)
+cp ~/.maskit/.key ~/.maskit/.key.backup
+
+# Or use an environment variable for key management
+export MASKIT_ENCRYPTION_KEY=$(cat ~/.maskit/.key)
+```
+
+**Key priority:**
+1. `MASKIT_ENCRYPTION_KEY` environment variable (recommended for production)
+2. `~/.maskit/.key` file (auto-generated for local use)
+3. New key generated if neither exists
 
 ## Use Cases
 
@@ -57,6 +75,22 @@ AI coding assistants see everything your MCP tools return — production databas
 - Production systems handling regulated data (PII, PHI, PCI) without hardening
 - Compliance-critical environments requiring audit trails (SOC 2, HIPAA)
 - Multi-tenant deployments (designed for single-user local use)
+
+## Experimental Features
+
+### 🧪 Dynamic Client Registration (DCR)
+
+**Status: Experimental** — May not work with all OAuth providers
+
+When adding custom HTTP servers with OAuth, Maskit offers two modes:
+- **Dynamic Registration**: Automatically discovers OAuth endpoints and registers a unique client
+- **Manual Credentials**: Provide existing OAuth application credentials (recommended for production)
+
+**Known limitations:**
+- DCR support varies significantly by OAuth provider
+- Some providers require pre-approval, registration tokens, or specific scopes
+- Connection failures may occur with non-standard OAuth implementations
+- **Manual mode is more reliable** if you have existing OAuth credentials
 
 ## How it works
 
@@ -157,6 +191,22 @@ MASKIT_LOG_FORMAT=json                 # JSON logging for production
 MASKIT_SHUTDOWN_TIMEOUT=30             # Graceful shutdown timeout (seconds)
 ```
 
+### Backup and Data Safety
+
+**What to backup:**
+
+1. **Encryption key**: `~/.maskit/.key` (required to decrypt OAuth tokens)
+2. **Database**: `~/.maskit/store.db` (masking rules, aliases, server configs)
+
+```bash
+# Backup both critical files
+cp ~/.maskit/.key ~/backups/maskit-key.backup
+cp ~/.maskit/store.db ~/backups/maskit-db-$(date +%Y%m%d).db
+
+# Restore from backup
+cp ~/backups/maskit-key.backup ~/.maskit/.key
+cp ~/backups/maskit-db-20260524.db ~/.maskit/store.db
+```
 ### Production Features
 
 **Health Endpoint:**
