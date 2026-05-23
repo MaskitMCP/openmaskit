@@ -3380,6 +3380,26 @@ code {
     }
 }
 
+/* Experimental Notice */
+.dcr-experimental-notice {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.75rem 0.875rem;
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.2);
+    border-radius: var(--radius-md);
+    color: #fbbf24;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    margin-bottom: 0.875rem;
+}
+
+.dcr-experimental-notice svg {
+    flex-shrink: 0;
+    opacity: 0.8;
+}
+
 /* OAuth Mode Selector Cards */
 .oauth-mode-selector {
     display: grid;
@@ -3390,8 +3410,8 @@ code {
 .oauth-mode-card {
     display: flex;
     align-items: flex-start;
-    gap: 0.875rem;
-    padding: 1rem 1.125rem;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
     background: var(--bg-elevated);
     border: 1.5px solid var(--border-subtle);
     border-radius: var(--radius-md);
@@ -3400,6 +3420,7 @@ code {
     position: relative;
     overflow: hidden;
     text-align: left;
+    min-height: 70px;
 }
 
 .oauth-mode-card::before {
@@ -3432,8 +3453,8 @@ code {
 
 .oauth-mode-icon {
     flex-shrink: 0;
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3454,18 +3475,20 @@ code {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: 0.25rem;
+    min-width: 0;
 }
 
 .oauth-mode-header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .oauth-mode-title {
     font-family: var(--font-body);
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.01em;
@@ -3478,16 +3501,20 @@ code {
     color: var(--teal);
     background: rgba(45, 212, 191, 0.15);
     border: 1px solid rgba(45, 212, 191, 0.3);
-    padding: 0.1rem 0.4rem;
+    padding: 0.125rem 0.375rem;
     border-radius: 20px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    white-space: nowrap;
 }
 
 .oauth-mode-desc {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: var(--text-muted);
-    line-height: 1.4;
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* DCR Section */
