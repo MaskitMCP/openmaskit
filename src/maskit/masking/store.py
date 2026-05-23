@@ -591,5 +591,13 @@ class MaskingStore:
                 "installed_at": row[4],
             }
 
+    async def update_server_config(self, server_id: str, config: dict):
+        """Update the config JSON for a server."""
+        await self._db.execute(
+            "UPDATE mcp_servers SET config = ? WHERE id = ?",
+            (json.dumps(config), server_id)
+        )
+        await self._db.commit()
+
     async def close(self):
         await self._db.close()

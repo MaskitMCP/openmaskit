@@ -171,6 +171,66 @@
                     </template>
                 </div>
             </template>
+            <template x-if="modal.configurableArgs.length > 0">
+                <div class="config-args-section">
+                    <div class="config-section-header">
+                        <span class="config-section-label">Runtime Configuration</span>
+                        <span class="config-section-badge" x-text="`${modal.configurableArgs.length} param${modal.configurableArgs.length !== 1 ? 's' : ''}`"></span>
+                    </div>
+
+                    <template x-for="arg in modal.configurableArgs" :key="arg.name">
+                        <div class="config-arg-block">
+                            <div class="config-arg-header">
+                                <span class="config-arg-label" x-text="arg.label"></span>
+                                <span x-show="arg.required" class="config-required-star">*</span>
+                            </div>
+                            <p x-show="arg.description" class="config-arg-hint" x-text="arg.description"></p>
+
+                            <!-- Multiple values -->
+                            <template x-if="arg.multiple">
+                                <div class="config-value-stack">
+                                    <template x-for="(value, idx) in modal.userArgs[arg.name]" :key="idx">
+                                        <div class="config-value-row">
+                                            <span class="config-value-index" x-text="`${idx + 1}.`"></span>
+                                            <input type="text"
+                                                   x-model="modal.userArgs[arg.name][idx]"
+                                                   :placeholder="arg.placeholder"
+                                                   class="config-value-input">
+                                            <button type="button"
+                                                    class="config-remove-btn"
+                                                    @click="removeArgValue(arg.name, idx)"
+                                                    :disabled="modal.userArgs[arg.name].length === 1"
+                                                    :aria-label="`Remove value ${idx + 1}`">
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <button type="button"
+                                            class="config-add-btn"
+                                            @click="addArgValue(arg.name)">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                                        </svg>
+                                        <span>Add another</span>
+                                    </button>
+                                </div>
+                            </template>
+
+                            <!-- Single value -->
+                            <template x-if="!arg.multiple">
+                                <input type="text"
+                                       x-model="modal.userArgs[arg.name]"
+                                       :placeholder="arg.placeholder"
+                                       class="config-value-input config-value-input-single">
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
             <div class="modal-actions">
                 <button type="button" class="btn-cancel" @click="modalCancel()">Cancel</button>
                 <button type="button" class="btn-primary" @click="modalSubmit()">Install</button>
@@ -206,30 +266,63 @@ function marketplacePage() {
 
         modal: {
             visible: false,
+            server: null,
             envVars: [],
             oauthVars: [],
+            configurableArgs: [],
             envValues: {},
             oauthValues: {},
+            userArgs: {},
         },
 
         showToast(msg, type = 'success') {
             this.toasts.push({ id: Date.now(), msg, type });
         },
 
-        openModal(envVars, oauthVars) {
+        openModal(server, envVars, oauthVars) {
+            this.modal.server = server;
             this.modal.envVars = envVars || [];
             this.modal.oauthVars = oauthVars || [];
+            this.modal.configurableArgs = server?.meta?.configurable_args || [];
             this.modal.envValues = {};
             this.modal.oauthValues = {};
+            this.modal.userArgs = {};
             this.modal.envVars.forEach(v => this.modal.envValues[v] = '');
             this.modal.oauthVars.forEach(v => this.modal.oauthValues[v] = '');
+
+            // Initialize userArgs with empty arrays for multiple args
+            for (const arg of this.modal.configurableArgs) {
+                if (arg.multiple) {
+                    this.modal.userArgs[arg.name] = [''];
+                } else {
+                    this.modal.userArgs[arg.name] = '';
+                }
+            }
+
             this.modal.visible = true;
             return new Promise((resolve) => { _modalResolve = resolve; });
         },
 
         modalSubmit() {
+            // Clean up empty values from userArgs
+            const cleanedUserArgs = {};
+            for (const [key, value] of Object.entries(this.modal.userArgs)) {
+                if (Array.isArray(value)) {
+                    const filtered = value.filter(v => v.trim() !== '');
+                    if (filtered.length > 0) {
+                        cleanedUserArgs[key] = filtered;
+                    }
+                } else if (value && value.trim() !== '') {
+                    cleanedUserArgs[key] = value;
+                }
+            }
+
             this.modal.visible = false;
-            if (_modalResolve) _modalResolve({ envValues: this.modal.envValues, oauthValues: this.modal.oauthValues });
+            if (_modalResolve) _modalResolve({
+                envValues: this.modal.envValues,
+                oauthValues: this.modal.oauthValues,
+                userArgs: cleanedUserArgs
+            });
             _modalResolve = null;
         },
 
@@ -237,6 +330,19 @@ function marketplacePage() {
             this.modal.visible = false;
             if (_modalResolve) _modalResolve(null);
             _modalResolve = null;
+        },
+
+        addArgValue(argName) {
+            if (!this.modal.userArgs[argName]) {
+                this.modal.userArgs[argName] = [];
+            }
+            this.modal.userArgs[argName].push('');
+        },
+
+        removeArgValue(argName, idx) {
+            if (this.modal.userArgs[argName] && this.modal.userArgs[argName].length > 1) {
+                this.modal.userArgs[argName].splice(idx, 1);
+            }
         },
 
         async init() {
@@ -326,29 +432,34 @@ function marketplacePage() {
 
             let envVars = {};
             let oauthVars = {};
+            let userArgs = {};
             const needsEnv = server.env_vars && server.env_vars.length > 0;
             const needsOauth = server.oauth_vars && server.oauth_vars.length > 0;
+            const hasConfigurableArgs = server.meta?.configurable_args && server.meta.configurable_args.length > 0;
             const hasBackendOauth = server.backend_id && needsOauth;
 
-            console.log('needsEnv:', needsEnv, 'needsOauth:', needsOauth, 'hasBackendOauth:', hasBackendOauth);
+            console.log('needsEnv:', needsEnv, 'needsOauth:', needsOauth, 'hasBackendOauth:', hasBackendOauth, 'hasConfigurableArgs:', hasConfigurableArgs);
 
             // For backend OAuth, only collect env vars if needed (OAuth handled by backend)
+            // Note: configurable_args not supported for OAuth servers (design decision)
             if (hasBackendOauth) {
                 if (needsEnv) {
-                    const result = await this.openModal(server.env_vars, []);
+                    const result = await this.openModal(server, server.env_vars, []);
                     if (!result) return;
                     envVars = result.envValues;
                 }
                 // Skip OAuth credentials prompt - backend handles it
-            } else if (needsEnv || needsOauth) {
-                // Local OAuth or non-OAuth: collect both env and oauth vars
+            } else if (needsEnv || needsOauth || hasConfigurableArgs) {
+                // Local OAuth or non-OAuth: collect env, oauth vars, and configurable args
                 const result = await this.openModal(
+                    server,
                     needsEnv ? server.env_vars : [],
                     needsOauth ? server.oauth_vars : []
                 );
                 if (!result) return;
                 envVars = result.envValues;
                 oauthVars = result.oauthValues;
+                userArgs = result.userArgs || {};
             }
 
             server.installing = true;
@@ -356,7 +467,7 @@ function marketplacePage() {
                 const res = await fetch('/api/marketplace/install', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ server_id: server.id, backend_id: server.backend_id, env_vars: envVars, oauth_vars: oauthVars }),
+                    body: JSON.stringify({ server_id: server.id, backend_id: server.backend_id, env_vars: envVars, oauth_vars: oauthVars, user_args: userArgs }),
                 });
                 const data = await res.json();
                 if (!res.ok) {

@@ -3027,6 +3027,335 @@ code {
     font-weight: 500;
 }
 
+/* ============================================================
+   Configurable Arguments — Editorial Precision Design
+   Refined hierarchy, asymmetric layout, tactile interactions
+   ============================================================ */
+
+.config-args-section {
+    position: relative;
+    margin-top: 1.75rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, rgba(45, 212, 191, 0.02) 0%, rgba(96, 165, 250, 0.02) 100%);
+    border: 1px solid rgba(45, 212, 191, 0.15);
+    border-radius: var(--radius-lg);
+    animation: config-section-slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes config-section-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.config-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.875rem;
+    border-bottom: 1px solid rgba(45, 212, 191, 0.1);
+}
+
+.config-section-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--teal);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    position: relative;
+    padding-left: 1rem;
+}
+
+.config-section-label::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 1.2em;
+    background: var(--teal);
+    border-radius: 2px;
+}
+
+.config-section-badge {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: rgba(45, 212, 191, 0.08);
+    border: 1px solid rgba(45, 212, 191, 0.2);
+    padding: 0.2rem 0.6rem;
+    border-radius: 20px;
+}
+
+.config-arg-block {
+    margin-bottom: 1.5rem;
+    position: relative;
+    animation: config-arg-fade-in 0.35s ease-out backwards;
+    animation-delay: calc(var(--arg-index, 0) * 0.05s);
+}
+
+.config-arg-block:last-child {
+    margin-bottom: 0;
+}
+
+@keyframes config-arg-fade-in {
+    from {
+        opacity: 0;
+        transform: translateX(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.config-arg-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.config-arg-label {
+    font-family: var(--font-body);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.config-required-star {
+    color: var(--red);
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+    animation: required-pulse 2s ease-in-out infinite;
+}
+
+@keyframes required-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.config-arg-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0 0 0.75rem 0;
+    font-style: italic;
+}
+
+/* Value Stack Container */
+.config-value-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Individual Value Row */
+.config-value-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    position: relative;
+    animation: value-row-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes value-row-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(-8px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+.config-value-index {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: rgba(45, 212, 191, 0.6);
+    min-width: 1.75rem;
+    text-align: right;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.config-value-input {
+    flex: 1;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
+    padding: 0.65rem 0.875rem;
+    border-radius: var(--radius-md);
+    font-size: 0.825rem;
+    font-family: var(--font-mono);
+    transition: all var(--transition-fast);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.config-value-input:focus {
+    outline: none;
+    border-color: var(--teal);
+    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12), inset 0 1px 2px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.config-value-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+    font-style: italic;
+}
+
+.config-value-input-single {
+    width: 100%;
+}
+
+/* Remove Button */
+.config-remove-btn {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+    overflow: hidden;
+}
+
+.config-remove-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--red);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.config-remove-btn svg {
+    position: relative;
+    z-index: 1;
+    transition: transform var(--transition-fast);
+}
+
+.config-remove-btn:hover:not(:disabled) {
+    border-color: var(--red-border);
+    color: white;
+    transform: scale(1.05);
+}
+
+.config-remove-btn:hover:not(:disabled)::before {
+    opacity: 1;
+}
+
+.config-remove-btn:hover:not(:disabled) svg {
+    transform: rotate(90deg);
+}
+
+.config-remove-btn:active:not(:disabled) {
+    transform: scale(0.95);
+}
+
+.config-remove-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* Add Button */
+.config-add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding: 0.55rem 1rem;
+    background: transparent;
+    border: 1px dashed rgba(45, 212, 191, 0.3);
+    border-radius: var(--radius-md);
+    color: var(--teal);
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+    overflow: hidden;
+}
+
+.config-add-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(45, 212, 191, 0.08) 0%, rgba(96, 165, 250, 0.08) 100%);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.config-add-btn span {
+    position: relative;
+    z-index: 1;
+}
+
+.config-add-btn svg {
+    position: relative;
+    z-index: 1;
+    transition: transform var(--transition-fast);
+}
+
+.config-add-btn:hover {
+    border-style: solid;
+    border-color: var(--teal);
+    background: rgba(45, 212, 191, 0.08);
+    box-shadow: 0 0 16px rgba(45, 212, 191, 0.15);
+    transform: translateY(-1px);
+}
+
+.config-add-btn:hover::before {
+    opacity: 1;
+}
+
+.config-add-btn:hover svg {
+    transform: rotate(90deg);
+}
+
+.config-add-btn:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* Legacy support for non-config sections */
+.field-hint {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin: 0.25rem 0 0.5rem;
+    line-height: 1.4;
+}
+
+.required {
+    color: var(--red);
+    margin-left: 0.25rem;
+}
+
 .integration-agents {
     display: flex;
     flex-wrap: wrap;

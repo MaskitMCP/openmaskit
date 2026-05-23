@@ -24,12 +24,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _merge_user_args(base_args: list[str], config: dict) -> list[str]:
+    """Merge base args with user-configured args from config.meta.user_args."""
+    merged = base_args.copy()
+
+    user_args = config.get("meta", {}).get("user_args", {})
+
+    for arg_name, arg_config in user_args.items():
+        values = arg_config.get("values", [])
+        arg_format = arg_config.get("arg_format", "")
+
+        if not arg_format:
+            logger.warning(f"Missing arg_format for {arg_name}, skipping")
+            continue
+
+        for value in values:
+            # Format: "--flag {value}" becomes ["--flag", "/path"]
+            formatted = arg_format.replace("{value}", str(value))
+            merged.extend(formatted.split())
+
+    return merged
+
+
 def _build_upstream_config(config: dict) -> UpstreamStdioConfig | UpstreamHttpConfig:
     transport = config.get("transport", "stdio")
     if transport == "stdio":
+        base_args = config.get("args", [])
+        merged_args = _merge_user_args(base_args, config)
+
         return UpstreamStdioConfig(
             command=config["command"],
-            args=config.get("args", []),
+            args=merged_args,
             env=config.get("env", {}),
         )
     else:
