@@ -113,12 +113,27 @@ class OAuthCallbackServer:
 
         self._event.set()
         return HTMLResponse(
-            "<html><body style='background:#0f1117;color:#e1e4e8;font-family:sans-serif;"
+            "<html><head>"
+            "<meta http-equiv='refresh' content='3;url=http://localhost:9473/'>"
+            "</head><body style='background:#0f1117;color:#e1e4e8;font-family:sans-serif;"
             "display:flex;align-items:center;justify-content:center;height:100vh;'>"
             "<div style='text-align:center'>"
             "<h1 style='color:#3fb950'>&#10003; Authenticated</h1>"
-            "<p>You can close this tab. Maskit is connecting...</p>"
-            "</div></body></html>"
+            "<p>Redirecting to Maskit in <span id='countdown'>3</span> seconds...</p>"
+            "<p style='margin-top:20px'>"
+            "<a href='http://localhost:9473/' style='color:#2dd4bf;text-decoration:none;border:1px solid #2dd4bf;padding:8px 16px;border-radius:4px;display:inline-block;'>"
+            "Click here to go now"
+            "</a>"
+            "</p>"
+            "</div>"
+            "<script>"
+            "let count = 3;"
+            "setInterval(() => {"
+            "  count--;"
+            "  if (count >= 0) document.getElementById('countdown').textContent = count;"
+            "}, 1000);"
+            "</script>"
+            "</body></html>"
         )
 
     def create_app(self) -> Starlette:

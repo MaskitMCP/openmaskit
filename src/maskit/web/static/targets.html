@@ -243,7 +243,7 @@
                 <div x-show="modal.transport === 'http'" x-transition.opacity>
                     <label class="modal-field">
                         <span class="modal-label">URL</span>
-                        <input type="url" class="modal-input" placeholder="https://mcp.example.com/mcp" x-model="modal.url">
+                        <input type="url" class="modal-input" placeholder="https://mcp.example.com/mcp" x-model="modal.url" @blur="previewDiscovery()">
                     </label>
 
                     <label class="oauth-switch">
@@ -254,19 +254,214 @@
                         <span>Requires OAuth</span>
                     </label>
 
-                    <div x-show="modal.oauthEnabled" x-transition.opacity class="oauth-fields">
-                        <label class="modal-field">
-                            <span class="modal-label">Client ID</span>
-                            <input type="text" class="modal-input" placeholder="OAuth client_id" x-model="modal.oauth.client_id">
-                        </label>
-                        <label class="modal-field">
-                            <span class="modal-label">Client Secret</span>
-                            <input type="password" class="modal-input" placeholder="OAuth client_secret" x-model="modal.oauth.client_secret">
-                        </label>
-                        <label class="modal-field">
-                            <span class="modal-label">Scope <span class="optional-hint">(optional)</span></span>
-                            <input type="text" class="modal-input" placeholder="e.g. read write" x-model="modal.oauth.scope">
-                        </label>
+                    <!-- OAuth Configuration Section -->
+                    <div x-show="modal.oauthEnabled" x-transition.opacity class="oauth-config-wrapper">
+
+                        <!-- OAuth Mode Selector -->
+                        <div class="oauth-mode-selector">
+                            <button type="button"
+                                    class="oauth-mode-card"
+                                    :class="{ 'oauth-mode-active': modal.oauthMode === 'dcr' }"
+                                    @click="modal.oauthMode = 'dcr'">
+                                <div class="oauth-mode-icon">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                                        <path d="M2 17l10 5 10-5"></path>
+                                        <path d="M2 12l10 5 10-5"></path>
+                                    </svg>
+                                </div>
+                                <div class="oauth-mode-content">
+                                    <div class="oauth-mode-header">
+                                        <span class="oauth-mode-title">Dynamic Registration</span>
+                                        <span class="oauth-mode-badge">Recommended</span>
+                                    </div>
+                                    <span class="oauth-mode-desc">Auto-discover and register OAuth client</span>
+                                </div>
+                            </button>
+
+                            <button type="button"
+                                    class="oauth-mode-card"
+                                    :class="{ 'oauth-mode-active': modal.oauthMode === 'manual' }"
+                                    @click="modal.oauthMode = 'manual'">
+                                <div class="oauth-mode-icon">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+                                    </svg>
+                                </div>
+                                <div class="oauth-mode-content">
+                                    <div class="oauth-mode-header">
+                                        <span class="oauth-mode-title">Manual Credentials</span>
+                                    </div>
+                                    <span class="oauth-mode-desc">Provide existing OAuth application</span>
+                                </div>
+                            </button>
+                        </div>
+
+                        <!-- DCR Mode Fields -->
+                        <div x-show="modal.oauthMode === 'dcr'" x-transition.opacity class="oauth-dcr-section">
+
+                            <!-- Discovery Status Terminal -->
+                            <div class="dcr-status-terminal">
+                                <!-- Loading State -->
+                                <div x-show="modal.discovering" class="dcr-status dcr-status-loading">
+                                    <div class="dcr-status-spinner"></div>
+                                    <span class="dcr-status-text">Discovering OAuth endpoints...</span>
+                                </div>
+
+                                <!-- Success State -->
+                                <div x-show="modal.discoveryResult && !modal.discovering" class="dcr-status dcr-status-success">
+                                    <div class="dcr-discovery-header">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                            <polyline points="20 6 9 17 4 12"></polyline>
+                                        </svg>
+                                        <span class="dcr-status-title">Discovery Complete</span>
+                                    </div>
+                                    <div class="dcr-discovery-body">
+                                        <div class="dcr-issuer-line">
+                                            <span class="dcr-label">Issuer:</span>
+                                            <code class="dcr-value" x-text="modal.discoveryResult?.issuer"></code>
+                                        </div>
+                                        <div class="dcr-endpoints">
+                                            <div class="dcr-endpoint-item">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                <span>authorization_endpoint</span>
+                                            </div>
+                                            <div class="dcr-endpoint-item">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                <span>token_endpoint</span>
+                                            </div>
+                                            <div class="dcr-endpoint-item" x-show="modal.discoveryResult?.registration_endpoint">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                <span>registration_endpoint</span>
+                                                <span class="dcr-supported-badge">DCR Supported</span>
+                                            </div>
+                                            <div class="dcr-endpoint-item dcr-endpoint-warning" x-show="!modal.discoveryResult?.registration_endpoint">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                                </svg>
+                                                <span>DCR not available for this server</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Error State -->
+                                <div x-show="modal.discoveryError" class="dcr-status dcr-status-error">
+                                    <div class="dcr-error-header">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="15" y1="9" x2="9" y2="15"></line>
+                                            <line x1="9" y1="9" x2="15" y2="15"></line>
+                                        </svg>
+                                        <span class="dcr-status-title">Discovery Failed</span>
+                                    </div>
+                                    <p class="dcr-error-message" x-text="modal.discoveryError"></p>
+                                    <button type="button" class="dcr-fallback-btn" @click="modal.oauthMode = 'manual'">
+                                        Switch to manual configuration →
+                                    </button>
+                                </div>
+
+                                <!-- Initial State (no discovery yet) -->
+                                <div x-show="!modal.discovering && !modal.discoveryResult && !modal.discoveryError" class="dcr-status dcr-status-idle">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.5">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <path d="M12 16v-4"></path>
+                                        <path d="M12 8h.01"></path>
+                                    </svg>
+                                    <span class="dcr-idle-text">Enter MCP URL above to discover OAuth endpoints</span>
+                                </div>
+                            </div>
+
+                            <!-- Scopes Selection -->
+                            <div class="dcr-field">
+                                <label class="dcr-field-label">
+                                    Scopes
+                                    <span class="dcr-field-required">*</span>
+                                </label>
+
+                                <!-- Multi-select checkboxes (when discovery succeeded) -->
+                                <template x-if="modal.discoveryResult?.scopes_supported && modal.discoveryResult.scopes_supported.length > 0">
+                                    <div class="dcr-scopes-grid">
+                                        <template x-for="scope in modal.discoveryResult.scopes_supported" :key="scope">
+                                            <label class="dcr-scope-checkbox">
+                                                <input type="checkbox"
+                                                       :value="scope"
+                                                       x-model="modal.scopes"
+                                                       class="dcr-checkbox-input">
+                                                <span class="dcr-checkbox-label" x-text="scope"></span>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </template>
+
+                                <!-- Text input fallback (when no discovery or scopes not available) -->
+                                <template x-if="!modal.discoveryResult?.scopes_supported || modal.discoveryResult.scopes_supported.length === 0">
+                                    <input type="text"
+                                           class="modal-input dcr-text-input"
+                                           placeholder="api, read_user, write_repository"
+                                           @input="modal.scopes = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)">
+                                </template>
+                                <p class="dcr-field-hint">Select OAuth scopes for this MCP server</p>
+                            </div>
+
+                            <!-- Registration Token (Collapsible) -->
+                            <div class="dcr-field" x-data="{ showToken: false }">
+                                <button type="button"
+                                        class="dcr-advanced-toggle"
+                                        @click="showToken = !showToken">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" :class="{ 'rotate-90': showToken }">
+                                        <polyline points="9 18 15 12 9 6"></polyline>
+                                    </svg>
+                                    <span>Advanced: Add registration token for Okta/Auth0</span>
+                                </button>
+                                <div x-show="showToken" x-transition.opacity class="dcr-token-field">
+                                    <input type="password"
+                                           class="modal-input"
+                                           placeholder="Registration token (optional)"
+                                           x-model="modal.registrationToken">
+                                    <p class="dcr-field-hint">Required for platforms like Okta that use authenticated DCR</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Manual Mode Fields -->
+                        <div x-show="modal.oauthMode === 'manual'" x-transition.opacity class="oauth-manual-section">
+                            <label class="modal-field">
+                                <span class="modal-label">Client ID</span>
+                                <input type="text" class="modal-input" placeholder="OAuth client_id" x-model="modal.oauth.client_id">
+                            </label>
+                            <label class="modal-field">
+                                <span class="modal-label">Client Secret</span>
+                                <input type="password" class="modal-input" placeholder="OAuth client_secret" x-model="modal.oauth.client_secret">
+                            </label>
+                            <label class="modal-field">
+                                <span class="modal-label">Scope <span class="optional-hint">(optional)</span></span>
+                                <input type="text" class="modal-input" placeholder="e.g. read write" x-model="modal.oauth.scope">
+                            </label>
+                        </div>
+
+                        <!-- Help Box -->
+                        <div class="dcr-help-box">
+                            <div class="dcr-help-icon">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                            </div>
+                            <div class="dcr-help-content">
+                                <strong class="dcr-help-title">What is Dynamic Client Registration?</strong>
+                                <p class="dcr-help-text">DCR automatically creates a unique OAuth application for your Maskit instance. No manual app creation needed. Supported by GitLab, Okta, Auth0, and more.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -417,7 +612,21 @@ function targetsPage() {
             env: [{ key: '', value: '' }],
             url: '',
             oauthEnabled: false,
+            oauthMode: 'dcr',  // DCR is DEFAULT: 'dcr' | 'manual'
+
+            // DCR fields (auto-populated from MCP URL)
+            issuer: '',  // Extracted from url field automatically
+            scopes: [],  // Array of selected scopes
+            registrationToken: '',  // Optional for Okta/Auth0
+
+            // Manual fields (existing)
             oauth: { client_id: '', client_secret: '', scope: '' },
+
+            // Discovery state
+            discovering: false,
+            discoveryError: null,
+            discoveryResult: null,  // Stores discovered metadata
+
             saving: false,
             error: null,
         },
@@ -474,7 +683,21 @@ function targetsPage() {
                 env: [{ key: '', value: '' }],
                 url: '',
                 oauthEnabled: false,
+                oauthMode: 'dcr',  // DCR is DEFAULT
+
+                // DCR fields
+                issuer: '',
+                scopes: [],
+                registrationToken: '',
+
+                // Manual fields
                 oauth: { client_id: '', client_secret: '', scope: '' },
+
+                // Discovery state
+                discovering: false,
+                discoveryError: null,
+                discoveryResult: null,
+
                 saving: false,
                 error: null,
             };
@@ -499,8 +722,22 @@ function targetsPage() {
                     argsText: (config.args || []).join(' '),
                     env: config.env ? Object.entries(config.env).map(([k, v]) => ({ key: k, value: v })) : [{ key: '', value: '' }],
                     url: config.url || '',
-                    oauthEnabled: !!config.oauth,
+                    oauthEnabled: !!(config.oauth || config.meta?.oauth),
+                    oauthMode: config.meta?.oauth?.issuer ? 'dcr' : 'manual',
+
+                    // DCR fields
+                    issuer: config.meta?.oauth?.issuer || '',
+                    scopes: config.meta?.oauth?.scopes || [],
+                    registrationToken: config.meta?.oauth?.registration_token || '',
+
+                    // Manual fields
                     oauth: config.oauth ? { client_id: config.oauth.client_id || '', client_secret: config.oauth.client_secret || '', scope: config.oauth.scope || '' } : { client_id: '', client_secret: '', scope: '' },
+
+                    // Discovery state
+                    discovering: false,
+                    discoveryError: null,
+                    discoveryResult: null,
+
                     saving: false,
                     error: null,
                 };
@@ -519,6 +756,55 @@ function targetsPage() {
             if (this.modal.env.length === 0) this.modal.env.push({ key: '', value: '' });
         },
 
+        async previewDiscovery() {
+            // Triggered on blur from URL field when OAuth is enabled in DCR mode
+            if (!this.modal.url || this.modal.url.trim() === '') {
+                this.modal.discoveryResult = null;
+                this.modal.discoveryError = null;
+                return;
+            }
+
+            if (!this.modal.oauthEnabled || this.modal.oauthMode !== 'dcr') {
+                return;  // Only discover for DCR mode
+            }
+
+            this.modal.discovering = true;
+            this.modal.discoveryError = null;
+
+            try {
+                // Send full MCP URL, backend extracts issuer
+                const response = await fetch('/api/oauth/discover', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: this.modal.url })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Discovery failed');
+                }
+
+                this.modal.discoveryResult = await response.json();
+
+                // Extract and store issuer from discovery result
+                this.modal.issuer = this.modal.discoveryResult.issuer;
+
+                // Populate scopes dropdown
+                if (this.modal.discoveryResult.scopes_supported) {
+                    // Keep existing selections that are still valid
+                    this.modal.scopes = this.modal.scopes.filter(s =>
+                        this.modal.discoveryResult.scopes_supported.includes(s)
+                    );
+                }
+
+            } catch (error) {
+                this.modal.discoveryError = error.message;
+                this.modal.discoveryResult = null;
+            } finally {
+                this.modal.discovering = false;
+            }
+        },
+
         async saveTarget() {
             this.modal.saving = true;
             this.modal.error = null;
@@ -533,7 +819,19 @@ function targetsPage() {
             } else {
                 payload.url = this.modal.url;
                 if (this.modal.oauthEnabled) {
-                    payload.oauth = { ...this.modal.oauth };
+                    if (this.modal.oauthMode === 'dcr') {
+                        payload.oauth_mode = 'dcr';
+                        payload.oauth = {
+                            issuer: this.modal.issuer,
+                            scopes: this.modal.scopes
+                        };
+                        if (this.modal.registrationToken) {
+                            payload.oauth.registration_token = this.modal.registrationToken;
+                        }
+                    } else {
+                        payload.oauth_mode = 'manual';
+                        payload.oauth = { ...this.modal.oauth };
+                    }
                 }
             }
 
