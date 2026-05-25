@@ -539,6 +539,22 @@ class MaskingStore:
         await self._db.commit()
         return cursor.rowcount > 0
 
+    async def get_all_servers(self) -> list[dict]:
+        """Get all servers (active AND inactive) from database."""
+        query = "SELECT id, name, config, active, icon_url FROM mcp_servers ORDER BY name"
+        async with self._db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "config": row[2],
+                    "active": bool(row[3]),
+                    "icon_url": row[4],
+                }
+                for row in rows
+            ]
+
     async def update_server(self, server_id: str, name: str, config: dict) -> bool:
         config_json = json.dumps(config)
         cursor = await self._db.execute(

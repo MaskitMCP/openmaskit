@@ -1932,8 +1932,10 @@ code {
     background: rgba(0, 0, 0, 0.7);
     backdrop-filter: blur(4px);
     display: flex;
-    align-items: center;
+    align-items: flex-start; /* Changed from center to allow scrolling */
     justify-content: center;
+    padding: 2rem 0; /* Add padding top/bottom */
+    overflow-y: auto; /* Make backdrop scrollable */
     z-index: 1000;
 }
 
@@ -2598,8 +2600,11 @@ code {
 
 .modal-target {
     max-width: 500px;
+    max-height: 90vh;
     padding: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .modal-header-bar {
@@ -2609,6 +2614,7 @@ code {
     padding: 1.25rem 1.75rem;
     border-bottom: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
+    flex-shrink: 0; /* Prevent header from shrinking */
 }
 
 .modal-header-bar h3 {
@@ -2641,8 +2647,9 @@ code {
 
 .modal-body {
     padding: 1.5rem 1.75rem;
-    max-height: 60vh;
+    flex: 1 1 auto;
     overflow-y: auto;
+    min-height: 0; /* Important for flex scrolling */
 }
 
 .modal-body::-webkit-scrollbar {
@@ -2665,6 +2672,7 @@ code {
     padding: 1rem 1.75rem;
     border-top: 1px solid var(--border-subtle);
     background: var(--bg-elevated);
+    flex-shrink: 0; /* Prevent footer from shrinking */
 }
 
 .modal-label {
@@ -4124,5 +4132,246 @@ code {
 
     .pagination-info {
         order: -1;
+    }
+}
+
+/* ========================================
+   INACTIVE SERVERS SECTION
+   ======================================== */
+
+/* Section wrapper for inactive servers */
+.servers-section {
+    margin-bottom: 2rem;
+}
+
+.servers-section-inactive {
+    margin-top: 4rem;
+    padding-top: 3rem;
+    position: relative;
+}
+
+/* Refined divider before inactive section */
+.servers-section-inactive::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        var(--border-subtle) 20%,
+        var(--border-subtle) 80%,
+        transparent
+    );
+    opacity: 0.4;
+}
+
+/* Section headings */
+.section-heading {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    margin: 0 0 1.5rem 0;
+    padding-left: 0.25rem;
+}
+
+/* Inactive server cards */
+.tgt-card-inactive {
+    opacity: 0.48;
+    filter: saturate(0.3);
+    transition: all var(--transition-base);
+}
+
+.tgt-card-inactive:hover {
+    opacity: 0.65;
+    filter: saturate(0.5);
+    border-color: var(--border-default);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Inactive accent bar - solid gray, no glow */
+.tgt-accent-inactive {
+    background: #4a5568;
+    box-shadow: none;
+}
+
+/* Inactive status indicator */
+.dot-inactive {
+    background: #6b7280;
+    box-shadow: none;
+    animation: none;
+}
+
+.label-inactive {
+    color: #6b7280;
+}
+
+/* Action buttons on inactive cards */
+.tgt-card-inactive .tgt-card-actions {
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.tgt-card-inactive:hover .tgt-card-actions {
+    opacity: 1;
+}
+
+/* Activate button - PRIMARY ACTION with teal accent */
+.tgt-action-activate {
+    background: var(--green);
+    color: #0f1117;
+    border-color: var(--green);
+    position: relative;
+    overflow: hidden;
+}
+
+.tgt-action-activate::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at center, var(--green), transparent 70%);
+    opacity: 0;
+    transition: opacity var(--transition-base);
+}
+
+.tgt-action-activate:hover {
+    background: var(--green);
+    border-color: var(--green);
+    color: #0f1117;
+    box-shadow: 0 0 16px rgba(45, 212, 191, 0.4),
+                0 2px 8px rgba(0, 0, 0, 0.2);
+    transform: translateY(-1px);
+}
+
+.tgt-action-activate:hover::before {
+    opacity: 0.3;
+}
+
+.tgt-action-activate:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* View details button */
+.tgt-action-view {
+    background: transparent;
+    color: #9ca3af;
+    border-color: transparent;
+}
+
+.tgt-action-view:hover {
+    background: rgba(156, 163, 175, 0.1);
+    border-color: #6b7280;
+    color: #d1d5db;
+}
+
+/* Delete button - destructive action */
+.tgt-action-delete {
+    background: transparent;
+    color: #9ca3af;
+    border-color: transparent;
+}
+
+.tgt-action-delete:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: #dc2626;
+    color: #ef4444;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+}
+
+.tgt-action-delete:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Details modal styling */
+.modal-details {
+    max-width: 700px;
+}
+
+.modal-details .modal-body {
+    padding: 0;
+    max-height: 600px;
+    overflow: hidden;
+}
+
+/* Configuration preview block */
+.config-preview {
+    background: #1a1d23;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.config-preview pre {
+    margin: 0;
+    padding: 1.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: #e1e4e8;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 550px;
+    tab-size: 2;
+    white-space: pre;
+    word-wrap: normal;
+
+    /* Refined scrollbar for code preview */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(45, 212, 191, 0.3) transparent;
+}
+
+.config-preview pre::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.config-preview pre::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.config-preview pre::-webkit-scrollbar-thumb {
+    background: rgba(45, 212, 191, 0.2);
+    border-radius: 4px;
+}
+
+.config-preview pre::-webkit-scrollbar-thumb:hover {
+    background: rgba(45, 212, 191, 0.4);
+}
+
+/* Spinner for activate button */
+.tgt-action-activate .spinner {
+    animation: spin 0.8s linear infinite;
+    color: #0f1117;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Refined card entrance animation for inactive section */
+.servers-section-inactive .tgt-card-inactive {
+    animation: tgt-card-fade-in 0.4s ease both;
+}
+
+@keyframes tgt-card-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 0.48;
+        transform: translateY(0);
     }
 }

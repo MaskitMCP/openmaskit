@@ -190,3 +190,74 @@ async def custom_target_delete(request: Request):
 
     await store.uninstall_server(target_id)
     return JSONResponse({"ok": True})
+
+
+async def custom_target_activate(request: Request):
+    """
+    Activate a previously deactivated custom server.
+
+    POST /api/custom-targets/{target_id}/activate
+    """
+    state = request.app.state.proxy_state
+    store = state.store
+    manager = state.target_manager
+
+    target_id = request.path_params["target_id"]
+
+    # Validate server exists
+    existing = await store.get_server(target_id)
+    if not existing:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
+
+    # Check if already active
+    if target_id in state.targets:
+        return JSONResponse({"error": "Target is already active"}, status_code=409)
+
+    # Load config from database
+    config = existing["config"]
+
+    # Attempt connection
+    connected = False
+    error_msg = None
+    if manager:
+        try:
+            await manager.add_target(target_id, config)
+            connected = True
+            await store.activate_server(target_id)  # Update DB only if connection succeeds
+        except Exception as exc:
+            logger.warning("Failed to activate custom target %s: %s", target_id, exc)
+            error_msg = str(exc)
+
+    result = {"ok": True, "connected": connected}
+    if error_msg:
+        result["error"] = error_msg
+    return JSONResponse(result)
+
+
+async def custom_target_deactivate(request: Request):
+    """
+    Deactivate a custom server (disconnect but keep config).
+
+    POST /api/custom-targets/{target_id}/deactivate
+    """
+    state = request.app.state.proxy_state
+    store = state.store
+    manager = state.target_manager
+
+    target_id = request.path_params["target_id"]
+
+    # Validate server exists
+    existing = await store.get_server(target_id)
+    if not existing:
+        return JSONResponse({"error": "Target not found"}, status_code=404)
+
+    # Disconnect if currently connected
+    if manager and target_id in state.targets:
+        try:
+            await manager.remove_target(target_id)
+        except Exception as exc:
+            logger.warning("Error disconnecting %s for deactivation: %s", target_id, exc)
+
+    # Mark as inactive in database
+    await store.deactivate_server(target_id)
+    return JSONResponse({"ok": True})

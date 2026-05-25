@@ -36,25 +36,50 @@ async def api_targets(request: Request):
     state = request.app.state.proxy_state
     store = state.store
 
-    # Check which servers are from marketplace (stored in DB)
-    installed_servers = await store.get_installed_servers()
-    marketplace_map = {s["id"]: s for s in installed_servers}
+    # Get all servers from database (marketplace and custom)
+    db_servers = await store.get_all_servers()
+    db_servers_map = {s["id"]: s for s in db_servers}
 
     targets = []
+    seen_ids = set()
+
+    # First, add all currently connected servers (from state.targets)
     for name, ts in state.targets.items():
-        # A target is editable only if it's NOT from config file AND NOT from marketplace
-        editable = name not in state.config_target_ids and name not in marketplace_map
-        server_record = marketplace_map.get(name)
+        seen_ids.add(name)
+        server_record = db_servers_map.get(name)
+
+        # A target is editable only if it's NOT from config file
+        editable = name not in state.config_target_ids
+
         targets.append({
             "name": name,
             "display_name": server_record["name"] if server_record else name,
+            "icon_url": server_record.get("icon_url") if server_record else None,
+            "active": True,  # If it's in state.targets, it's active
+            "initialized": ts.initialized,
             "tool_count": len(ts.tool_schemas),
             "rule_count": len(ts.engine.rules),
             "mapper_count": len(ts.engine.mappers),
-            "initialized": ts.initialized,
             "editable": editable,
-            "icon_url": server_record["icon_url"] if server_record else None,
+            "config": server_record["config"] if server_record else None,
         })
+
+    # Then, add inactive servers from database that aren't in state.targets
+    for server in db_servers:
+        if server["id"] not in seen_ids and not server["active"]:
+            targets.append({
+                "name": server["id"],
+                "display_name": server["name"],
+                "icon_url": server.get("icon_url"),
+                "active": False,
+                "initialized": False,
+                "tool_count": 0,
+                "rule_count": 0,
+                "mapper_count": 0,
+                "editable": server["id"] not in state.config_target_ids,
+                "config": server["config"],
+            })
+
     return JSONResponse({"targets": targets})
 
 

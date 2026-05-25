@@ -163,4 +163,35 @@ Custom target routes:
 
 - `GET /api/custom-targets` — list custom targets
 - `POST /api/custom-targets` — add a new custom target
-- `DELETE /api/custom-targets/{id}` — remove a custom target
+- `POST /api/custom-targets/{target_id}/activate` — activate a deactivated custom target
+- `POST /api/custom-targets/{target_id}/deactivate` — deactivate a custom target (keeps config)
+- `POST /api/custom-targets/{target_id}/delete` — permanently remove a custom target
+
+Server list routes:
+
+- `GET /api/targets` — list all servers (active AND inactive) with runtime state merged from database
+
+### Server lifecycle states
+
+Servers can be in three states:
+1. **Active** — Connected and running, appears in "Active Servers" section
+2. **Inactive** — Disconnected but config retained in database, appears in "Inactive Servers" section, can be reactivated
+3. **Deleted** — Permanently removed from database (custom servers only)
+
+The Servers page (`/`) shows both active and inactive servers in separate sections. Users can:
+- **Deactivate** any server (marketplace or custom) to temporarily disconnect it
+- **Activate** any inactive server to reconnect using stored configuration
+- **Delete** custom servers permanently (marketplace servers can only be deactivated)
+- **View details** of inactive servers to see their configuration
+
+### Container runtime compatibility
+
+Maskit auto-detects container runtimes (Docker, Podman, nerdctl, Finch) for containerized MCP servers:
+
+- Detection happens at startup (`container.py` module)
+- Commands starting with `docker` are automatically substituted with detected runtime
+- Optional override via `container_runtime` config field in `maskit.yaml`
+- Example: `docker run mcp-server` → `podman run mcp-server` (if Podman is detected)
+- Logs show detected/configured runtime at startup
+
+This makes containerized marketplace servers work across different environments without user intervention.

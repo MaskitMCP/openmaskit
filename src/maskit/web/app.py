@@ -17,7 +17,9 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def create_app(state: ProxyState) -> Starlette:
     from maskit.web.routes.custom_targets import (
+        custom_target_activate,
         custom_target_create,
+        custom_target_deactivate,
         custom_target_delete,
         custom_target_get,
         custom_target_update,
@@ -85,6 +87,8 @@ def create_app(state: ProxyState) -> Starlette:
         Route("/api/targets/custom/{target_id}", custom_target_get, methods=["GET"]),
         Route("/api/targets/custom/{target_id}/update", custom_target_update, methods=["POST"]),
         Route("/api/targets/custom/{target_id}/delete", custom_target_delete, methods=["POST"]),
+        Route("/api/targets/custom/{target_id}/activate", custom_target_activate, methods=["POST"]),
+        Route("/api/targets/custom/{target_id}/deactivate", custom_target_deactivate, methods=["POST"]),
         Route("/api/targets", api_targets),
         Route("/api/targets/{target_name}/tools", api_tools),
         Route("/api/targets/{target_name}/tools/call", api_tools_call, methods=["POST"]),

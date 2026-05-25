@@ -166,6 +166,17 @@ async def async_main():
     )
     bind_host = os.environ.get("MASKIT_HOST", "127.0.0.1")
 
+    # Container runtime detection
+    from maskit.container import get_container_runtime
+    runtime = get_container_runtime(config.container_runtime)
+    if runtime:
+        if config.container_runtime:
+            logger.info(f"Container runtime: {runtime} (configured)")
+        else:
+            logger.info(f"Container runtime: {runtime} (auto-detected)")
+    else:
+        logger.warning("No container runtime detected. Containerized MCP servers will not work.")
+
     # Shutdown configuration
     SHUTDOWN_TIMEOUT = float(os.environ.get("MASKIT_SHUTDOWN_TIMEOUT", "30"))
     DRAIN_TIMEOUT = 5.0  # Time to wait for in-flight requests
@@ -332,7 +343,8 @@ async def async_main():
                     us_read, us_write = await stack.enter_async_context(
                         connect_upstream(target_config.upstream, config.store_path,
                                        errlog=sys.stderr, server_id=name,
-                                       callback_server=callback_server)
+                                       callback_server=callback_server,
+                                       container_runtime=config.container_runtime)
                     )
                     upstream_streams[name] = (us_read, us_write)
                 elif name in marketplace_configs:
@@ -341,7 +353,8 @@ async def async_main():
                         us_read, us_write = await stack.enter_async_context(
                             connect_upstream(upstream_cfg, config.store_path,
                                            errlog=sys.stderr, server_id=name,
-                                           callback_server=callback_server)
+                                           callback_server=callback_server,
+                                           container_runtime=config.container_runtime)
                         )
                         upstream_streams[name] = (us_read, us_write)
                     except Exception as exc:
@@ -358,7 +371,8 @@ async def async_main():
 
             async with anyio.create_task_group() as tg:
                 manager = TargetManager(state, store, config.store_path,
-                                       callback_server=callback_server)
+                                       callback_server=callback_server,
+                                       container_runtime=config.container_runtime)
                 manager.set_task_group(tg, shutdown_event)
                 state.target_manager = manager
 

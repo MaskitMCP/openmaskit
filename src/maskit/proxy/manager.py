@@ -68,11 +68,12 @@ def _build_upstream_config(config: dict) -> UpstreamStdioConfig | UpstreamHttpCo
 class TargetManager:
     """Manages hot-adding and removing MCP server targets at runtime."""
 
-    def __init__(self, state: ProxyState, store: MaskingStore, store_path: str, callback_server=None):
+    def __init__(self, state: ProxyState, store: MaskingStore, store_path: str, callback_server=None, container_runtime: str | None = None):
         self._state = state
         self._store = store
         self._store_path = store_path
         self._callback_server = callback_server
+        self._container_runtime = container_runtime
         self._exit_stacks: dict[str, AsyncExitStack] = {}
         self._task_group: anyio.abc.TaskGroup | None = None
         self._shutdown_event: anyio.Event | None = None
@@ -117,7 +118,8 @@ class TargetManager:
             upstream = _build_upstream_config(config)
             us_read, us_write = await stack.enter_async_context(
                 connect_upstream(upstream, self._store_path, errlog=sys.stderr,
-                               server_id=server_id, callback_server=self._callback_server)
+                               server_id=server_id, callback_server=self._callback_server,
+                               container_runtime=self._container_runtime)
             )
 
             self._exit_stacks[server_id] = stack

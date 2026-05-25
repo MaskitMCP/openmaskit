@@ -167,6 +167,9 @@ targets:
 web_port: 9473
 mcp_port: 9474
 oauth_port: 3118
+
+# Optional: Override container runtime (auto-detects docker/podman/nerdctl/finch)
+# container_runtime: "podman"
 ```
 
 **Or skip the config** — install servers via the marketplace or add custom servers through the UI.
@@ -227,6 +230,18 @@ Maskit drains in-flight requests, flushes database, and exits cleanly on SIGINT/
 
 The "Connect Agent" in the dashboard helps you connect your MCP servers to your AI agents.
 
+## Container Runtime Support
+
+Maskit automatically detects and works with different container runtimes:
+
+- **Auto-detection**: Automatically detects Docker, Podman, nerdctl, or Finch at startup
+- **Transparent substitution**: Commands starting with `docker` are automatically converted to use your installed runtime
+- **Configuration override**: Optionally specify runtime in `maskit.yaml` with `container_runtime: "podman"`
+
+**Example:** If you have Podman installed, marketplace servers like `docker run ghcr.io/example/mcp-server` automatically become `podman run ghcr.io/example/mcp-server`.
+
+This means containerized MCP servers work seamlessly regardless of which container runtime you use!
+
 ## Docker
 
 ```bash
@@ -244,11 +259,22 @@ Open `http://127.0.0.1:9473` to:
 
 - **Marketplace**: Install pre-configured servers (Slack, GitHub, etc.) with OAuth
 - **Custom servers**: Add stdio/HTTP servers at runtime
+- **Server lifecycle**: Deactivate/activate servers without losing configuration, permanently delete custom servers
+- **Inactive servers**: View and manage deactivated servers in a separate section
 - **Tool management**: Browse schemas, hide tools, test tool calls
 - **Masking rules**: Configure input/output masking per tool
 - **Guardrails**: Block dangerous operations by pattern
 - **Injections**: Force safe argument defaults
 - **Live traffic**: Monitor tool calls and alias mappings in real-time
+
+### Server States
+
+Servers can be in three states:
+- **Active**: Connected and running
+- **Inactive**: Disconnected but configuration retained, can be reactivated
+- **Deleted**: Permanently removed (custom servers only)
+
+The Servers page shows both active and inactive servers in separate sections. You can temporarily deactivate any server (marketplace or custom) without losing its configuration, then reactivate it later with one click.
 
 ## Configuration Reference
 

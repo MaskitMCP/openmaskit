@@ -16,6 +16,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from maskit.models import UpstreamHttpConfig, UpstreamStdioConfig
 from maskit.security import validate_server_id, read_token_file, write_token_file
+from maskit.container import preprocess_container_command, get_container_runtime
 
 if TYPE_CHECKING:
     from maskit.oauth.handler import OAuthCallbackServer
@@ -115,15 +116,28 @@ async def connect_upstream(
     extra_env: dict[str, str] | None = None,
     server_id: str | None = None,
     callback_server: "OAuthCallbackServer | None" = None,
+    container_runtime: str | None = None,
 ):
-    """Connect to the upstream MCP server. Yields (read_stream, write_stream)."""
+    """
+    Connect to the upstream MCP server. Yields (read_stream, write_stream).
+
+    Args:
+        container_runtime: Optional container runtime override (docker/podman/nerdctl/finch)
+    """
     if isinstance(upstream, UpstreamStdioConfig):
         env = dict(upstream.env) if upstream.env else {}
         if extra_env:
             env.update(extra_env)
 
+        # Preprocess command for container runtime substitution
+        runtime = get_container_runtime(container_runtime)
+        command, was_substituted = preprocess_container_command(upstream.command, runtime)
+
+        if was_substituted:
+            logger.info(f"Substituted container command: {upstream.command} → {command}")
+
         params = StdioServerParameters(
-            command=upstream.command,
+            command=command,
             args=upstream.args,
             env=env if env else None,
         )
