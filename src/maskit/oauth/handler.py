@@ -394,8 +394,8 @@ async def create_oauth_provider(
         )
 
         if oauth_config.client_id:
-            data = storage._read()
-            stored_id = (data.get("client_info") or {}).get("client_id")
+            existing_client_info = await storage.get_client_info()
+            stored_id = existing_client_info.client_id if existing_client_info else None
             if stored_id != oauth_config.client_id:
                 client_info = OAuthClientInformationFull(
                     client_id=oauth_config.client_id,
@@ -406,8 +406,7 @@ async def create_oauth_provider(
                     response_types=["code"],
                     token_endpoint_auth_method=auth_method,
                 )
-                data["client_info"] = client_info.model_dump(exclude_none=True)
-                storage._write(data)
+                await storage.set_client_info(client_info)
 
     async def redirect_handler(auth_url: str) -> None:
         print(

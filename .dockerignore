@@ -45,3 +45,5 @@ CONTRIBUTING.md
 *.sqlite
 .env
 .env.*
+
+.codegraph

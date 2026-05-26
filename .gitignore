@@ -17,3 +17,5 @@ wheels/
 # Jetbrains related files
 .idea
 .bsp
+
+.codegraph

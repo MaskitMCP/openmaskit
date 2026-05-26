@@ -213,7 +213,7 @@ class TestCreateOAuthProvider:
             scope="read write",
         )
 
-        provider = create_oauth_provider(
+        provider = await create_oauth_provider(
             server_url="http://example.com",
             oauth_config=oauth_config,
             store_path=tmp_path / "oauth.json",
@@ -233,7 +233,7 @@ class TestCreateOAuthProvider:
         callback_server = OAuthCallbackServer(port=3131)
         oauth_config = HttpOAuthConfig(scope="read")
 
-        provider = create_oauth_provider(
+        provider = await create_oauth_provider(
             server_url="http://example.com",
             oauth_config=oauth_config,
             store_path=tmp_path / "oauth.json",
@@ -263,7 +263,7 @@ class TestCreateOAuthProvider:
         callback_server = OAuthCallbackServer(port=3131)
         oauth_config = HttpOAuthConfig(client_id="new-id")
 
-        provider = create_oauth_provider(
+        provider = await create_oauth_provider(
             server_url="http://example.com",
             oauth_config=oauth_config,
             store_path=storage_path,
@@ -283,7 +283,7 @@ class TestCreateOAuthProvider:
             client_secret="test-secret",
         )
 
-        provider = create_oauth_provider(
+        provider = await create_oauth_provider(
             server_url="http://example.com",
             oauth_config=oauth_config,
             store_path=tmp_path / "oauth.json",
@@ -300,7 +300,7 @@ class TestCreateOAuthProvider:
         callback_server = OAuthCallbackServer(port=3131)
         oauth_config = HttpOAuthConfig(client_id="test-id")
 
-        provider = create_oauth_provider(
+        provider = await create_oauth_provider(
             server_url="http://example.com",
             oauth_config=oauth_config,
             store_path=tmp_path / "oauth.json",
