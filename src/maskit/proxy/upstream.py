@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO
 
+import anyio
 import httpx
 
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -16,7 +17,19 @@ from mcp.client.streamable_http import streamable_http_client
 
 from maskit.models import UpstreamHttpConfig, UpstreamStdioConfig
 from maskit.security import validate_server_id, read_token_file, write_token_file
-from maskit.container import preprocess_container_command, get_container_runtime
+from maskit.container import (
+    MASKIT_LABEL_KEY,
+    MASKIT_NAME_PREFIX,
+    extract_container_name,
+    get_container_runtime,
+    has_rm_flag,
+    inject_container_label,
+    inject_container_name,
+    is_container_run_command,
+    preprocess_container_command,
+    stop_container,
+    sweep_server_orphans,
+)
 
 if TYPE_CHECKING:
     from maskit.oauth.handler import OAuthCallbackServer
@@ -178,7 +191,15 @@ async def connect_upstream(
     container_runtime: str | None = None,
 ):
     """
-    Connect to the upstream MCP server. Yields (read_stream, write_stream).
+    Connect to the upstream MCP server.
+
+    Yields ``(read_stream, write_stream, container_info)`` where
+    ``container_info`` is ``(runtime, container_name)`` when the upstream is
+    a containerized stdio command we manage, or ``None`` otherwise. Callers
+    should stash ``container_info`` on the per-target state so an explicit
+    ``stop_container`` can run on teardown without depending on this context
+    manager's ``finally`` (which can be bypassed when the context is closed
+    from a different task than the one that entered it).
 
     Args:
         container_runtime: Optional container runtime override (docker/podman/nerdctl/finch)
@@ -195,13 +216,51 @@ async def connect_upstream(
         if was_substituted:
             logger.info(f"Substituted container command: {upstream.command} → {command}")
 
+        # Container lifecycle management: when the upstream is a
+        # `<runtime> run ...` command, inject a deterministic --name and
+        # --label so we can stop it cleanly on context exit (and sweep
+        # crash-orphans on next start).
+        args = list(upstream.args)
+        container_cleanup: tuple[str, str] | None = None
+        if (
+            runtime is not None
+            and server_id
+            and is_container_run_command(command, args)
+        ):
+            if not has_rm_flag(args):
+                logger.warning(
+                    "Container server '%s' is missing --rm; stopped containers "
+                    "will accumulate and restart may fail with a name conflict. "
+                    "Add --rm to args for automatic cleanup.",
+                    server_id,
+                )
+
+            # Pre-start sweep: stop any crash-orphan with our label for this
+            # server_id, so a stale `--name` doesn't block `docker run`.
+            await sweep_server_orphans(runtime, server_id)
+
+            container_name = (
+                extract_container_name(args) or f"{MASKIT_NAME_PREFIX}{server_id}"
+            )
+            args = inject_container_name(args, container_name)
+            args = inject_container_label(args, MASKIT_LABEL_KEY, server_id)
+            container_cleanup = (runtime, container_name)
+
         params = StdioServerParameters(
             command=command,
-            args=upstream.args,
+            args=args,
             env=env if env else None,
         )
-        async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
-            yield read_stream, write_stream
+        try:
+            async with stdio_client(params, errlog=errlog) as (read_stream, write_stream):
+                yield read_stream, write_stream, container_cleanup
+        finally:
+            if container_cleanup is not None:
+                rt, name = container_cleanup
+                # Shield from outer cancellation so the stop call can finish.
+                # stop_container has its own internal timeout, so it can't hang.
+                with anyio.CancelScope(shield=True):
+                    await stop_container(rt, name)
 
     elif isinstance(upstream, UpstreamHttpConfig):
         # Check if there's a backend-managed OAuth token first
@@ -218,7 +277,7 @@ async def connect_upstream(
                 async with streamable_http_client(
                     upstream.url, http_client=http_client
                 ) as (read_stream, write_stream, _get_session_id):
-                    yield read_stream, write_stream
+                    yield read_stream, write_stream, None
 
         elif upstream.oauth:
             # Self-managed OAuth: use OAuth provider (original behavior for local servers)
@@ -247,7 +306,7 @@ async def connect_upstream(
                 async with streamable_http_client(
                     upstream.url, http_client=http_client
                 ) as (read_stream, write_stream, _get_session_id):
-                    yield read_stream, write_stream
+                    yield read_stream, write_stream, None
 
         else:
             # No OAuth: simple HTTP connection
@@ -256,7 +315,7 @@ async def connect_upstream(
                 async with streamable_http_client(
                     upstream.url, http_client=http_client
                 ) as (read_stream, write_stream, _get_session_id):
-                    yield read_stream, write_stream
+                    yield read_stream, write_stream, None
 
     else:
         raise ValueError(f"Unknown upstream config type: {type(upstream)}")

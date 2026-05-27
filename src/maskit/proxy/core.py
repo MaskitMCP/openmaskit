@@ -145,6 +145,10 @@ class TargetState:
     ds_read_recv: MemoryObjectReceiveStream[SessionMessage | Exception] | None = None
     needs_token_refresh: bool = False
     server_id: str | None = None
+    # (runtime, container_name) when this target is backed by a container
+    # `run` command. Used by manager.remove_target to explicitly stop the
+    # container regardless of whether connect_upstream's `finally` runs.
+    container_info: tuple[str, str] | None = None
 
     def cache_tool_schemas(self, schemas: list[dict[str, Any]]):
         self.tool_schemas = schemas

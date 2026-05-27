@@ -9,6 +9,12 @@ import anyio
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from maskit.container import (
+    extract_container_name,
+    is_container_run_command,
+    validate_user_container_name,
+)
+
 logger = logging.getLogger(__name__)
 
 _DELETE_DISCONNECT_TIMEOUT = 15
@@ -27,10 +33,21 @@ def _build_config(body: dict) -> tuple[dict | None, str | None]:
         command = body.get("command", "").strip()
         if not command:
             return None, "command is required for stdio transport"
+        args = body.get("args", []) or []
+
+        # If the user supplied --name on a container `run` command, validate
+        # it now so the failure surfaces at submission rather than activation.
+        if is_container_run_command(command, args):
+            user_name = extract_container_name(args)
+            if user_name is not None:
+                err = validate_user_container_name(user_name)
+                if err is not None:
+                    return None, err
+
         config = {
             "transport": "stdio",
             "command": command,
-            "args": body.get("args", []),
+            "args": args,
             "env": body.get("env", {}),
         }
     elif transport == "http":

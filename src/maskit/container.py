@@ -177,6 +177,17 @@ def inject_container_label(args: list[str], key: str, value: str) -> list[str]:
     return new_args
 
 
+def has_rm_flag(args: list[str]) -> bool:
+    """True iff args contain `--rm` (any form: bare, `--rm=true`, `--rm=True`)."""
+    for a in args:
+        if a == "--rm":
+            return True
+        if a.startswith("--rm="):
+            value = a.split("=", 1)[1].lower()
+            return value in ("true", "1", "yes")
+    return False
+
+
 def validate_user_container_name(name: str) -> str | None:
     """Validate a user-supplied container name.
 

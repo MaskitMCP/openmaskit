@@ -341,12 +341,13 @@ async def async_main():
             for name, target_state in state.targets.items():
                 if name in config.targets:
                     target_config = config.targets[name]
-                    us_read, us_write = await stack.enter_async_context(
+                    us_read, us_write, container_info = await stack.enter_async_context(
                         connect_upstream(target_config.upstream, config.store_path,
                                        errlog=sys.stderr, server_id=name,
                                        callback_server=callback_server,
                                        container_runtime=config.container_runtime)
                     )
+                    target_state.container_info = container_info
                     upstream_streams[name] = (us_read, us_write)
                 elif name in marketplace_configs:
                     upstream_cfg = _build_upstream_config(marketplace_configs[name])
@@ -371,27 +372,28 @@ async def async_main():
                         own_stack = AsyncExitStack()
                         await own_stack.__aenter__()
                         try:
-                            r, w = await own_stack.enter_async_context(
+                            r, w, ci = await own_stack.enter_async_context(
                                 connect_upstream(upstream_cfg, config.store_path,
                                                errlog=sys.stderr, server_id=name,
                                                callback_server=callback_server,
                                                container_runtime=config.container_runtime)
                             )
-                            return own_stack, r, w
+                            return own_stack, r, w, ci
                         except BaseException:
                             await own_stack.aclose()
                             raise
 
                     own_stack = None
+                    container_info = None
                     try:
-                        own_stack, us_read, us_write = await _connect_with_isolated_stack()
+                        own_stack, us_read, us_write, container_info = await _connect_with_isolated_stack()
                     except Exception as exc:
                         # One refresh+retry on failure (covers stale token not flagged by created_at)
                         logger.warning("Failed to connect marketplace server %s: %s", name, exc)
                         refreshed = await refresh_backend_oauth_token(name, config.store_path, backend_client)
                         if refreshed:
                             try:
-                                own_stack, us_read, us_write = await _connect_with_isolated_stack()
+                                own_stack, us_read, us_write, container_info = await _connect_with_isolated_stack()
                             except Exception as exc2:
                                 logger.warning("Retry after refresh failed for %s: %s", name, exc2)
                                 own_stack = None
@@ -415,6 +417,7 @@ async def async_main():
                                 logger.warning("Error closing upstream %s at shutdown: %s", target_name, exc)
                         return _close
                     stack.push_async_callback(_make_safe_aclose())
+                    state.targets[name].container_info = container_info
                     upstream_streams[name] = (us_read, us_write)
             for name in failed_targets:
                 del state.targets[name]

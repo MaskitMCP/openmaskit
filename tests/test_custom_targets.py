@@ -166,6 +166,83 @@ class TestCustomTargetCreate:
         assert "transport" in resp.json()["error"]
 
 
+class TestCustomTargetContainerNameValidation:
+    """When user supplies --name on a `docker run`, validate at submission."""
+
+    @pytest.mark.anyio
+    async def test_reserved_maskit_prefix_rejected(self, client):
+        resp = await client.post(
+            "/api/targets/custom",
+            json={
+                "name": "My Container",
+                "transport": "stdio",
+                "command": "docker",
+                "args": ["run", "--rm", "--name", "maskit-evil", "img"],
+            },
+        )
+        assert resp.status_code == 400
+        assert "reserved" in resp.json()["error"]
+
+    @pytest.mark.anyio
+    async def test_invalid_chars_rejected(self, client):
+        resp = await client.post(
+            "/api/targets/custom",
+            json={
+                "name": "My Container",
+                "transport": "stdio",
+                "command": "docker",
+                "args": ["run", "--rm", "--name=bad name", "img"],
+            },
+        )
+        assert resp.status_code == 400
+        assert "invalid" in resp.json()["error"].lower()
+
+    @pytest.mark.anyio
+    async def test_valid_user_name_accepted(self, client, state):
+        resp = await client.post(
+            "/api/targets/custom",
+            json={
+                "name": "My Container",
+                "transport": "stdio",
+                "command": "docker",
+                "args": ["run", "--rm", "--name", "my-pg", "img"],
+            },
+        )
+        assert resp.status_code == 201
+        record = await state.store.get_server("my-container")
+        assert "--name" in record["config"]["args"]
+
+    @pytest.mark.anyio
+    async def test_no_user_name_accepted(self, client):
+        # Absent --name → no validation needed, the proxy will inject one.
+        resp = await client.post(
+            "/api/targets/custom",
+            json={
+                "name": "Plain Container",
+                "transport": "stdio",
+                "command": "docker",
+                "args": ["run", "--rm", "img"],
+            },
+        )
+        assert resp.status_code == 201
+
+    @pytest.mark.anyio
+    async def test_non_container_command_not_validated(self, client):
+        # `uvx --name foo` is not a container, so we don't apply our naming
+        # rules to it. (Our `--name` parser would extract "foo" but the
+        # is_container_run_command gate prevents that here.)
+        resp = await client.post(
+            "/api/targets/custom",
+            json={
+                "name": "uvx thing",
+                "transport": "stdio",
+                "command": "uvx",
+                "args": ["--name", "maskit-foo", "some-server"],
+            },
+        )
+        assert resp.status_code == 201
+
+
 class TestCustomTargetGet:
     @pytest.mark.anyio
     async def test_get_custom_target(self, client, state):

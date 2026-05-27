@@ -215,6 +215,123 @@ class TestTargetManager:
             pass
 
     @pytest.mark.anyio
+    async def test_remove_target_stops_container_when_info_set(
+        self, manager, state, monkeypatch
+    ):
+        """When target.container_info is set, remove_target must explicitly
+        call stop_container. This is the deactivate/delete code path — relying
+        on connect_upstream's `finally` doesn't work because the stack is
+        closed from a different task than the one that entered it."""
+        from maskit.masking.engine import MaskingEngine
+        from maskit.proxy import manager as manager_mod
+
+        stop_calls: list[tuple[str, str]] = []
+
+        async def fake_stop(runtime: str, name: str, timeout: float = 5.0) -> None:
+            stop_calls.append((runtime, name))
+
+        monkeypatch.setattr(manager_mod, "stop_container", fake_stop)
+
+        engine = MaskingEngine([], state.store, target_name="containerized")
+        await engine.load_aliases()
+        ds_send, ds_recv = anyio.create_memory_object_stream[
+            SessionMessage | Exception
+        ](10)
+        target = TargetState(
+            name="containerized",
+            engine=engine,
+            ds_read_send=ds_send,
+            ds_read_recv=ds_recv,
+            container_info=("docker", "maskit-containerized"),
+        )
+        state.targets["containerized"] = target
+
+        await manager.remove_target("containerized")
+
+        assert stop_calls == [("docker", "maskit-containerized")]
+        assert "containerized" not in state.targets
+
+    @pytest.mark.anyio
+    async def test_remove_target_skips_stop_for_non_container(
+        self, manager, state, monkeypatch
+    ):
+        """A target with container_info=None (HTTP, stdio non-container) must
+        not trigger stop_container."""
+        from maskit.masking.engine import MaskingEngine
+        from maskit.proxy import manager as manager_mod
+
+        stop_calls: list[tuple[str, str]] = []
+
+        async def fake_stop(runtime: str, name: str, timeout: float = 5.0) -> None:
+            stop_calls.append((runtime, name))
+
+        monkeypatch.setattr(manager_mod, "stop_container", fake_stop)
+
+        engine = MaskingEngine([], state.store, target_name="http-target")
+        await engine.load_aliases()
+        ds_send, ds_recv = anyio.create_memory_object_stream[
+            SessionMessage | Exception
+        ](10)
+        target = TargetState(
+            name="http-target",
+            engine=engine,
+            ds_read_send=ds_send,
+            ds_read_recv=ds_recv,
+            container_info=None,
+        )
+        state.targets["http-target"] = target
+
+        await manager.remove_target("http-target")
+
+        assert stop_calls == []
+
+    @pytest.mark.anyio
+    async def test_remove_target_stops_container_even_if_stack_close_fails(
+        self, manager, state, monkeypatch
+    ):
+        """If stack.aclose() raises (the cross-task close failure mode we're
+        defending against), stop_container must still have been invoked
+        because we call it *before* the stack close."""
+        from contextlib import AsyncExitStack
+        from maskit.masking.engine import MaskingEngine
+        from maskit.proxy import manager as manager_mod
+
+        stop_calls: list[tuple[str, str]] = []
+
+        async def fake_stop(runtime: str, name: str, timeout: float = 5.0) -> None:
+            stop_calls.append((runtime, name))
+
+        monkeypatch.setattr(manager_mod, "stop_container", fake_stop)
+
+        engine = MaskingEngine([], state.store, target_name="containerized")
+        await engine.load_aliases()
+        ds_send, ds_recv = anyio.create_memory_object_stream[
+            SessionMessage | Exception
+        ](10)
+        target = TargetState(
+            name="containerized",
+            engine=engine,
+            ds_read_send=ds_send,
+            ds_read_recv=ds_recv,
+            container_info=("podman", "user-named"),
+        )
+        state.targets["containerized"] = target
+
+        # Wire a stack whose aclose raises (simulating cross-task close fail).
+        class _ExplodingStack:
+            async def aclose(self):
+                raise RuntimeError("cross-task close exploded")
+
+        manager._exit_stacks["containerized"] = _ExplodingStack()
+
+        # remove_target must swallow the close error (existing behavior) and
+        # the stop must still have happened.
+        await manager.remove_target("containerized")
+
+        assert stop_calls == [("podman", "user-named")]
+        assert "containerized" not in state.targets
+
+    @pytest.mark.anyio
     async def test_multiple_targets_coexist(self, manager, state):
         """Multiple targets can be added and removed independently."""
         from maskit.masking.engine import MaskingEngine

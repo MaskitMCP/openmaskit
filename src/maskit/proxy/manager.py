@@ -12,6 +12,7 @@ from anyio.streams.memory import MemoryObjectSendStream
 
 from mcp.shared.message import SessionMessage
 
+from maskit.container import stop_container
 from maskit.masking.engine import MaskingEngine
 from maskit.models import UpstreamHttpConfig, UpstreamStdioConfig
 from maskit.proxy.core import TargetState, _bootstrap_upstream, run_proxy_for_target
@@ -116,12 +117,13 @@ class TargetManager:
 
         try:
             upstream = _build_upstream_config(config)
-            us_read, us_write = await stack.enter_async_context(
+            us_read, us_write, container_info = await stack.enter_async_context(
                 connect_upstream(upstream, self._store_path, errlog=sys.stderr,
                                server_id=server_id, callback_server=self._callback_server,
                                container_runtime=self._container_runtime)
             )
 
+            target.container_info = container_info
             self._exit_stacks[server_id] = stack
             self._state.targets[server_id] = target
 
@@ -158,8 +160,23 @@ class TargetManager:
         return target
 
     async def remove_target(self, server_id: str) -> None:
-        """Teardown: close upstream connection, stop relay tasks, remove from state."""
+        """Teardown: close upstream connection, stop relay tasks, remove from state.
+
+        Explicitly stops the upstream container before closing the exit stack.
+        The stack-close path can fail (silently) when the stack is closed from
+        a different task than the one that entered it — common in the
+        deactivate/delete HTTP-handler path. Doing the stop here makes the
+        cleanup independent of that close succeeding.
+        """
         target = self._state.targets.get(server_id)
+
+        # Explicit container stop, shielded so an outer cancellation can't
+        # skip it. stop_container has its own internal timeout.
+        if target is not None and target.container_info is not None:
+            runtime, container_name = target.container_info
+            with anyio.CancelScope(shield=True):
+                await stop_container(runtime, container_name)
+
         if target and target.ds_read_send:
             try:
                 await target.ds_read_send.aclose()
