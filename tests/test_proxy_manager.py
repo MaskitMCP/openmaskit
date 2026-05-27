@@ -53,7 +53,7 @@ class TestTargetManagerInit:
         """Initialize manager with callback server."""
         from maskit.oauth.handler import OAuthCallbackServer
 
-        callback_server = OAuthCallbackServer(port=3118)
+        callback_server = OAuthCallbackServer(port=3131)
 
         manager = TargetManager(
             state=state,

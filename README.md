@@ -166,7 +166,7 @@ targets:
 
 web_port: 9473
 mcp_port: 9474
-oauth_port: 3118
+oauth_port: 3131
 
 # Optional: Override container runtime (auto-detects docker/podman/nerdctl/finch)
 # container_runtime: "podman"
@@ -246,10 +246,10 @@ This means containerized MCP servers work seamlessly regardless of which contain
 
 ```bash
 docker build -t maskit .
-docker run -p 9473:9473 -p 9474:9474 -p 3118:3118 maskit
+docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 maskit
 ```
 
-**Ports:** 9473 (dashboard), 9474 (MCP), 3118 (OAuth callback)
+**Ports:** 9473 (dashboard), 9474 (MCP), 3131 (OAuth callback)
 
 ⚠️ **Limitation:** Docker only supports HTTP-based MCP servers. For stdio servers (`uvx`, `npx`), run Maskit natively.
 

@@ -6,6 +6,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Maskit is an MCP (Model Context Protocol) server proxy that sits between an AI host (e.g., Claude Code) and a real MCP server. It intercepts tool call responses to mask sensitive field values (replacing `prod-db.internal.net` with `host_1`) and unmasks them when the agent sends those aliases back in tool call arguments.
 
+## Deployment model (important for security reasoning)
+
+Maskit runs **locally on the user's own machine** — like a CLI dev tool (Docker Desktop, Jupyter, a local DB client). It is **not a hosted service**, the Python backend is **not deployed anywhere**, and the FE↔Python channel is a localhost link on the same machine. So:
+
+- **Localhost-only auth on the Web UI / API / MCP endpoint is not required.** The user already owns the machine.
+- **Running arbitrary subprocesses (stdio targets, `docker run ...` from the marketplace) is not RCE in any meaningful sense.** Maskit is a UI for commands the user would otherwise type into their own terminal — it confers no privilege the user doesn't already have.
+- **Multi-user shared-machine threats (other local users reading token files, etc.) are out of scope** unless explicitly raised.
+
+The threats that **do** still matter, even for a local tool:
+
+- **Browser-based cross-origin attacks against localhost.** A malicious webpage the user visits can `fetch()`/`WebSocket` against `127.0.0.1:9473`/`9474`/`3131` and exfiltrate secrets. This is the canonical "localhost service" attack class (cf. the Docker daemon, ethdev wallets, etc.). CSRF tokens, `Origin` header checks on POST and WS, and not echoing the alias map / unmasked previews to API callers are all still required.
+- **OAuth callback integrity** — the OAuth flow physically goes through the browser, so `state` validation and code-injection defenses still apply.
+- **Malicious upstream MCP server** — Maskit talks to third-party MCP servers; their responses must not be able to crash the proxy, ReDoS the masking engine, or poison persistent state.
+- **Correctness bugs** (mask/unmask collisions, races, leaks) — same as any other software.
+
+When reviewing security findings, classify by whether the attacker is (a) the local user themselves [out of scope], (b) a malicious upstream MCP server [in scope], or (c) a webpage in the user's browser / a remote OAuth peer [in scope].
+
 ## Commands
 
 ```bash
@@ -119,7 +136,7 @@ Handles hot-adding and removing MCP server targets at runtime. Holds references 
 
 ### OAuth handler (`oauth/handler.py`)
 
-Shared OAuth 2.1 callback server running on port 3118. Used by HTTP upstream targets that require OAuth (e.g., Slack). The callback server is started once in `__main__.py` and shared across all targets. OAuth tokens are stored per-server at `{store_dir}/oauth/{server_id}.json`.
+Shared OAuth 2.1 callback server running on port 3131. Used by HTTP upstream targets that require OAuth (e.g., Slack). The callback server is started once in `__main__.py` and shared across all targets. OAuth tokens are stored per-server at `{store_dir}/oauth/{server_id}.json`.
 
 ### Bind host
 

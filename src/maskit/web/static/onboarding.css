@@ -19,7 +19,7 @@
 .onboarding-hero {
     text-align: center;
     padding: 2rem 2rem 1.5rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 .onboarding-hero-icon {
@@ -67,8 +67,8 @@
     display: flex;
     gap: 1rem;
     padding: 1rem;
-    background: var(--card-bg);
-    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
     border-radius: 8px;
     transition: all 0.2s ease;
 }
@@ -96,7 +96,7 @@
     margin: 0 0 0.25rem;
     font-size: 0.9375rem;
     font-weight: 600;
-    color: var(--text);
+    color: var(--text-primary);
 }
 
 .onboarding-step-content p {
@@ -108,7 +108,7 @@
 
 .onboarding-actions {
     padding: 1.5rem 2rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-subtle);
     display: flex;
     gap: 0.75rem;
     justify-content: flex-end;
@@ -134,7 +134,7 @@
 .btn-onboarding-skip {
     padding: 0.625rem 1.5rem;
     background: transparent;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
     color: var(--text-muted);
     font-size: 0.9375rem;
@@ -145,7 +145,7 @@
 
 .btn-onboarding-skip:hover {
     border-color: var(--text-muted);
-    color: var(--text);
+    color: var(--text-primary);
 }
 
 /* ===== Enhanced Empty State ===== */
@@ -159,8 +159,8 @@
 }
 
 .empty-state-card {
-    background: var(--panel-bg);
-    border: 2px solid var(--border);
+    background: var(--bg-surface);
+    border: 2px solid var(--border-subtle);
     border-radius: 12px;
     padding: 2rem 1.5rem;
     text-align: center;
@@ -235,7 +235,7 @@
     font-size: 1.125rem;
     font-weight: 600;
     margin: 0 0 0.5rem;
-    color: var(--text);
+    color: var(--text-primary);
 }
 
 .empty-card-desc {
@@ -292,7 +292,7 @@
 .btn-help {
     padding: 0.5rem;
     background: transparent;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
     color: var(--text-muted);
     cursor: pointer;

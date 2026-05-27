@@ -312,12 +312,12 @@ class TestOAuthAuthorizeURL:
         url = client.get_oauth_authorize_url(
             server_id="github",
             state="random-state-123",
-            redirect_uri="http://localhost:3118/callback",
+            redirect_uri="http://localhost:3131/callback",
         )
 
         assert url.startswith("https://test-auth.example.com/auth/authorize/github?")
         assert "state=random-state-123" in url
-        assert "redirect_uri=http%3A%2F%2Flocalhost%3A3118%2Fcallback" in url
+        assert "redirect_uri=http%3A%2F%2Flocalhost%3A3131%2Fcallback" in url
 
     @pytest.mark.anyio
     async def test_get_oauth_authorize_url_encoding(self, client):
@@ -325,7 +325,7 @@ class TestOAuthAuthorizeURL:
         url = client.get_oauth_authorize_url(
             server_id="slack",
             state="state with spaces & special=chars",
-            redirect_uri="http://localhost:3118/callback?foo=bar",
+            redirect_uri="http://localhost:3131/callback?foo=bar",
         )
 
         # Should be URL-encoded

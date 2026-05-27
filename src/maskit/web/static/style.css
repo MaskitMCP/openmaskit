@@ -19,8 +19,8 @@
     --border-focus: #2dd4bf;
 
     --text-primary: #e8ecf0;
-    --text-secondary: #8892a4;
-    --text-muted: #5c6578;
+    --text-secondary: #94a0b3;
+    --text-muted: #6b7589;
 
     --accent: #58a6ff;
     --accent-dim: #58a6ff20;
@@ -4067,32 +4067,34 @@ code {
     align-items: center;
     justify-content: space-between;
     margin-top: 2rem;
-    padding: 1rem 0;
-    border-top: 1px solid var(--border);
+    padding: 1rem 0 0.25rem;
+    border-top: 1px solid var(--border-subtle);
 }
 
 .pagination-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.625rem 1rem;
-    background: var(--panel-bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text);
-    font-size: 0.875rem;
+    padding: 0.55rem 1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.825rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all var(--transition-fast);
 }
 
 .pagination-btn:hover:not(:disabled) {
-    background: var(--hover-bg);
-    border-color: var(--primary);
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .pagination-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
 }
 
@@ -4104,18 +4106,21 @@ code {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.2rem;
 }
 
 .pagination-current {
-    font-size: 0.875rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
     font-weight: 500;
-    color: var(--text);
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
 }
 
 .pagination-total {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--text-muted);
+    letter-spacing: 0.02em;
 }
 
 /* Responsive pagination */
@@ -4374,5 +4379,248 @@ code {
     to {
         opacity: 0.48;
         transform: translateY(0);
+    }
+}
+
+/* ============================================================
+   Polish Pass — additive, non-breaking refinements
+   Focus rings, action discoverability, traffic readability,
+   small typographic + responsive corrections.
+   ============================================================ */
+
+/* --- Accessible focus rings (visible only for keyboard users) --- */
+/* Apply a consistent two-layer ring across interactive elements.
+   :focus-visible is supported in all modern browsers; mouse clicks
+   intentionally do not show the ring. */
+.btn-primary:focus-visible,
+.btn-danger:focus-visible,
+.btn-small:focus-visible,
+.btn-save:focus-visible,
+.btn-edit:focus-visible,
+.btn-save-inline:focus-visible,
+.btn-cancel:focus-visible,
+.btn-modal-cancel:focus-visible,
+.btn-modal-submit:focus-visible,
+.btn-add-target:focus-visible,
+.btn-reveal:focus-visible,
+.btn-help:focus-visible,
+.btn-onboarding-primary:focus-visible,
+.btn-onboarding-skip:focus-visible,
+.btn-mapper:focus-visible,
+.btn-try:focus-visible,
+.btn-install:focus-visible,
+.btn-activate:focus-visible,
+.fab-connect:focus-visible,
+.tgt-action-btn:focus-visible,
+.tool-hide-btn:focus-visible,
+.transport-opt:focus-visible,
+.oauth-mode-card:focus-visible,
+.integration-agent-btn:focus-visible,
+.integration-copy-btn:focus-visible,
+.response-tab:focus-visible,
+.dynamic-add-btn:focus-visible,
+.dynamic-remove-btn:focus-visible,
+.config-add-btn:focus-visible,
+.config-remove-btn:focus-visible,
+.pagination-btn:focus-visible,
+.dcr-advanced-toggle:focus-visible,
+.dcr-fallback-btn:focus-visible,
+.empty-card-action:focus-visible,
+.detail-close:focus-visible,
+.modal-close-btn:focus-visible,
+nav a:focus-visible,
+.back-link:focus-visible,
+.tgt-card-main:focus-visible,
+.tool-card-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px var(--accent-glow);
+}
+
+/* Inputs already have :focus styling, but make sure :focus-visible carries the same ring */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: none; /* the existing box-shadow is the visible affordance */
+}
+
+/* --- Header polish: softer h1 underline so the accent doesn't shout --- */
+header h1::after {
+    height: 1px;
+    opacity: 0.4;
+    bottom: -3px;
+}
+
+/* --- Inactive servers: make primary action discoverable --- */
+/* Previously hidden behind hover-only `.tgt-card-actions { opacity: 0 }`,
+   which was inaccessible on touch devices. Reveal on focus-within and
+   on touch (no hover) so the Activate button is always findable. */
+.tgt-card-inactive .tgt-card-actions {
+    opacity: 0.85;
+}
+
+.tgt-card-inactive:hover .tgt-card-actions,
+.tgt-card-inactive:focus-within .tgt-card-actions {
+    opacity: 1;
+}
+
+/* Stronger affordance for the activate button even at rest */
+.tgt-card-inactive .tgt-action-activate {
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25);
+}
+
+/* Active cards: also reveal actions on focus-within (keyboard nav) */
+.tgt-card:focus-within .tgt-card-actions {
+    opacity: 1;
+}
+
+/* On touch devices (no hover capability), keep all card actions visible */
+@media (hover: none) {
+    .tgt-card-actions,
+    .tgt-card-inactive .tgt-card-actions {
+        opacity: 1;
+    }
+}
+
+/* --- Traffic stream: bump readability of secondary text --- */
+.traffic-duration {
+    font-size: 0.72rem;
+}
+
+.traffic-time {
+    font-size: 0.72rem;
+}
+
+/* Selected row: avoid horizontal jog caused by added left border */
+.traffic-row {
+    border-left: 2px solid transparent;
+}
+
+.traffic-row-selected {
+    border-left-color: var(--accent);
+}
+
+/* Traffic row icon: a touch more breathing room on the left */
+.traffic-row {
+    padding-left: 1rem;
+}
+
+/* --- Response tabs: use the body font variable for consistency --- */
+.response-tab {
+    font-family: var(--font-body);
+}
+
+.json-tree {
+    font-family: var(--font-mono);
+}
+
+/* --- Scrollbar: slightly more visible thumb (still discreet) --- */
+::-webkit-scrollbar-thumb {
+    background: #2a3142;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #3a4358;
+}
+
+/* --- Code inline: improve contrast against bg-elevated --- */
+code {
+    background: var(--bg-root);
+}
+
+/* --- Section headings: slightly improved hierarchy/spacing --- */
+.section-heading {
+    margin: 0 0 1.25rem 0;
+}
+
+/* --- Empty-state cards (active variant): tighten padding rhythm --- */
+.empty-card-desc {
+    color: var(--text-secondary);
+}
+
+/* --- Modal: ensure the integration-help "primary" color resolves --- */
+/* templates use inline `color: var(--primary)` which was undefined.
+   Provide it as an alias of the accent so the info icon renders teal-blue
+   instead of inheriting currentColor (white). */
+:root {
+    --primary: var(--accent);
+}
+
+/* --- Marketplace inactive status: nudge contrast --- */
+.marketplace-status-inactive {
+    color: var(--text-secondary);
+}
+
+/* --- Marketplace card hover: subtle accent ring instead of gray border --- */
+.marketplace-card:hover {
+    border-color: var(--accent-dim);
+}
+
+/* --- Tool detail header: clearer description rhythm --- */
+.tool-detail-header h2 {
+    margin-bottom: 0.5rem;
+}
+
+.tool-desc {
+    line-height: 1.55;
+}
+
+/* --- Try-it result: rounded corners restored after response-panel join --- */
+.response-panel > pre {
+    line-height: 1.6;
+}
+
+/* --- Form-row label: slightly stronger label hierarchy --- */
+.form-row label {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.form-row label input::placeholder,
+.try-field input::placeholder,
+.try-field textarea::placeholder {
+    color: var(--text-muted);
+}
+
+/* --- Toast: stronger separation from page content --- */
+.toast {
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(8px);
+}
+
+/* --- Mobile (<= 768px): keep target action buttons reachable --- */
+@media (max-width: 768px) {
+    .tgt-card-actions {
+        opacity: 1;
+    }
+
+    .tgt-card-meta {
+        gap: 0.4rem;
+    }
+
+    /* Make page-title row stack cleanly on small screens */
+    .page-title-row {
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+}
+
+/* --- Print-style reduced-motion respect --- */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .status-dot,
+    .tgt-dot.dot-live,
+    .tgt-dot.dot-pending,
+    .config-required-star,
+    .empty-state-card::after {
+        animation: none !important;
     }
 }
