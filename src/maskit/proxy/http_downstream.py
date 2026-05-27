@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 import anyio
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage, JSONRPCRequest, JSONRPCResponse
+
+from maskit.web.origin import OriginMiddleware, default_localhost_origins
 
 if TYPE_CHECKING:
     from maskit.proxy.core import ProxyState
@@ -121,13 +125,35 @@ async def _handle_mcp_delete(request: Request) -> Response:
     return Response(status_code=200)
 
 
-def create_mcp_app(state: ProxyState) -> Starlette:
-    """Create the MCP HTTP endpoint app with path-based target routing."""
+def create_mcp_app(
+    state: ProxyState,
+    allowed_origins: Iterable[str] | None = None,
+) -> Starlette:
+    """Create the MCP HTTP endpoint app with path-based target routing.
+
+    The endpoint is reachable from any webpage in the user's browser
+    (``fetch('http://127.0.0.1:9474/...')``), so it gets the same Origin
+    allow-list as the dashboard. Real MCP clients (Claude Code etc.) don't
+    send an ``Origin`` header — those pass through unchanged.
+    """
     routes = [
         Route("/{target_name}/mcp", _handle_mcp_post, methods=["POST"]),
         Route("/{target_name}/mcp", _handle_mcp_get, methods=["GET"]),
         Route("/{target_name}/mcp", _handle_mcp_delete, methods=["DELETE"]),
     ]
-    app = Starlette(routes=routes)
+
+    if allowed_origins is None:
+        web_port = getattr(state, "web_port", 9473)
+        allowed_origins = default_localhost_origins(web_port)
+
+    middleware = [
+        Middleware(
+            OriginMiddleware,
+            allowed_origins=list(allowed_origins),
+            protected_path_prefixes=("/",),
+        ),
+    ]
+
+    app = Starlette(routes=routes, middleware=middleware)
     app.state.proxy_state = state
     return app

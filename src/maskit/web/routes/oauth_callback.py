@@ -128,7 +128,6 @@ async def oauth_callback(request: Request):
     if expires_in and expires_in > 31536000:  # > 1 year in seconds, likely milliseconds
         expires_in = expires_in // 1000
 
-    import time
     token_file_data = {
         "tokens": {
             "access_token": token_data["access_token"],

@@ -295,10 +295,19 @@ async def async_main():
     for name in state.target_names:
         logger.info(f"  {name}: http://{bind_host}:{config.mcp_port}/{name}/mcp")
 
-    web_app = create_app(state)
+    from maskit.web.origin import default_localhost_origins
+    allowed_origins = default_localhost_origins(config.web_port)
+    extra_origins_env = os.environ.get("MASKIT_ALLOWED_ORIGINS", "").strip()
+    if extra_origins_env:
+        allowed_origins.extend(
+            o.strip() for o in extra_origins_env.split(",") if o.strip()
+        )
+    logger.info(f"Allowed dashboard origins: {allowed_origins}")
+
+    web_app = create_app(state, allowed_origins=allowed_origins)
     web_app.state.backend_client = backend_client
     web_app.state.oauth_states = oauth_states
-    mcp_app = create_mcp_app(state)
+    mcp_app = create_mcp_app(state, allowed_origins=allowed_origins)
 
     uvicorn_config = uvicorn.Config(
         web_app,

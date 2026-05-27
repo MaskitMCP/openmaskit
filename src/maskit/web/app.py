@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
+
+from maskit.web.origin import OriginMiddleware, default_localhost_origins
 
 if TYPE_CHECKING:
     from maskit.proxy.core import ProxyState
@@ -15,7 +19,10 @@ if TYPE_CHECKING:
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(state: ProxyState) -> Starlette:
+def create_app(
+    state: ProxyState,
+    allowed_origins: Iterable[str] | None = None,
+) -> Starlette:
     from maskit.web.routes.custom_targets import (
         custom_target_activate,
         custom_target_create,
@@ -120,6 +127,14 @@ def create_app(state: ProxyState) -> Starlette:
         Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static"),
     ]
 
-    app = Starlette(routes=routes)
+    if allowed_origins is None:
+        web_port = getattr(state, "web_port", 9473)
+        allowed_origins = default_localhost_origins(web_port)
+
+    middleware = [
+        Middleware(OriginMiddleware, allowed_origins=list(allowed_origins)),
+    ]
+
+    app = Starlette(routes=routes, middleware=middleware)
     app.state.proxy_state = state
     return app
