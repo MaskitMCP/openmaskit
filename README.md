@@ -192,6 +192,7 @@ MASKIT_HOST=0.0.0.0                    # Bind address (default: 127.0.0.1)
 MASKIT_ENCRYPTION_KEY=<base64-key>     # Override token encryption key
 MASKIT_LOG_FORMAT=json                 # JSON logging for production
 MASKIT_SHUTDOWN_TIMEOUT=30             # Graceful shutdown timeout (seconds)
+MASKIT_ALLOWED_ORIGINS=https://a,https://b  # Extra origins permitted to call /api/* and /ws/* (comma-separated). The dashboard's localhost origin is always allowed.
 ```
 
 ### Backup and Data Safety
