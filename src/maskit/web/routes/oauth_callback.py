@@ -128,6 +128,7 @@ async def oauth_callback(request: Request):
     if expires_in and expires_in > 31536000:  # > 1 year in seconds, likely milliseconds
         expires_in = expires_in // 1000
 
+    import time
     token_file_data = {
         "tokens": {
             "access_token": token_data["access_token"],
@@ -135,6 +136,7 @@ async def oauth_callback(request: Request):
             "scope": token_data.get("scope"),
             "expires_in": expires_in,
             "refresh_token": token_data.get("refresh_token"),
+            "created_at": time.time(),
         },
         # No client_info - backend manages OAuth client credentials
     }

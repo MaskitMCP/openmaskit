@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from maskit.cli import get_version, parse_args
+from maskit import __version__
+from maskit.cli import parse_args
 
 
 class TestParseArgs:
@@ -84,9 +85,7 @@ class TestParseArgs:
 
 class TestVersion:
     def test_version_returns_string(self):
-        """get_version() returns a version string."""
-        version = get_version()
-        assert isinstance(version, str)
-        assert len(version) > 0
-        # Should either return the version from pyproject.toml or "unknown"
-        assert version == "0.1.0" or version == "unknown"
+        """__version__ is a non-empty string matching pyproject.toml or 'unknown'."""
+        assert isinstance(__version__, str)
+        assert len(__version__) > 0
+        assert __version__ == "0.1.0" or __version__ == "unknown"

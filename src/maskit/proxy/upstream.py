@@ -7,7 +7,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
 import httpx
 
@@ -24,8 +24,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_self_managed_oauth(server_id: str, store_path: str) -> bool:
+    """True if the token file was written by the self-managed OAuth flow (DCR or
+    manual client). Such files contain a `client_info` block; the backend-managed
+    flow only writes `tokens`. Self-managed tokens must be refreshed by
+    OAuthClientProvider talking directly to the provider, not via the backend.
+    """
+    try:
+        server_id = validate_server_id(server_id)
+    except ValueError:
+        return False
+    oauth_dir = Path(store_path).expanduser().parent / "oauth"
+    token_path = oauth_dir / f"{server_id}.json"
+    data = read_token_file(token_path)
+    return bool(data.get("client_info"))
+
+
 def _load_backend_oauth_token(server_id: str, store_path: str) -> str | None:
-    """Load OAuth access token from backend-managed token file."""
+    """Load OAuth access token from backend-managed token file.
+
+    Returns None for self-managed token files so connect_upstream falls through
+    to the OAuthClientProvider path (which handles refresh against the provider).
+    """
     try:
         server_id = validate_server_id(server_id)
     except ValueError as e:
@@ -36,6 +56,8 @@ def _load_backend_oauth_token(server_id: str, store_path: str) -> str | None:
     token_path = oauth_dir / f"{server_id}.json"
 
     data = read_token_file(token_path)  # Handles decryption + migration
+    if data.get("client_info"):
+        return None  # Self-managed; let OAuthClientProvider handle it
     return data.get("tokens", {}).get("access_token")
 
 
@@ -59,6 +81,7 @@ def _load_backend_oauth_tokens(server_id: str, store_path: str) -> dict | None:
 
 def _save_backend_oauth_tokens(server_id: str, store_path: str, tokens: dict) -> None:
     """Save refreshed OAuth tokens back to backend-managed token file."""
+    import time
     try:
         server_id = validate_server_id(server_id)
     except ValueError as e:
@@ -71,10 +94,39 @@ def _save_backend_oauth_tokens(server_id: str, store_path: str, tokens: dict) ->
 
     # Read existing data to preserve other fields
     data = read_token_file(token_path) or {}
+    tokens = dict(tokens)
+    tokens.setdefault("created_at", time.time())
     data["tokens"] = tokens
 
     write_token_file(token_path, data)  # Handles encryption
     logger.info(f"Saved refreshed OAuth tokens for {server_id}")
+
+
+def is_oauth_token_expired(server_id: str, store_path: str, skew_seconds: int = 60) -> bool:
+    """Check if the stored OAuth token is expired (or near-expiry).
+
+    Returns True if:
+      - we can prove the token is past its lifetime minus skew, OR
+      - the token file has a refresh_token but no created_at (legacy file written
+        before created_at tracking; treat as unknown-age and refresh proactively).
+    Returns False otherwise (no tokens, or no refresh_token to refresh with).
+    """
+    import time
+    # Self-managed tokens (DCR / manual custom servers) are refreshed by the MCP
+    # OAuthClientProvider talking to the provider directly. Don't pre-flight them.
+    if _is_self_managed_oauth(server_id, store_path):
+        return False
+    tokens = _load_backend_oauth_tokens(server_id, store_path)
+    if not tokens:
+        return False
+    if not tokens.get("refresh_token"):
+        return False
+    created_at = tokens.get("created_at")
+    expires_in = tokens.get("expires_in")
+    if not created_at or not expires_in:
+        # Legacy token file — age unknown, refresh proactively.
+        return True
+    return (created_at + expires_in - skew_seconds) < time.time()
 
 
 async def refresh_backend_oauth_token(
@@ -84,8 +136,15 @@ async def refresh_backend_oauth_token(
 ) -> str | None:
     """Attempt to refresh expired OAuth token using backend API.
 
+    Only valid for backend-managed marketplace servers. Self-managed tokens
+    (DCR / manual custom servers) refresh against the provider directly via
+    OAuthClientProvider — calling the backend for those would be wrong.
+
     Returns new access_token if successful, None otherwise.
     """
+    if _is_self_managed_oauth(server_id, store_path):
+        logger.debug(f"{server_id} is self-managed OAuth; skipping backend refresh")
+        return None
     # Load current tokens (need refresh_token)
     tokens = _load_backend_oauth_tokens(server_id, store_path)
     if not tokens or not tokens.get("refresh_token"):

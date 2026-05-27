@@ -25,8 +25,9 @@ from maskit.oauth.handler import OAuthCallbackServer
 from maskit.proxy.core import ProxyState, TargetState, run_proxy_for_target
 from maskit.proxy.http_downstream import create_mcp_app
 from maskit.proxy.manager import TargetManager, _build_upstream_config
-from maskit.proxy.upstream import connect_upstream
+from maskit.proxy.upstream import connect_upstream, is_oauth_token_expired, refresh_backend_oauth_token
 from maskit.web.app import create_app
+from maskit import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +48,6 @@ def print_banner():
                                                                   ░░▀░░▀░░▀▀▀░▀░░░▀░
     """
     print(banner)
-
-def _get_version() -> str:
-    """Get version from package metadata."""
-    # Try importlib.metadata first (works for installed packages)
-    try:
-        from importlib.metadata import version
-        return version("maskit")
-    except Exception:
-        pass
 
 async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
     """Periodically flush pending alias writes to the database."""
@@ -278,7 +270,7 @@ async def async_main():
     state.callback_server = callback_server
 
     installation_id = _load_installation_id()
-    maskit_version = _get_version()
+    maskit_version = __version__
     print('----------------------------------------------------------------------------------------')
     print_banner()
     print('----------------------------------------------------------------------------------------')
@@ -348,24 +340,73 @@ async def async_main():
                     )
                     upstream_streams[name] = (us_read, us_write)
                 elif name in marketplace_configs:
-                    try:
-                        upstream_cfg = _build_upstream_config(marketplace_configs[name])
-                        us_read, us_write = await stack.enter_async_context(
-                            connect_upstream(upstream_cfg, config.store_path,
-                                           errlog=sys.stderr, server_id=name,
-                                           callback_server=callback_server,
-                                           container_runtime=config.container_runtime)
-                        )
-                        upstream_streams[name] = (us_read, us_write)
-                    except Exception as exc:
-                        logger.warning("Failed to connect marketplace server %s: %s", name, exc)
-                        failed_targets.append(name)
-                        # Deactivate in DB to prevent restart loops
+                    upstream_cfg = _build_upstream_config(marketplace_configs[name])
+
+                    # Pre-flight refresh if token is known-expired
+                    if is_oauth_token_expired(name, config.store_path):
+                        logger.info("OAuth token for %s is expired; attempting refresh before connect", name)
+                        refreshed = await refresh_backend_oauth_token(name, config.store_path, backend_client)
+                        if not refreshed:
+                            logger.warning(
+                                "Could not refresh OAuth token for %s; deactivating. User must re-authenticate via the dashboard.",
+                                name,
+                            )
+                            failed_targets.append(name)
+                            try:
+                                await store.deactivate_server(name)
+                            except Exception as deactivate_exc:
+                                logger.error("Failed to deactivate server %s: %s", name, deactivate_exc)
+                            continue
+
+                    async def _connect_with_isolated_stack():
+                        own_stack = AsyncExitStack()
+                        await own_stack.__aenter__()
                         try:
-                            await store.deactivate_server(name)
-                            logger.info("Deactivated server %s in database", name)
-                        except Exception as deactivate_exc:
-                            logger.error("Failed to deactivate server %s: %s", name, deactivate_exc)
+                            r, w = await own_stack.enter_async_context(
+                                connect_upstream(upstream_cfg, config.store_path,
+                                               errlog=sys.stderr, server_id=name,
+                                               callback_server=callback_server,
+                                               container_runtime=config.container_runtime)
+                            )
+                            return own_stack, r, w
+                        except BaseException:
+                            await own_stack.aclose()
+                            raise
+
+                    own_stack = None
+                    try:
+                        own_stack, us_read, us_write = await _connect_with_isolated_stack()
+                    except Exception as exc:
+                        # One refresh+retry on failure (covers stale token not flagged by created_at)
+                        logger.warning("Failed to connect marketplace server %s: %s", name, exc)
+                        refreshed = await refresh_backend_oauth_token(name, config.store_path, backend_client)
+                        if refreshed:
+                            try:
+                                own_stack, us_read, us_write = await _connect_with_isolated_stack()
+                            except Exception as exc2:
+                                logger.warning("Retry after refresh failed for %s: %s", name, exc2)
+                                own_stack = None
+                        if own_stack is None:
+                            failed_targets.append(name)
+                            try:
+                                await store.deactivate_server(name)
+                                logger.info("Deactivated server %s in database; re-auth via dashboard to reconnect", name)
+                            except Exception as deactivate_exc:
+                                logger.error("Failed to deactivate server %s: %s", name, deactivate_exc)
+                            continue
+
+                    # Register the isolated stack with the parent so it tears down at shutdown.
+                    # Wrap aclose to swallow exit-time errors per target (otherwise one bad
+                    # upstream's teardown takes down the whole process).
+                    def _make_safe_aclose(target_name=name, s=own_stack):
+                        async def _close():
+                            try:
+                                await s.aclose()
+                            except Exception as exc:
+                                logger.warning("Error closing upstream %s at shutdown: %s", target_name, exc)
+                        return _close
+                    stack.push_async_callback(_make_safe_aclose())
+                    upstream_streams[name] = (us_read, us_write)
             for name in failed_targets:
                 del state.targets[name]
 
@@ -393,9 +434,25 @@ async def async_main():
 
                 tg.start_soon(_shutdown_on_signal)
 
+                async def _safe_run_proxy(target_state, us_read, us_write):
+                    target_name = target_state.name
+                    try:
+                        await run_proxy_for_target(target_state, us_read, us_write)
+                    except Exception as exc:
+                        logger.error(
+                            "[%s] Proxy task failed (likely OAuth/upstream error); deactivating target. %s",
+                            target_name, exc,
+                        )
+                        # Deactivate so we don't crash again on next startup
+                        try:
+                            await store.deactivate_server(target_name)
+                        except Exception:
+                            pass
+                        state.targets.pop(target_name, None)
+
                 for name, target_state in state.targets.items():
                     us_read, us_write = upstream_streams[name]
-                    tg.start_soon(run_proxy_for_target, target_state, us_read, us_write)
+                    tg.start_soon(_safe_run_proxy, target_state, us_read, us_write)
                     tg.start_soon(_flush_loop, target_state.engine, shutdown_event)
                     # Start background eviction to prevent memory leaks
                     tg.start_soon(target_state.response_dispatcher.start_background_eviction, shutdown_event)

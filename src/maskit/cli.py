@@ -5,34 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-
-def get_version() -> str:
-    """Get version from package metadata."""
-    # Try importlib.metadata first (works for installed packages)
-    try:
-        from importlib.metadata import version
-        return version("maskit")
-    except Exception:
-        pass
-
-    # Fallback: read from pyproject.toml (development mode)
-    try:
-        # Python 3.11+ has tomllib built-in
-        try:
-            import tomllib
-        except ImportError:
-            # Python 3.10 fallback
-            import tomli as tomllib  # type: ignore
-
-        pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
-        if pyproject.exists():
-            with open(pyproject, "rb") as f:
-                data = tomllib.load(f)
-                return data.get("project", {}).get("version", "unknown")
-    except Exception:
-        pass
-
-    return "unknown"
+from maskit import __version__
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -110,7 +83,7 @@ Documentation: https://github.com/AminMal/maskit"""
     parser.add_argument(
         "--version",
         action="version",
-        version=f"maskit {get_version()}",
+        version=f"maskit {__version__}",
     )
 
     return parser
