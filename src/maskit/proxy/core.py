@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -23,9 +23,13 @@ from mcp.types import (
     JSONRPCResponse,
 )
 
+from maskit.traffic.store import TrafficEntry
+
 if TYPE_CHECKING:
     from maskit.masking.engine import MaskingEngine
     from maskit.masking.store import MaskingStore
+    from maskit.traffic.buffer import TrafficBuffer
+    from maskit.traffic.store import TrafficStore
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +138,7 @@ class TargetState:
     engine: MaskingEngine
     tool_schemas: list[dict[str, Any]] = field(default_factory=list)
     hidden_tools: set[str] = field(default_factory=set)
-    traffic_log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=100))
-    traffic_events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
+    traffic_buffer: TrafficBuffer | None = None
     response_dispatcher: ResponseDispatcher = field(default_factory=ResponseDispatcher)
     pending_tool_calls: dict[str | int, dict[str, Any]] = field(default_factory=dict)
     pending_requests: dict[str | int, str] = field(default_factory=dict)
@@ -153,16 +156,9 @@ class TargetState:
     def cache_tool_schemas(self, schemas: list[dict[str, Any]]):
         self.tool_schemas = schemas
 
-    def log_traffic_entry(self, entry: dict[str, Any]):
-        self.traffic_log.append(entry)
-        self.traffic_events.append({"type": "new", "entry": entry})
-
-    def update_traffic_entry(self, entry_id: str, updates: dict[str, Any]):
-        for entry in reversed(self.traffic_log):
-            if entry.get("id") == entry_id:
-                entry.update(updates)
-                break
-        self.traffic_events.append({"type": "update", "id": entry_id, "updates": updates})
+    def _emit_traffic(self, entry: TrafficEntry) -> None:
+        if self.traffic_buffer is not None:
+            self.traffic_buffer.append(entry)
 
 
 async def cleanup_target_state(target: TargetState) -> None:
@@ -190,6 +186,8 @@ class ProxyState:
     def __init__(self):
         self.targets: dict[str, TargetState] = {}
         self.store: MaskingStore | None = None
+        self.traffic_store: TrafficStore | None = None
+        self.traffic_buffer: TrafficBuffer | None = None
         self.target_manager: Any | None = None
         self.callback_server: Any | None = None
         self.config_target_ids: set[str] = set()
@@ -395,22 +393,23 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
         target.pending_requests[root.id] = "tools/list"
     elif method == "tools/call" and params:
         tool_name = params.get("name", "")
+        request_ts = time.time()
+        rid = str(root.id) if root.id is not None else None
 
         if tool_name in target.hidden_tools:
             logger.info("[%s] Blocked call to hidden tool: %s", target.name, tool_name)
-            target.log_traffic_entry({
-                "id": str(time.time_ns()),
-                "type": "blocked",
-                "tool_name": tool_name,
-                "timestamp": time.time(),
-                "duration_ms": None,
-                "status": "blocked",
-                "masked_args": None,
-                "unmasked_fields": [],
-                "masked_response_fields": [],
-                "response_preview": None,
-                "reason": "hidden_tool",
-            })
+            target._emit_traffic(TrafficEntry(
+                ts=request_ts,
+                target_name=target.name,
+                status="blocked",
+                tool_name=tool_name,
+                request_id=rid,
+                duration_ms=0,
+                unmasked_args=None,
+                unmasked_response=None,
+                masked_args=None,
+                masked_response="blocked: hidden tool",
+            ))
             error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
                 jsonrpc="2.0",
                 id=root.id,
@@ -419,18 +418,16 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
             target.response_dispatcher.dispatch_sync(root.id, error_response)
             return None
 
-        request_ts = time.time()
-        entry_id = str(time.time_ns())
-        masked_args = None
-        unmasked_fields = []
+        masked_args_dict: dict[str, Any] | None = None
+        unmasked_args_dict: dict[str, Any] | None = None
 
         if target.engine:
             arguments = params.get("arguments")
             if arguments and isinstance(arguments, dict):
-                masked_args = dict(arguments)
+                masked_args_dict = dict(arguments)
                 unmasked = target.engine.unmask_arguments(tool_name, arguments)
+                unmasked_args_dict = unmasked
                 if unmasked != arguments:
-                    unmasked_fields = [k for k in arguments if arguments.get(k) != unmasked.get(k)]
                     masked_str = ", ".join(f"{v}" for v in arguments.values())
                     real_str = ", ".join(f"{v}" for v in unmasked.values())
                     logger.info("[%s] Received tool call: %s(%s)", target.name, tool_name, masked_str)
@@ -440,19 +437,18 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
                 violation = target.engine.check_guardrails(tool_name, params["arguments"])
                 if violation:
                     logger.info("[%s] Guardrail blocked %s: %s", target.name, tool_name, violation)
-                    target.log_traffic_entry({
-                        "id": entry_id,
-                        "type": "blocked",
-                        "tool_name": tool_name,
-                        "timestamp": request_ts,
-                        "duration_ms": (time.time() - request_ts) * 1000,
-                        "status": "blocked",
-                        "masked_args": masked_args,
-                        "unmasked_fields": unmasked_fields,
-                        "masked_response_fields": [],
-                        "response_preview": None,
-                        "reason": violation,
-                    })
+                    target._emit_traffic(TrafficEntry(
+                        ts=request_ts,
+                        target_name=target.name,
+                        status="blocked",
+                        tool_name=tool_name,
+                        request_id=rid,
+                        duration_ms=int((time.time() - request_ts) * 1000),
+                        unmasked_args=_dump_json(unmasked_args_dict),
+                        unmasked_response=None,
+                        masked_args=_dump_json(masked_args_dict),
+                        masked_response=f"blocked: {violation}",
+                    ))
                     error_response = SessionMessage(message=JSONRPCMessage(root=JSONRPCError(
                         jsonrpc="2.0",
                         id=root.id,
@@ -465,24 +461,22 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
 
         target.pending_tool_calls[root.id] = {
             "tool_name": tool_name,
-            "entry_id": entry_id,
+            "request_id": rid,
             "timestamp": request_ts,
+            "masked_args": masked_args_dict,
+            "unmasked_args": unmasked_args_dict,
         }
-        target.log_traffic_entry({
-            "id": entry_id,
-            "type": "tool_call",
-            "tool_name": tool_name,
-            "timestamp": request_ts,
-            "duration_ms": None,
-            "status": "pending",
-            "masked_args": masked_args,
-            "unmasked_fields": unmasked_fields,
-            "masked_response_fields": [],
-            "response_preview": None,
-            "reason": None,
-        })
 
     return msg
+
+
+def _dump_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return json.dumps(value, default=str)
+    except (TypeError, ValueError):
+        return None
 
 
 def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMessage | None:
@@ -521,30 +515,18 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
                 target.cache_tool_schemas(tools)
                 if target.hidden_tools:
                     result["tools"] = [t for t in tools if t.get("name") not in target.hidden_tools]
-                target.log_traffic_entry({
-                    "id": str(time.time_ns()),
-                    "type": "tools_list",
-                    "tool_name": None,
-                    "timestamp": time.time(),
-                    "duration_ms": None,
-                    "status": "complete",
-                    "masked_args": None,
-                    "unmasked_fields": [],
-                    "masked_response_fields": [],
-                    "response_preview": f"{len(result['tools'])} tools",
-                    "reason": None,
-                })
         return msg
 
     # Check if this is a response to a tools/call request
     if request_id in target.pending_tool_calls:
         pending = target.pending_tool_calls.pop(request_id)
         tool_name = pending["tool_name"]
-        entry_id = pending["entry_id"]
+        rid = pending["request_id"]
         request_ts = pending["timestamp"]
+        masked_args_dict = pending.get("masked_args")
+        unmasked_args_dict = pending.get("unmasked_args")
 
         duration_ms = (time.time() - request_ts) * 1000
-        masked_response_fields = []
 
         # Extract original response preview BEFORE masking
         original_preview = None
@@ -558,7 +540,6 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
             pending_before = target.engine.pending_writes_count
             root.result = target.engine.mask_response(tool_name, result)
             new_masks = target.engine.get_new_masks_since(pending_before)
-            masked_response_fields = [field_path for _, _, _, field_path in new_masks]
             for alias, real_value, _, field_path in new_masks:
                 logger.info("[%s] Masked %s.%s: %s → %s", target.name, tool_name, field_path, real_value, alias)
 
@@ -571,12 +552,21 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
                     masked_preview = _truncate_preview(block["text"])
                     break
 
-        target.update_traffic_entry(entry_id, {
-            "status": "complete",
-            "duration_ms": round(duration_ms, 1),
-            "masked_response_fields": masked_response_fields,
-            "response_preview": original_preview,
-            "masked_preview": masked_preview,
-        })
+        status = "ok"
+        if result and isinstance(result, dict) and result.get("isError"):
+            status = "error"
+
+        target._emit_traffic(TrafficEntry(
+            ts=request_ts,
+            target_name=target.name,
+            status=status,
+            tool_name=tool_name,
+            request_id=rid,
+            duration_ms=int(duration_ms),
+            unmasked_args=_dump_json(unmasked_args_dict),
+            unmasked_response=original_preview,
+            masked_args=_dump_json(masked_args_dict),
+            masked_response=masked_preview,
+        ))
 
     return msg

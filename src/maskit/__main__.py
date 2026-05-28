@@ -26,6 +26,8 @@ from maskit.proxy.core import ProxyState, TargetState, run_proxy_for_target
 from maskit.proxy.http_downstream import create_mcp_app
 from maskit.proxy.manager import TargetManager, _build_upstream_config
 from maskit.proxy.upstream import connect_upstream, is_oauth_token_expired, refresh_backend_oauth_token
+from maskit.traffic.buffer import TrafficBuffer
+from maskit.traffic.store import TrafficStore
 from maskit.web.app import create_app
 from maskit import __version__
 
@@ -64,6 +66,38 @@ async def _flush_loop(engine: MaskingEngine, shutdown_event: anyio.Event):
             await engine.flush_pending()
         except Exception:
             logger.exception("Failed final flush of aliases to database")
+
+
+async def _traffic_flush_loop(
+    buffer: TrafficBuffer,
+    store: TrafficStore,
+    shutdown_event: anyio.Event,
+):
+    """Periodically drain the traffic buffer into the traffic DB."""
+    while not shutdown_event.is_set():
+        await anyio.sleep(1.0)
+        if buffer.has_pending:
+            await buffer.flush(store)
+    # Final drain on shutdown
+    if buffer.has_pending:
+        await buffer.flush(store)
+
+
+async def _traffic_rotation_loop(
+    store: TrafficStore,
+    max_rows: int,
+    shutdown_event: anyio.Event,
+):
+    """Enforce the global traffic row cap every 5 minutes."""
+    while not shutdown_event.is_set():
+        with anyio.move_on_after(300):
+            await shutdown_event.wait()
+        if shutdown_event.is_set():
+            return
+        try:
+            await store.enforce_row_cap(max_rows)
+        except Exception:
+            logger.exception("Failed to enforce traffic row cap")
 
 
 async def _graceful_shutdown(
@@ -119,6 +153,11 @@ async def _graceful_shutdown(
         )
         if pending_count > 0:
             logger.warning(f"{pending_count} targets still have pending writes")
+
+        # Drain any remaining traffic entries
+        if state.traffic_buffer is not None and state.traffic_store is not None:
+            if state.traffic_buffer.has_pending:
+                await state.traffic_buffer.flush(state.traffic_store)
 
     # Stage 4: Cancel remaining tasks (relay loops, servers)
     logger.info("Stage 4/4: Cancelling remaining tasks")
@@ -176,8 +215,18 @@ async def async_main():
 
     store = await MaskingStore.create(config.store_path)
 
+    traffic_db_path = os.environ.get(
+        "MASKIT_TRAFFIC_DB_PATH",
+        str(Path("~/.maskit/traffic.db").expanduser()),
+    )
+    traffic_store = await TrafficStore.create(traffic_db_path)
+    traffic_buffer = TrafficBuffer()
+    traffic_max_rows = int(os.environ.get("MASKIT_TRAFFIC_MAX_ROWS", "10000"))
+
     state = ProxyState()
     state.store = store
+    state.traffic_store = traffic_store
+    state.traffic_buffer = traffic_buffer
     state.mcp_port = config.mcp_port
 
     # Create per-target state
@@ -221,6 +270,7 @@ async def async_main():
             hidden_tools=set(hidden),
             ds_read_send=ds_read_send,
             ds_read_recv=ds_read_recv,
+            traffic_buffer=traffic_buffer,
         )
         state.targets[name] = target_state
 
@@ -249,6 +299,7 @@ async def async_main():
             ds_read_send=ds_read_send,
             ds_read_recv=ds_read_recv,
             server_id=server_id,  # Set server_id for OAuth refresh
+            traffic_buffer=traffic_buffer,
         )
         state.targets[server_id] = target_state
         marketplace_configs[server_id] = record["config"]
@@ -469,6 +520,9 @@ async def async_main():
                     # Start background eviction to prevent memory leaks
                     tg.start_soon(target_state.response_dispatcher.start_background_eviction, shutdown_event)
 
+                tg.start_soon(_traffic_flush_loop, traffic_buffer, traffic_store, shutdown_event)
+                tg.start_soon(_traffic_rotation_loop, traffic_store, traffic_max_rows, shutdown_event)
+
                 tg.start_soon(web_server.serve)
                 tg.start_soon(mcp_server.serve)
                 tg.start_soon(callback_web_server.serve)
@@ -478,6 +532,10 @@ async def async_main():
     finally:
         await backend_client.close()
         await store.close()
+        try:
+            await traffic_store.close()
+        except Exception:
+            logger.exception("Failed to close traffic store")
 
     logger.info("Maskit stopped")
 

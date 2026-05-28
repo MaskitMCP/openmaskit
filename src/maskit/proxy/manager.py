@@ -110,6 +110,7 @@ class TargetManager:
             ds_read_send=ds_read_send,
             ds_read_recv=ds_read_recv,
             server_id=server_id,  # Set server_id for OAuth refresh
+            traffic_buffer=self._state.traffic_buffer,
         )
 
         stack = AsyncExitStack()

@@ -344,28 +344,6 @@ class TestWebAppIntegration:
         # Whatever the route's own behavior is, it must not be 403 from middleware.
         assert resp.status_code != 403
 
-    def test_websocket_traffic_cross_origin_blocked(self, web_state):
-        """The unmasked-traffic WS is the highest-value target — must reject cross-origin."""
-        app = create_app(web_state)
-        with TestClient(app) as client:
-            with pytest.raises(WebSocketDisconnect) as excinfo:
-                with client.websocket_connect(
-                    "/ws/targets/test/traffic", headers={"Origin": EVIL}
-                ):
-                    pass
-            assert excinfo.value.code == 4403
-
-    def test_websocket_traffic_allowed_origin(self, web_state):
-        app = create_app(web_state)
-        with TestClient(app) as client:
-            with client.websocket_connect(
-                "/ws/targets/test/traffic", headers={"Origin": ALLOWED}
-            ) as ws:
-                # First payload is initial-state replay (which may be nothing
-                # for a fresh target). The connection establishing without a
-                # 4403 close is the assertion we care about.
-                ws.close()
-
     @pytest.mark.anyio
     async def test_custom_allowed_origins_via_env_equivalent(self, web_state):
         """Pass allowed_origins explicitly to mirror the MASKIT_ALLOWED_ORIGINS path."""

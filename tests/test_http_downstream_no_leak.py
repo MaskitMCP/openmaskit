@@ -197,20 +197,29 @@ class TestMcpEndpointNoLeak:
 
     @pytest.mark.anyio
     async def test_response_does_not_contain_traffic_preview_fields(self, state):
-        """The in-memory traffic_log fields must not leak through the MCP endpoint."""
+        """Traffic-buffer entries (with unmasked previews) must not leak through the MCP endpoint."""
+        from maskit.traffic.buffer import TrafficBuffer
+        from maskit.traffic.store import TrafficEntry
+
         app = create_mcp_app(state)
+        target = state.targets["test"]
+        target.traffic_buffer = TrafficBuffer()
 
         async def feed_response():
             await anyio.sleep(0.05)
-            target = state.targets["test"]
-            # Plant a traffic log entry to make sure it can't escape.
-            target.traffic_log.append(
-                {
-                    "id": "trace-1",
-                    "original_preview": f"raw secret was {SECRET_HOST}",
-                    "response_preview": f"masked was {ALIAS_HOST}",
-                }
-            )
+            # Plant a traffic entry carrying unmasked content to make sure it can't escape.
+            target.traffic_buffer.append(TrafficEntry(
+                ts=1.0,
+                target_name="test",
+                status="ok",
+                tool_name="anything",
+                request_id="trace-1",
+                duration_ms=1,
+                unmasked_args=None,
+                unmasked_response=f"raw secret was {SECRET_HOST}",
+                masked_args=None,
+                masked_response=f"masked was {ALIAS_HOST}",
+            ))
             response = JSONRPCMessage.model_validate(
                 {
                     "jsonrpc": "2.0",
@@ -236,10 +245,13 @@ class TestMcpEndpointNoLeak:
                     },
                 )
 
+        body = resp.text
+        assert SECRET_HOST not in body
+        assert "raw secret" not in body
         data = resp.json()
         keys = set(_walk_keys(data))
-        assert "original_preview" not in keys
-        assert "response_preview" not in keys
+        assert "unmasked_response" not in keys
+        assert "unmasked_args" not in keys
         assert "traffic_log" not in keys
         assert "alias_cache" not in keys
         # And the raw secret must absolutely not appear anywhere.
