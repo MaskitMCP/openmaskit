@@ -1,92 +1,72 @@
 # Contributing to Maskit
 
-Thank you for your interest in contributing to Maskit! This project is in early development and we welcome contributions of all kinds.
+Thanks for your interest in contributing! Maskit is in early development and contributions of all kinds are welcome — bug reports, fixes, features, docs, and marketplace catalog entries.
 
-## How to Contribute
+## Reporting issues
 
-### Reporting Issues
-
-Found a bug or have a feature request?
-
-1. Check the [existing issues](https://github.com/AminMal/maskit/issues) to avoid duplicates
+1. Check [existing issues](https://github.com/AminMal/maskit/issues) to avoid duplicates.
 2. Open a new issue with:
-   - Clear title and description
+   - A clear title and description
    - Steps to reproduce (for bugs)
    - Expected vs. actual behavior
-   - Relevant logs, screenshots, or config files
+   - Relevant logs, screenshots, or config
 
-### Contributing Code
-
-1. **Fork and clone** the repository
-2. **Install dependencies**: `uv sync`
-3. **Create a branch**: `git checkout -b feature/your-feature-name`
-4. **Make your changes**
-5. **Run tests**: `uv run pytest tests/ -v`
-6. **Commit**: Use clear, descriptive commit messages
-7. **Push** and open a pull request
-
-### Code Style
-
-- Follow existing code conventions (Python PEP 8, type hints where helpful)
-- Add docstrings for public functions and classes
-- Keep functions focused and modular
-- Write tests for new features or bug fixes
-
-### Testing
-
-Run the test suite before submitting:
+## Development setup
 
 ```bash
-uv run pytest tests/ -v                          # All tests
-uv run pytest tests/test_engine.py -v            # Specific module
-uv run pytest tests/test_engine.py::TestMaskingEngine::test_mask_structured_content -v  # Single test
-```
-
-### Areas Where We Need Help
-
-- **Test coverage**: Integration tests, fuzzing, concurrency stress tests
-- **Documentation**: Examples, tutorials, architecture diagrams
-- **Edge cases**: Binary data handling, large payloads, streaming responses
-- **Security review**: Threat modeling, timing attack analysis
-- **Production features**: Health checks, structured logging, metrics/observability
-- **Marketplace**: More pre-configured MCP servers in the catalog
-- **Bug fixes**: Check the issues for known bugs
-
-### Pull Request Guidelines
-
-- Keep PRs focused on a single feature or bug fix
-- Reference related issues in the PR description
-- Update documentation (README, CLAUDE.md) if your change affects usage
-- Add tests for new functionality
-- Be responsive to review feedback
-
-### Communication
-
-- Open an issue for discussion before starting large changes
-- Ask questions in the issue tracker or pull request comments
-- Be respectful and constructive in all interactions
-
-## Development Setup
-
-```bash
-# Clone the repo
 git clone https://github.com/AminMal/maskit.git
 cd maskit
-
-# Install dependencies
 uv sync
-
-# Run Maskit locally
-uv run maskit
-
-# Run tests
-uv run pytest tests/ -v
 ```
+
+Run Maskit locally:
+
+```bash
+uv run maskit                    # uses ./maskit.yaml if present
+uv run maskit path/to/config.yaml
+```
+
+Then open the dashboard at `http://127.0.0.1:9473`.
+
+## Testing
+
+```bash
+uv run pytest tests/ -v                                                   # all tests
+uv run pytest tests/test_engine.py -v                                     # one module
+uv run pytest tests/test_engine.py::TestMaskingEngine::test_mask_structured_content -v  # one test
+```
+
+New features and bug fixes should come with tests.
+
+## Submitting a change
+
+1. **Fork and branch**: `git checkout -b feature/your-feature-name`
+2. **Code** — follow the conventions of the surrounding files. Python 3.12+, type hints where they clarify intent, docstrings on public APIs. Keep functions focused.
+3. **Test** — run the suite above. Add cases for what you changed.
+4. **Commit** with a clear message describing the *why*, not just the *what*.
+5. **Push** and open a pull request. Reference any related issues.
+
+### Pull request guidelines
+
+- One feature or fix per PR.
+- Update docs (`README.md`, `CLAUDE.md`) if your change affects how Maskit is used or how it's structured.
+- Be responsive to review feedback.
+- For large changes, open an issue first to align on direction before writing code.
+
+## Areas where help is wanted
+
+- **Test coverage** — integration tests, fuzzing, concurrency stress tests
+- **Documentation** — examples, tutorials, architecture diagrams
+- **Edge cases** — binary data, large payloads, streaming responses
+- **Security review** — threat modeling, timing attack analysis
+- **Observability** — metrics, structured logging improvements
+- **Marketplace** — more pre-configured MCP servers in the catalog
+- **Bug fixes** — see the issue tracker
 
 ## License
 
-By contributing to Maskit, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions are licensed under the MIT License.
 
 ## Questions?
 
-Open an issue or reach out to the maintainers. We're here to help!
+Open an issue or start a discussion in the repo — we're happy to help.

@@ -9,133 +9,43 @@
 </p>
 
 <p align="center">
-  <strong>⚠️ Early Stage Project — Not Production-Ready</strong><br>
-  Maskit is under active development. Expect breaking changes and bugs.<br>
-  Contributions and feedback are welcome!
+  <strong>⚠️ Early stage — expect breaking changes.</strong>
 </p>
 
 ---
 
-## Overview
+## What it does
 
-AI coding assistants see everything your MCP tools return — production database hosts, API keys, customer emails, internal infrastructure. Maskit sits between your AI and MCP servers, replacing sensitive values with safe aliases (`host_1`, `email_2`, `api_key_1`) so models never see real data.
+AI coding assistants see everything your MCP tools return — production hostnames, API keys, customer emails. Maskit sits between your AI and your MCP servers and replaces sensitive values with stable aliases (`host_1`, `email_2`, `api_key_1`) so the model never sees the real data. When the agent passes an alias back in a tool call, Maskit swaps in the real value before forwarding.
 
-**Key Features:**
-- 🎭 **Data masking** — Sensitive values replaced with stable aliases
-- 🔐 **Token encryption** — OAuth credentials encrypted at rest (Fernet AES-128)
-- 🛡️ **Guardrails** — Block dangerous operations before they reach servers
-- 💉 **Injections** — Force safe defaults (e.g., `read_only: true`)
-- 🏪 **Marketplace** — One-click server installation with OAuth support
-- 📊 **Dashboard** — Visual tool management and encrypted traffic audit log
-
-## Security Features
-
-### 🎭 Data Masking
-- **Input masking**: Sensitive argument values replaced before AI sees them
-- **Output masking**: Tool responses automatically masked via rules or regex patterns
-- **Stable aliasing**: Same value always gets same alias across sessions
-- **Field stripping**: Remove sensitive fields entirely (SSNs, credit cards, etc.)
-
-### 🛡️ Guardrails & Injections
-- **Guardrails**: Block dangerous operations (`DROP TABLE`, `rm -rf`, force push)
-- **Injections**: Silently enforce safe defaults (`read_only: true`, connection limits)
-- **Hidden tools**: Remove tools from agent access without deleting config
-
-### 🔐 Token Security
-- **Encrypted storage**: OAuth tokens encrypted at rest with Fernet (AES-128)
-- **Encryption key**: Stored at `~/.maskit/.key` (auto-generated on first run)
-- **Auto-refresh**: Expired OAuth tokens automatically refreshed via backend
-- **Path validation**: Server IDs validated to prevent directory traversal
-
-**⚠️ Important: Backup Your Encryption Key**
-
-Your OAuth tokens are encrypted using a key at `~/.maskit/.key`. If you lose this key, **you will lose access to all stored OAuth tokens** and will need to re-authenticate.
-
-```bash
-# Backup your encryption key (KEEP THIS SECURE!)
-cp ~/.maskit/.key ~/.maskit/.key.backup
-
-# Or use an environment variable for key management
-export MASKIT_ENCRYPTION_KEY=$(cat ~/.maskit/.key)
-```
-
-**Key priority:**
-1. `MASKIT_ENCRYPTION_KEY` environment variable (recommended for production)
-2. `~/.maskit/.key` file (auto-generated for local use)
-3. New key generated if neither exists
-
-## Use Cases
-
-✅ **Safe for:**
-- Local development with production tool access
-- Prototyping AI workflows without exposing secrets
-- Testing MCP integrations with sensitive data
-
-⚠️ **Not recommended for:**
-- Production systems handling regulated data (PII, PHI, PCI) without hardening
-- Compliance-critical environments requiring audit trails (SOC 2, HIPAA)
-- Multi-tenant deployments (designed for single-user local use)
-
-## Experimental Features
-
-### 🧪 Dynamic Client Registration (DCR)
-
-**Status: Experimental** — May not work with all OAuth providers
-
-When adding custom HTTP servers with OAuth, Maskit offers two modes:
-- **Dynamic Registration**: Automatically discovers OAuth endpoints and registers a unique client
-- **Manual Credentials**: Provide existing OAuth application credentials (recommended for production)
-
-**Known limitations:**
-- DCR support varies significantly by OAuth provider
-- Some providers require pre-approval, registration tokens, or specific scopes
-- Connection failures may occur with non-standard OAuth implementations
-- **Manual mode is more reliable** if you have existing OAuth credentials
-
-## How it works
+It also lets you block dangerous tool calls (guardrails), force safe defaults (injections), hide tools from agents, and install pre-configured servers from a marketplace.
 
 ```
-AI Host (Claude Code, etc.)
-    │ HTTP (:9474/mcp) or stdio
+AI Agent (Claude, Cursor, …)
+    │  HTTP :9474/{server}/mcp
     ▼
-  Maskit  ──── Web dashboard (http://127.0.0.1:9473)
-    │ stdio / http
+  Maskit  ──  Dashboard :9473
+    │  stdio / HTTP
     ▼
 Real MCP Server
 ```
 
-- Tool responses are intercepted and matched against masking rules and response mappers
-- Matched field values are replaced with stable aliases (same value always gets the same alias)
-- Fields can be stripped entirely from responses (the agent never sees them)
-- When the agent passes an alias back in a tool call, Maskit swaps in the real value before forwarding
-- Argument guardrails block tool calls whose arguments match dangerous patterns (e.g., `DROP TABLE`)
-- Argument injections silently inject or override values before forwarding (e.g., force `read_only: true`)
-- Tools can be hidden per-server, blocking agent access entirely
-
-## Quick Start
-
-### Install from source
+## Quick start
 
 ```bash
 git clone https://github.com/AminMal/maskit.git
 cd maskit
 uv sync
+uv run maskit
 ```
 
-### Run
-
-```bash
-maskit                    # Start with empty config (add servers via UI)
-maskit config.yaml        # Or use a config file
-```
-
-Open `http://127.0.0.1:9473` for the dashboard.
+Then open the dashboard at **http://127.0.0.1:9473** — add servers from the marketplace, connect your AI agent with one click, and configure masking from the UI.
 
 ## Configuration
 
-### Config File (Optional)
+Maskit runs with no config at all — add servers from the dashboard.
 
-Create `maskit.yaml` for pre-configured servers:
+If you'd rather pre-declare servers, drop a `maskit.yaml` next to where you run it:
 
 ```yaml
 targets:
@@ -145,106 +55,80 @@ targets:
       command: uvx
       args: ["mcp-server-time"]
     rules:
-      - tool_name: "get_time"
-        field_path: "timezone"
+      - tool_name: get_time
+        field_path: timezone
 
   slack:
     upstream:
       transport: http
-      url: "https://mcp.slack.com/mcp"
+      url: https://mcp.slack.com/mcp
       oauth:
-        client_id: "your-client-id"
+        client_id: your-client-id
     guardrails:
-      - tool_name: "*"
-        pattern: "DROP TABLE"
+      - pattern: "DROP TABLE"
         message: "Destructive SQL blocked"
     injections:
-      - tool_name: "query_db"
-        argument_name: "read_only"
+      - tool_name: query_db
+        argument_name: read_only
         value: "true"
-        mode: "set"
+        mode: set
 
+# Optional overrides (defaults shown)
 web_port: 9473
 mcp_port: 9474
 oauth_port: 3131
-
-# Optional: Override container runtime (auto-detects docker/podman/nerdctl/finch)
-# container_runtime: "podman"
+# container_runtime: podman    # auto-detected from docker/podman/nerdctl/finch
 ```
 
-**Or skip the config** — install servers via the marketplace or add custom servers through the UI.
-
-### CLI Options
+### CLI
 
 ```bash
-maskit --help                          # Show help
-maskit --version                       # Show version
-maskit --web-port 8080                 # Custom dashboard port
-maskit -w 8080 -m 8081 -o 8082         # Override multiple ports
-maskit --store-path /data/maskit.db    # Custom database location
-maskit config.yaml -w 9000             # Config + override
+maskit                              # use ./maskit.yaml (or start empty)
+maskit path/to/config.yaml          # custom config
+maskit -c path/to/config.yaml       # same, via flag
+maskit -w 9473 -m 9474 -o 3131      # override ports
+maskit -s ~/.maskit/store.db        # override SQLite path
+maskit --version
 ```
 
-### Environment Variables
+### Environment variables
 
-```bash
-MASKIT_HOST=0.0.0.0                    # Bind address (default: 127.0.0.1)
-MASKIT_ENCRYPTION_KEY=<base64-key>     # Override token encryption key
-MASKIT_LOG_FORMAT=json                 # JSON logging for production
-MASKIT_SHUTDOWN_TIMEOUT=30             # Graceful shutdown timeout (seconds)
-MASKIT_TRAFFIC_DB_PATH=/path/traffic.db  # Override traffic audit DB location (default: ~/.maskit/traffic.db)
-MASKIT_TRAFFIC_MAX_ROWS=10000          # Global cap on traffic audit log rows (oldest dropped first)
-MASKIT_ALLOWED_ORIGINS=https://a,https://b  # Extra origins permitted to call /api/* (comma-separated). The dashboard's localhost origin is always allowed.
-```
+| Variable | Purpose |
+|---|---|
+| `MASKIT_HOST` | Bind address (default `127.0.0.1`; Docker image uses `0.0.0.0`) |
+| `MASKIT_ENCRYPTION_KEY` | Override the at-rest encryption key (otherwise read from `~/.maskit/.key`) |
+| `MASKIT_LOG_FORMAT` | `text` (default) or `json` |
+| `MASKIT_SHUTDOWN_TIMEOUT` | Graceful shutdown deadline in seconds (default 30) |
+| `MASKIT_TRAFFIC_DB_PATH` | Path to the traffic audit database (default `~/.maskit/traffic.db`) |
+| `MASKIT_TRAFFIC_MAX_ROWS` | Cap on stored audit rows (default 10000, oldest evicted first) |
+| `MASKIT_ALLOWED_ORIGINS` | Comma-separated extra origins allowed to call `/api/*` |
 
-### Backup and Data Safety
+## Dashboard
 
-**What to backup:**
+Everything is configurable from the UI at `http://127.0.0.1:9473`:
 
-1. **Encryption key**: `~/.maskit/.key` (required to decrypt OAuth tokens AND the traffic audit log)
-2. **Database**: `~/.maskit/store.db` (masking rules, aliases, server configs)
-3. **Traffic audit log** (optional): `~/.maskit/traffic.db` — historical tool calls. Safe to drop; losing it doesn't break Maskit.
+- **Marketplace** — one-click install of pre-configured MCP servers (with OAuth where needed).
+- **Custom servers** — add stdio or HTTP servers at runtime; deactivate or delete without losing config.
+- **Tools** — browse schemas, try calls, hide tools from agents, set per-tool masking rules, regex output mappers, guardrails, and argument injections.
+- **Traffic** — encrypted, paginated audit log of recent calls.
 
-```bash
-# Backup both critical files
-cp ~/.maskit/.key ~/backups/maskit-key.backup
-cp ~/.maskit/store.db ~/backups/maskit-db-$(date +%Y%m%d).db
+Connect an AI agent to a server with the "Connect Agent" button on its page — it generates the snippet for Claude Code, Cursor, VS Code, Windsurf, JetBrains, Codex, or OpenCode.
 
-# Restore from backup
-cp ~/backups/maskit-key.backup ~/.maskit/.key
-cp ~/backups/maskit-db-20260524.db ~/.maskit/store.db
-```
-### Production Features
+> 💡 **Built-in tutorials.** Each configuration panel in the dashboard has a small help icon next to its title. Click it for a guided, step-by-step walkthrough of input masking, output mappers, guardrails, injections, and hiding tools — no docs to dig through.
 
-**Health Endpoint:**
-```bash
-curl http://127.0.0.1:9473/health
-# Returns: { "status": "healthy", "uptime_seconds": 123.45, "targets": [...] }
-```
+## Highlights
 
-**JSON Logging:**
-```bash
-MASKIT_LOG_FORMAT=json maskit  # For log aggregation systems
-```
+A few things worth knowing about:
 
-**Graceful Shutdown:**
-Maskit drains in-flight requests, flushes database, and exits cleanly on SIGINT/SIGTERM.
-
-### Connect AI Agents
-
-The "Connect Agent" in the dashboard helps you connect your MCP servers to your AI agents.
-
-## Container Runtime Support
-
-Maskit automatically detects and works with different container runtimes:
-
-- **Auto-detection**: Automatically detects Docker, Podman, nerdctl, or Finch at startup
-- **Transparent substitution**: Commands starting with `docker` are automatically converted to use your installed runtime
-- **Configuration override**: Optionally specify runtime in `maskit.yaml` with `container_runtime: "podman"`
-
-**Example:** If you have Podman installed, marketplace servers like `docker run ghcr.io/example/mcp-server` automatically become `podman run ghcr.io/example/mcp-server`.
-
-This means containerized MCP servers work seamlessly regardless of which container runtime you use!
+- **Container runtime auto-detection** — Marketplace servers shipped as `docker run …` automatically run on Podman, nerdctl, or Finch if that's what you have. No flag needed; override with `container_runtime` in `maskit.yaml` if you want to pin a specific one.
+- **Container lifecycle management** — When you deactivate, delete, or stop Maskit, any containers it spawned are stopped with it. No orphaned containers sitting around using ports.
+- **Stable aliases across restarts** — `prod-db.internal.net` always becomes `host_1`, the same alias your agent saw last week. Aliases are persisted, so multi-turn conversations stay coherent.
+- **Encrypted traffic audit log** — Every tool call is recorded with its unmasked args and response, Fernet-encrypted at rest. Lazy-loaded from the UI on demand and capped at 10k rows by default.
+- **OAuth with Dynamic Client Registration** (experimental) — Adding an HTTP server that supports DCR? Maskit can discover its OAuth endpoints and register a client automatically. Manual credentials are also supported and more reliable for providers that don't fully implement DCR.
+- **Hot add/remove servers** — Marketplace installs, custom server adds, deactivations, and deletes all happen live. No restart needed.
+- **Argument guardrails and injections** — Block `DROP TABLE` before it leaves your machine; silently inject `read_only: true` on every database call.
+- **Field stripping** — Some fields shouldn't be aliased, they should just be gone. SSNs, credit cards — strip them from responses entirely.
+- **Localhost-safe by default** — `Origin` allow-listing, CSRF protection, and OAuth `state` validation are on out of the box, so a malicious webpage can't reach into your local Maskit.
 
 ## Docker
 
@@ -253,109 +137,23 @@ docker build -t maskit .
 docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 maskit
 ```
 
-**Ports:** 9473 (dashboard), 9474 (MCP), 3131 (OAuth callback)
+The container supports HTTP-based MCP servers. For stdio servers (`uvx`, `npx`), run Maskit natively.
 
-⚠️ **Limitation:** Docker only supports HTTP-based MCP servers. For stdio servers (`uvx`, `npx`), run Maskit natively.
+## Data safety
 
-## Dashboard Features
+Two files matter:
 
-Open `http://127.0.0.1:9473` to:
+- `~/.maskit/.key` — encrypts OAuth tokens and the traffic audit log. **Back this up.** Lose it and you'll re-authenticate every server.
+- `~/.maskit/store.db` — masking rules, aliases, server configs.
 
-- **Marketplace**: Install pre-configured servers (Slack, GitHub, etc.) with OAuth
-- **Custom servers**: Add stdio/HTTP servers at runtime
-- **Server lifecycle**: Deactivate/activate servers without losing configuration, permanently delete custom servers
-- **Inactive servers**: View and manage deactivated servers in a separate section
-- **Tool management**: Browse schemas, hide tools, test tool calls
-- **Masking rules**: Configure input/output masking per tool
-- **Guardrails**: Block dangerous operations by pattern
-- **Injections**: Force safe argument defaults
-- **Traffic audit log**: Inspect recent tool calls on demand — encrypted at rest, paginated, lazily loaded (click "Load traffic" to fetch)
+`~/.maskit/traffic.db` is the audit log; safe to drop.
 
-### Server States
-
-Servers can be in three states:
-- **Active**: Connected and running
-- **Inactive**: Disconnected but configuration retained, can be reactivated
-- **Deleted**: Permanently removed (custom servers only)
-
-The Servers page shows both active and inactive servers in separate sections. You can temporarily deactivate any server (marketplace or custom) without losing its configuration, then reactivate it later with one click.
-
-## Configuration Reference
-
-### Rules (Input/Output Masking)
-
-| Field | Description |
-|-------|-------------|
-| `tool_name` | Tool to apply to (`*` = all tools) |
-| `field_path` | Dot-notation path (e.g., `user.email`, `connection.host`) |
-| `alias_prefix` | Custom prefix (default: `_masked_{field}`) |
-| `action` | `mask` (replace with alias) or `strip` (remove entirely) |
-
-### Guardrails (Block Dangerous Operations)
-
-| Field | Description |
-|-------|-------------|
-| `tool_name` | Tool to protect (`*` = all, default) |
-| `argument_name` | Argument to check (`*` = scan all recursively, default) |
-| `match_type` | `contains`, `equals`, or `regex` (default: `contains`) |
-| `pattern` | Pattern to block (e.g., `DROP TABLE`, `rm -rf`) |
-| `message` | Error message shown to agent |
-
-### Injections (Force Safe Defaults)
-
-| Field | Description |
-|-------|-------------|
-| `tool_name` | Tool to inject into (`*` = all, default) |
-| `argument_name` | Argument key to set |
-| `value` | JSON-encoded value (`"true"`, `"100"`, `"\"hello\""`) |
-| `mode` | `set` (always), `default` (if missing), `append` (for arrays/strings) |
-
-### Response Mappers (Pattern-Based Masking)
-
-| Type | Description |
-|------|-------------|
-| `regex_replace` | Regex pattern masking (e.g., `\b[A-Z0-9]{32}\b` for API keys) |
-| `json_field_mask` | JSON path masking (e.g., `response.data.token`) |
-
-## Architecture
-
-```
-┌─────────────────────┐
-│  AI Agent           │
-│  (Claude/Cursor)    │
-└──────────┬──────────┘
-           │ HTTP :9474/{server}/mcp
-           ▼
-┌─────────────────────┐      ┌──────────────┐
-│  Maskit Proxy       │◄────►│  Dashboard   │
-│                     │      │  :9473       │
-│  • Mask/unmask      │      └──────────────┘
-│  • Guardrails       │
-│  • Token encryption │
-│  • Traffic logs     │
-└──────────┬──────────┘
-           │ stdio/HTTP
-           ▼
-┌─────────────────────┐
-│  Real MCP Server    │
-│  (Slack, GitHub,    │
-│   Postgres, etc.)   │
-└─────────────────────┘
-```
-
-## Development
-
-```bash
-git clone https://github.com/AminMal/maskit.git
-cd maskit
-uv sync
-uv run pytest tests/ -v
-```
+For production-style setups, hold the key in `MASKIT_ENCRYPTION_KEY` instead of on disk.
 
 ## Contributing
 
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Bug reports, feature requests, and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
