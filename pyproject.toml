@@ -31,6 +31,7 @@ dependencies = [
     "pydantic>=2.0",
     "anyio>=4.0",
     "cryptography>=48.0.0",  # For OAuth token encryption
+    "pyahocorasick>=2.0.0",
 ]
 
 [project.urls]

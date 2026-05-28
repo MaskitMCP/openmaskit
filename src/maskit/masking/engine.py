@@ -7,6 +7,8 @@ import logging
 import re
 from typing import Any
 
+import ahocorasick
+
 from maskit.masking.mappers import ResponseMapper
 from maskit.masking.parsing import serialize, try_parse_structured
 from maskit.masking.rules import (
@@ -34,7 +36,8 @@ class MaskingEngine:
         self._target_name = target_name
         self._alias_cache: dict[str, str] = {}  # alias -> real_value
         self._reverse_cache: dict[str, dict[str, str]] = {}  # (field_path, real_value) -> alias
-        self._sorted_aliases: list[tuple[str, str]] = []  # sorted by alias length desc
+        self._automaton: ahocorasick.Automaton | None = None
+        self._aliases_dirty: bool = True
         self._pending_writes: list[tuple[str, str, str, str]] = []
         self._counters: dict[str, int] = {}
         self._mappers: list[ResponseMapper] = []
@@ -250,12 +253,21 @@ class MaskingEngine:
                 self._counters[prefix] = max(
                     self._counters.get(prefix, 0), int(parts[1])
                 )
-        self._rebuild_sorted_aliases()
+        self._aliases_dirty = True
 
-    def _rebuild_sorted_aliases(self):
-        self._sorted_aliases = sorted(
-            self._alias_cache.items(), key=lambda x: len(x[0]), reverse=True
-        )
+    def _ensure_automaton(self) -> ahocorasick.Automaton | None:
+        if not self._aliases_dirty:
+            return self._automaton
+        if not self._alias_cache:
+            self._automaton = None
+        else:
+            A = ahocorasick.Automaton()
+            for alias, real_value in self._alias_cache.items():
+                A.add_word(alias, (alias, real_value))
+            A.make_automaton()
+            self._automaton = A
+        self._aliases_dirty = False
+        return self._automaton
 
     async def load_mappers(self):
         """Load response mappers from store and compile patterns."""
@@ -341,7 +353,7 @@ class MaskingEngine:
         self._alias_cache[new_alias] = real_value
         self._reverse_cache.setdefault(prefix, {})[real_value] = new_alias
         self._pending_writes.append((new_alias, real_value, tool_name, field_path))
-        self._rebuild_sorted_aliases()
+        self._aliases_dirty = True
         return new_alias
 
     def _mask_content_block(
@@ -376,10 +388,22 @@ class MaskingEngine:
         if isinstance(data, str):
             if data in self._alias_cache:
                 return self._alias_cache[data]
-            for alias, real_value in self._sorted_aliases:
-                if alias in data:
-                    data = data.replace(alias, real_value)
-            return data
+            automaton = self._ensure_automaton()
+            if automaton is None:
+                return data
+            parts: list[str] = []
+            last_end = 0
+            matched = False
+            for end_idx, (alias, real_value) in automaton.iter_long(data):
+                start = end_idx - len(alias) + 1
+                parts.append(data[last_end:start])
+                parts.append(real_value)
+                last_end = end_idx + 1
+                matched = True
+            if not matched:
+                return data
+            parts.append(data[last_end:])
+            return "".join(parts)
         elif isinstance(data, dict):
             return {k: self._unmask_recursive(v) for k, v in data.items()}
         elif isinstance(data, list):

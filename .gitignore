@@ -19,3 +19,4 @@ wheels/
 .bsp
 
 .codegraph
+bench_unmask.py
