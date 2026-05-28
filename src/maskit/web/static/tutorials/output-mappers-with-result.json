@@ -23,13 +23,8 @@
             "position": "bottom"
         },
         {
-            "text": "Click 'Preview' to test your regex on the actual tool response above. You'll see exactly what gets masked before saving!",
+            "text": "Click 'Preview' to test your regex on the actual tool response above. You'll see exactly what gets masked, and a 'Save Mapper' button will appear next to it — click that to apply the rule to all future responses.",
             "target": "button:contains('Preview')",
-            "position": "top"
-        },
-        {
-            "text": "If the preview looks good, click 'Save Mapper'. From now on, this pattern is automatically masked in all responses!",
-            "target": "button:contains('Save Mapper')",
             "position": "top"
         }
     ]

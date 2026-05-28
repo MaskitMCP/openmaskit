@@ -13,12 +13,7 @@
             "position": "bottom"
         },
         {
-            "text": "Choose match type: 'contains' (case-insensitive substring), 'equals' (exact match), or 'regex' (pattern matching).",
-            "target": "select[x-model='newGuardrail.match_type']",
-            "position": "bottom"
-        },
-        {
-            "text": "Enter the pattern to block (e.g., 'DROP TABLE', 'prod', '.*DELETE.*'). Tool calls matching this pattern will be rejected.",
+            "text": "Pick a match type and enter the pattern. 'contains' matches case-insensitive substrings ('DROP TABLE'), 'equals' requires an exact match, 'regex' matches a regular expression ('.*DELETE.*'). Tool calls matching this pattern will be rejected.",
             "target": "input[x-model='newGuardrail.pattern']",
             "position": "top"
         },

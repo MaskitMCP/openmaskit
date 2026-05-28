@@ -8,12 +8,7 @@
             "position": "bottom"
         },
         {
-            "text": "First, use 'Try It Out' above to call your tool and see a real response. This helps you identify what patterns need masking!",
-            "target": ".try-it-section",
-            "position": "bottom"
-        },
-        {
-            "text": "After calling the tool, come back here. Enter a regex pattern to match sensitive values. Example: '\\b[A-Z0-9]{32}\\b' for 32-char API keys.",
+            "text": "Call your tool in 'Try It Out' first to see a real response. Once you have one, this section will let you add a regex (e.g. '\\b[A-Z0-9]{32}\\b' for 32-char API keys) and preview the matches before saving.",
             "target": ".section-hint:contains('Call the tool')",
             "position": "bottom"
         }
