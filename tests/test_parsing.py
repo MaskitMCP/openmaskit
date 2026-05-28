@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maskit.masking.parsing import _convert_tuples, try_parse_structured
+from openmaskit.masking.parsing import _convert_tuples, try_parse_structured
 
 
 class TestTryParseStructured:

@@ -25,13 +25,13 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.rules import MaskingRule
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.proxy.http_downstream import create_mcp_app
-from maskit.web.app import create_app
-from maskit.web.origin import OriginMiddleware, default_localhost_origins
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.rules import MaskingRule
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.proxy.http_downstream import create_mcp_app
+from openmaskit.web.app import create_app
+from openmaskit.web.origin import OriginMiddleware, default_localhost_origins
 
 
 ALLOWED = "http://127.0.0.1:9473"
@@ -366,8 +366,8 @@ class TestWebAppIntegration:
 
     @pytest.mark.anyio
     async def test_custom_allowed_origins_via_env_equivalent(self, web_state):
-        """Pass allowed_origins explicitly to mirror the MASKIT_ALLOWED_ORIGINS path."""
-        extra = "https://maskit.example.com"
+        """Pass allowed_origins explicitly to mirror the OPENMASKIT_ALLOWED_ORIGINS path."""
+        extra = "https://openmaskit.example.com"
         app = create_app(
             web_state,
             allowed_origins=default_localhost_origins(9473) + [extra],

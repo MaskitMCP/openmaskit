@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.mappers import ResponseMapper
-from maskit.masking.rules import MaskingRule
-from maskit.masking.store import MaskingStore
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.mappers import ResponseMapper
+from openmaskit.masking.rules import MaskingRule
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest.fixture

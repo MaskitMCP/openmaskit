@@ -20,8 +20,8 @@ htmlcov/
 .DS_Store
 */.DS_Store
 
-# Local Maskit config (root-level only)
-/maskit*.yaml
+# Local OpenMaskit config (root-level only)
+/openmaskit*.yaml
 
 # Jetbrains related files
 .idea

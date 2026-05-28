@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-from maskit.security import read_token_file
-from maskit.proxy.upstream import (
+from openmaskit.security import read_token_file
+from openmaskit.proxy.upstream import (
     _is_self_managed_oauth,
     _load_backend_oauth_token,
     _load_backend_oauth_tokens,
@@ -234,7 +234,7 @@ class TestUpstreamConfigParsing:
 
     def test_stdio_config_basic(self):
         """Parse basic stdio configuration."""
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         config = {
             "transport": "stdio",
@@ -250,7 +250,7 @@ class TestUpstreamConfigParsing:
 
     def test_stdio_config_with_env(self):
         """Parse stdio configuration with environment variables."""
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         config = {
             "transport": "stdio",
@@ -267,7 +267,7 @@ class TestUpstreamConfigParsing:
 
     def test_stdio_config_with_user_args(self):
         """Parse stdio configuration with user-provided arguments."""
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         config = {
             "transport": "stdio",
@@ -299,7 +299,7 @@ class TestUpstreamConfigParsing:
 
     def test_http_config_basic(self):
         """Parse basic HTTP configuration."""
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         config = {
             "transport": "http",
@@ -313,7 +313,7 @@ class TestUpstreamConfigParsing:
 
     def test_http_config_with_oauth(self):
         """Parse HTTP configuration with OAuth."""
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         config = {
             "transport": "http",
@@ -333,7 +333,7 @@ class TestUpstreamConfigParsing:
 
     def test_merge_user_args_single_value(self):
         """Merge user args with single value."""
-        from maskit.proxy.manager import _merge_user_args
+        from openmaskit.proxy.manager import _merge_user_args
 
         base_args = ["--base"]
         config = {
@@ -353,7 +353,7 @@ class TestUpstreamConfigParsing:
 
     def test_merge_user_args_multiple_values(self):
         """Merge user args with multiple values."""
-        from maskit.proxy.manager import _merge_user_args
+        from openmaskit.proxy.manager import _merge_user_args
 
         base_args = []
         config = {
@@ -376,7 +376,7 @@ class TestUpstreamConfigParsing:
 
     def test_merge_user_args_empty_meta(self):
         """Handle config without meta.user_args."""
-        from maskit.proxy.manager import _merge_user_args
+        from openmaskit.proxy.manager import _merge_user_args
 
         base_args = ["--existing"]
         config = {}
@@ -387,7 +387,7 @@ class TestUpstreamConfigParsing:
 
     def test_merge_user_args_missing_arg_format(self):
         """Skip user args without arg_format."""
-        from maskit.proxy.manager import _merge_user_args
+        from openmaskit.proxy.manager import _merge_user_args
 
         base_args = ["--base"]
         config = {
@@ -408,7 +408,7 @@ class TestUpstreamConfigParsing:
 
     def test_merge_user_args_preserves_order(self):
         """Preserve base args order and append user args."""
-        from maskit.proxy.manager import _merge_user_args
+        from openmaskit.proxy.manager import _merge_user_args
 
         base_args = ["cmd", "--flag1", "val1", "--flag2"]
         config = {
@@ -447,7 +447,7 @@ class TestIsSelfManagedOAuth:
     from self-managed (DCR / manual custom) tokens. Files written by the
     OAuthClientProvider flow contain a `client_info` block; backend-managed
     files do not. This must be correct because it gates whether we hit the
-    Maskit auth backend or refresh against the upstream provider directly.
+    OpenMaskit auth backend or refresh against the upstream provider directly.
     """
 
     def test_returns_true_when_client_info_present(self, tmp_path):

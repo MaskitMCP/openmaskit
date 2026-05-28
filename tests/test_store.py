@@ -2,8 +2,8 @@
 
 import pytest
 
-from maskit.masking.rules import MaskingRule
-from maskit.masking.store import MaskingStore
+from openmaskit.masking.rules import MaskingRule
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest.fixture
@@ -94,7 +94,7 @@ class TestSQLInjectionProtection:
     @pytest.mark.anyio
     async def test_update_guardrail_rejects_invalid_fields(self, store):
         """update_guardrail only accepts whitelisted field names."""
-        from maskit.masking.rules import ArgumentGuardrail
+        from openmaskit.masking.rules import ArgumentGuardrail
 
         # First add a guardrail
         guardrail = ArgumentGuardrail(
@@ -127,7 +127,7 @@ class TestSQLInjectionProtection:
     @pytest.mark.anyio
     async def test_update_guardrail_whitelist_validation(self, store):
         """update_guardrail only updates fields in the allowed set."""
-        from maskit.masking.rules import ArgumentGuardrail
+        from openmaskit.masking.rules import ArgumentGuardrail
 
         guardrail = ArgumentGuardrail(
             tool_name="test_tool",
@@ -167,7 +167,7 @@ class TestSQLInjectionProtection:
     @pytest.mark.anyio
     async def test_update_injection_rejects_invalid_fields(self, store):
         """update_injection only accepts whitelisted field names."""
-        from maskit.masking.rules import ArgumentInjection
+        from openmaskit.masking.rules import ArgumentInjection
         import json
 
         injection = ArgumentInjection(
@@ -200,7 +200,7 @@ class TestSQLInjectionProtection:
     @pytest.mark.anyio
     async def test_update_injection_whitelist_validation(self, store):
         """update_injection only updates fields in the allowed set."""
-        from maskit.masking.rules import ArgumentInjection
+        from openmaskit.masking.rules import ArgumentInjection
         import json
 
         injection = ArgumentInjection(
@@ -230,7 +230,7 @@ class TestSQLInjectionProtection:
     @pytest.mark.anyio
     async def test_parameterized_values_prevent_injection(self, store):
         """Values are properly parameterized, preventing injection via values."""
-        from maskit.masking.rules import ArgumentGuardrail
+        from openmaskit.masking.rules import ArgumentGuardrail
 
         guardrail = ArgumentGuardrail(
             tool_name="test",

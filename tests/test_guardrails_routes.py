@@ -4,11 +4,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.rules import ArgumentGuardrail
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.web.app import create_app
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.rules import ArgumentGuardrail
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.web.app import create_app
 
 
 @pytest_asyncio.fixture

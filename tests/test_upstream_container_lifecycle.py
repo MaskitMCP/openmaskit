@@ -3,7 +3,7 @@
 Pin the contract that for stdio upstreams whose command is a container `run`:
   * pre-start sweep of orphan containers runs first
   * `--name` is injected (or user's is preserved) before stdio_client starts
-  * `--label maskit.server_id=<id>` is always injected
+  * `--label openmaskit.server_id=<id>` is always injected
   * `stop_container` runs on context exit — normal exit AND exception path
   * no rm is ever called (verified via `stop_container` being a recorded mock)
   * missing `--rm` logs a WARNING but does not block
@@ -20,11 +20,11 @@ from typing import Any
 
 import pytest
 
-from maskit import container as container_mod
-from maskit.container import MASKIT_LABEL_KEY, MASKIT_NAME_PREFIX
-from maskit.models import UpstreamStdioConfig
-from maskit.proxy import upstream as upstream_mod
-from maskit.proxy.upstream import connect_upstream
+from openmaskit import container as container_mod
+from openmaskit.container import OPENMASKIT_LABEL_KEY, OPENMASKIT_NAME_PREFIX
+from openmaskit.models import UpstreamStdioConfig
+from openmaskit.proxy import upstream as upstream_mod
+from openmaskit.proxy.upstream import connect_upstream
 
 
 # --------------------------------- Test doubles ------------------------------
@@ -111,9 +111,9 @@ class TestContainerInjection:
         assert params.args == [
             "run",
             "--label",
-            f"{MASKIT_LABEL_KEY}=slack-7f3a",
+            f"{OPENMASKIT_LABEL_KEY}=slack-7f3a",
             "--name",
-            f"{MASKIT_NAME_PREFIX}slack-7f3a",
+            f"{OPENMASKIT_NAME_PREFIX}slack-7f3a",
             "--rm",
             "-i",
             "ghcr.io/foo/mcp",
@@ -156,7 +156,7 @@ class TestContainerInjection:
             pass
 
         params = fake_stdio.calls[0].params
-        assert f"{MASKIT_LABEL_KEY}=svc" in params.args
+        assert f"{OPENMASKIT_LABEL_KEY}=svc" in params.args
 
     @pytest.mark.anyio
     async def test_sweep_runs_before_stdio_client(self, fakes, tmp_path):
@@ -203,7 +203,7 @@ class TestContainerCleanup:
         ):
             pass
 
-        assert rec.stop_calls == [("docker", f"{MASKIT_NAME_PREFIX}svc")]
+        assert rec.stop_calls == [("docker", f"{OPENMASKIT_NAME_PREFIX}svc")]
 
     @pytest.mark.anyio
     async def test_stop_called_on_exception_during_yield(self, fakes, tmp_path):
@@ -218,7 +218,7 @@ class TestContainerCleanup:
                 pass
 
         # Cleanup must still have fired despite the exception.
-        assert rec.stop_calls == [("docker", f"{MASKIT_NAME_PREFIX}svc")]
+        assert rec.stop_calls == [("docker", f"{OPENMASKIT_NAME_PREFIX}svc")]
 
     @pytest.mark.anyio
     async def test_stop_called_when_caller_raises(self, fakes, tmp_path):
@@ -231,7 +231,7 @@ class TestContainerCleanup:
             ):
                 raise ValueError("caller fail")
 
-        assert rec.stop_calls == [("docker", f"{MASKIT_NAME_PREFIX}svc")]
+        assert rec.stop_calls == [("docker", f"{OPENMASKIT_NAME_PREFIX}svc")]
 
 
 class TestMissingRmWarning:
@@ -354,7 +354,7 @@ class TestRuntimeSubstitution:
             pass
 
         # Stop call targets podman, not the original docker.
-        assert rec.stop_calls == [("podman", f"{MASKIT_NAME_PREFIX}svc")]
+        assert rec.stop_calls == [("podman", f"{OPENMASKIT_NAME_PREFIX}svc")]
         assert rec.sweep_calls == [("podman", "svc")]
 
 
@@ -381,7 +381,7 @@ class TestYieldedContainerInfo:
         ) as yielded:
             assert isinstance(yielded, tuple) and len(yielded) == 3
             _, _, container_info = yielded
-            assert container_info == ("docker", f"{MASKIT_NAME_PREFIX}svc")
+            assert container_info == ("docker", f"{OPENMASKIT_NAME_PREFIX}svc")
 
     @pytest.mark.anyio
     async def test_container_yield_uses_user_name(self, fakes, tmp_path):

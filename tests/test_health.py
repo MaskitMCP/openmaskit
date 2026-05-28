@@ -4,10 +4,10 @@ import pytest
 from collections import deque
 from starlette.testclient import TestClient
 
-from maskit.web.app import create_app
-from maskit.proxy.core import ProxyState, TargetState, ResponseDispatcher
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.store import MaskingStore
+from openmaskit.web.app import create_app
+from openmaskit.proxy.core import ProxyState, TargetState, ResponseDispatcher
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ def test_json_logging_format():
     """JSON formatter produces valid JSON logs."""
     import logging
     from io import StringIO
-    from maskit.logging_config import JSONFormatter
+    from openmaskit.logging_config import JSONFormatter
 
     # Create logger with JSON formatter
     stream = StringIO()

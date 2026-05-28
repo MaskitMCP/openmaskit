@@ -2,23 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What is Maskit
+## What is OpenMaskit
 
-Maskit is an MCP (Model Context Protocol) server proxy that sits between an AI host (e.g., Claude Code) and a real MCP server. It intercepts tool call responses to mask sensitive field values (replacing `prod-db.internal.net` with `host_1`) and unmasks them when the agent sends those aliases back in tool call arguments.
+OpenMaskit is an MCP (Model Context Protocol) server proxy that sits between an AI host (e.g., Claude Code) and a real MCP server. It intercepts tool call responses to mask sensitive field values (replacing `prod-db.internal.net` with `host_1`) and unmasks them when the agent sends those aliases back in tool call arguments.
 
 ## Deployment model (important for security reasoning)
 
-Maskit runs **locally on the user's own machine** — like a CLI dev tool (Docker Desktop, Jupyter, a local DB client). It is **not a hosted service**, the Python backend is **not deployed anywhere**, and the FE↔Python channel is a localhost link on the same machine. So:
+OpenMaskit runs **locally on the user's own machine** — like a CLI dev tool (Docker Desktop, Jupyter, a local DB client). It is **not a hosted service**, the Python backend is **not deployed anywhere**, and the FE↔Python channel is a localhost link on the same machine. So:
 
 - **Localhost-only auth on the Web UI / API / MCP endpoint is not required.** The user already owns the machine.
-- **Running arbitrary subprocesses (stdio targets, `docker run ...` from the marketplace) is not RCE in any meaningful sense.** Maskit is a UI for commands the user would otherwise type into their own terminal — it confers no privilege the user doesn't already have.
+- **Running arbitrary subprocesses (stdio targets, `docker run ...` from the marketplace) is not RCE in any meaningful sense.** OpenMaskit is a UI for commands the user would otherwise type into their own terminal — it confers no privilege the user doesn't already have.
 - **Multi-user shared-machine threats (other local users reading token files, etc.) are out of scope** unless explicitly raised.
 
 The threats that **do** still matter, even for a local tool:
 
 - **Browser-based cross-origin attacks against localhost.** A malicious webpage the user visits can `fetch()`/`WebSocket` against `127.0.0.1:9473`/`9474`/`3131` and exfiltrate secrets. This is the canonical "localhost service" attack class (cf. the Docker daemon, ethdev wallets, etc.). CSRF tokens, `Origin` header checks on POST and WS, and not echoing the alias map / unmasked previews to API callers are all still required.
 - **OAuth callback integrity** — the OAuth flow physically goes through the browser, so `state` validation and code-injection defenses still apply.
-- **Malicious upstream MCP server** — Maskit talks to third-party MCP servers; their responses must not be able to crash the proxy, ReDoS the masking engine, or poison persistent state.
+- **Malicious upstream MCP server** — OpenMaskit talks to third-party MCP servers; their responses must not be able to crash the proxy, ReDoS the masking engine, or poison persistent state.
 - **Correctness bugs** (mask/unmask collisions, races, leaks) — same as any other software.
 
 When reviewing security findings, classify by whether the attacker is (a) the local user themselves [out of scope], (b) a malicious upstream MCP server [in scope], or (c) a webpage in the user's browser / a remote OAuth peer [in scope].
@@ -29,13 +29,13 @@ When reviewing security findings, classify by whether the attacker is (a) the lo
 uv sync                          # Install dependencies
 uv run pytest tests/ -v          # Run all tests
 uv run pytest tests/test_engine.py::TestMaskingEngine::test_mask_structured_content -v  # Single test
-uv run maskit                    # Run with ./maskit.yaml
-uv run maskit path/to/config.yaml  # Run with custom config
+uv run openmaskit                    # Run with ./openmaskit.yaml
+uv run openmaskit path/to/config.yaml  # Run with custom config
 ```
 
 ## Naming
 
-The UI says "Servers" but the codebase uses "target" everywhere (classes, DB columns, API routes, variables). They mean the same thing — an upstream MCP server that Maskit proxies to. "Server" is the user-facing term; "target" is the internal term. Do not rename internal code.
+The UI says "Servers" but the codebase uses "target" everywhere (classes, DB columns, API routes, variables). They mean the same thing — an upstream MCP server that OpenMaskit proxies to. "Server" is the user-facing term; "target" is the internal term. Do not rename internal code.
 
 ## Architecture
 
@@ -80,11 +80,11 @@ HTTP clients (MCP endpoint and web UI "Try it out") register a waiter by request
 
 ### Traffic audit log (`traffic/`)
 
-Tool-call records are persisted to a **separate** SQLite database (`~/.maskit/traffic.db`, configurable via `MASKIT_TRAFFIC_DB_PATH`) so rotation/vacuum is isolated and a corrupt traffic DB can't kill masking config.
+Tool-call records are persisted to a **separate** SQLite database (`~/.openmaskit/traffic.db`, configurable via `OPENMASKIT_TRAFFIC_DB_PATH`) so rotation/vacuum is isolated and a corrupt traffic DB can't kill masking config.
 
 - **`TrafficStore` (`traffic/store.py`)** — async aiosqlite wrapper. Opens with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` for low-latency batched writes (WAL is critical here — the flush loop writes every 1s and rotation deletes are concurrent with reads from the GET endpoint). Unmasked args + unmasked response columns are encrypted at rest using the shared Fernet key from `security.TokenEncryption`. Masked args/response columns are plaintext (safe to read without the key).
 - **`TrafficBuffer` (`traffic/buffer.py`)** — process-wide in-memory queue. `_intercept_response` (and the two block paths in `_intercept_request`) call `target.traffic_buffer.append(...)` synchronously on **terminal state only** — there are no pending/in-flight rows. `_traffic_flush_loop` in `__main__.py` drains the buffer to the store every 1s. This mirrors the `MaskingEngine._pending_writes` + `_flush_loop` idiom.
-- **Rotation** — `_traffic_rotation_loop` enforces a global row cap (`MASKIT_TRAFFIC_MAX_ROWS`, default 10000) every 5 minutes by deleting the oldest rows beyond the cap.
+- **Rotation** — `_traffic_rotation_loop` enforces a global row cap (`OPENMASKIT_TRAFFIC_MAX_ROWS`, default 10000) every 5 minutes by deleting the oldest rows beyond the cap.
 - **Lazy UI** — there is no WebSocket stream. The dashboard fetches pages on demand via `GET /api/targets/{target_name}/traffic?limit=&before=<id>`. The endpoint flushes the buffer before reading so the response reflects the latest writes.
 - **Status values** — `ok`, `error`, `blocked`. Blocked entries (hidden tool or guardrail violation) record the unmasked args (encrypted) and put the block reason into `masked_response`.
 
@@ -120,7 +120,7 @@ The `try_parse_structured` utility attempts JSON first, then falls back to `ast.
 
 Two SQLite databases:
 
-**`~/.maskit/store.db`** (masking config + state):
+**`~/.openmaskit/store.db`** (masking config + state):
 - `mappings` — alias ↔ real_value (persists across restarts so the same real value always gets the same alias)
 - `rules` — masking rules created via Web UI (merged with config-file rules at startup), supports `action` column (`mask` or `strip`)
 - `response_mappers` — output mapper configs (regex or json_field_mask) with optional `config` JSON column
@@ -129,7 +129,7 @@ Two SQLite databases:
 - `injections` — argument injection rules that inject/override values before forwarding
 - `mcp_servers` — marketplace and custom servers (id, name, config JSON, active flag). Used for both marketplace installs and custom targets added via the UI
 
-**`~/.maskit/traffic.db`** (audit log, separate file by design):
+**`~/.openmaskit/traffic.db`** (audit log, separate file by design):
 - `traffic` — one row per terminal-state tool call. Columns: `id`, `ts`, `target_name`, `tool_name`, `request_id`, `status`, `duration_ms`, `args_enc` (BLOB, Fernet), `response_enc` (BLOB, Fernet), `masked_args` (TEXT), `masked_resp` (TEXT). Indexed on `(target_name, id DESC)`.
 
 ### Marketplace
@@ -155,11 +155,11 @@ Shared OAuth 2.1 callback server running on port 3131. Used by HTTP upstream tar
 
 ### Bind host
 
-All servers (web, MCP, OAuth callback) bind to the address in `MASKIT_HOST` env var (default `127.0.0.1`). The Dockerfile sets this to `0.0.0.0` so the container is accessible from the host.
+All servers (web, MCP, OAuth callback) bind to the address in `OPENMASKIT_HOST` env var (default `127.0.0.1`). The Dockerfile sets this to `0.0.0.0` so the container is accessible from the host.
 
 ## Configuration
 
-`maskit.yaml` at project root. Upstream supports `stdio` transport (spawns child process) and `http` transport (connects to remote MCP server with optional OAuth 2.1). If no config file exists, Maskit starts with no pre-configured targets (marketplace/custom targets can still be added via UI).
+`openmaskit.yaml` at project root. Upstream supports `stdio` transport (spawns child process) and `http` transport (connects to remote MCP server with optional OAuth 2.1). If no config file exists, OpenMaskit starts with no pre-configured targets (marketplace/custom targets can still be added via UI).
 
 ## Web UI
 
@@ -218,11 +218,11 @@ The Servers page (`/`) shows both active and inactive servers in separate sectio
 
 ### Container runtime compatibility
 
-Maskit auto-detects container runtimes (Docker, Podman, nerdctl, Finch) for containerized MCP servers:
+OpenMaskit auto-detects container runtimes (Docker, Podman, nerdctl, Finch) for containerized MCP servers:
 
 - Detection happens at startup (`container.py` module)
 - Commands starting with `docker` are automatically substituted with detected runtime
-- Optional override via `container_runtime` config field in `maskit.yaml`
+- Optional override via `container_runtime` config field in `openmaskit.yaml`
 - Example: `docker run mcp-server` → `podman run mcp-server` (if Podman is detected)
 - Logs show detected/configured runtime at startup
 

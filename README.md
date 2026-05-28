@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Maskit" width="120">
+  <img src="assets/icon.png" alt="OpenMaskit" width="120">
 </p>
 
-<h1 align="center">Maskit</h1>
+<h1 align="center">OpenMaskit</h1>
 
 <p align="center">
   <em>Secure MCP proxy that keeps your secrets out of AI context windows</em>
@@ -16,7 +16,7 @@
 
 ## What it does
 
-AI coding assistants see everything your MCP tools return — production hostnames, API keys, customer emails. Maskit sits between your AI and your MCP servers and replaces sensitive values with stable aliases (`host_1`, `email_2`, `api_key_1`) so the model never sees the real data. When the agent passes an alias back in a tool call, Maskit swaps in the real value before forwarding.
+AI coding assistants see everything your MCP tools return — production hostnames, API keys, customer emails. OpenMaskit sits between your AI and your MCP servers and replaces sensitive values with stable aliases (`host_1`, `email_2`, `api_key_1`) so the model never sees the real data. When the agent passes an alias back in a tool call, OpenMaskit swaps in the real value before forwarding.
 
 It also lets you block dangerous tool calls (guardrails), force safe defaults (injections), hide tools from agents, and install pre-configured servers from a marketplace.
 
@@ -24,7 +24,7 @@ It also lets you block dangerous tool calls (guardrails), force safe defaults (i
 AI Agent (Claude, Cursor, …)
     │  HTTP :9474/{server}/mcp
     ▼
-  Maskit  ──  Dashboard :9473
+  OpenMaskit  ──  Dashboard :9473
     │  stdio / HTTP
     ▼
 Real MCP Server
@@ -33,19 +33,19 @@ Real MCP Server
 ## Quick start
 
 ```bash
-git clone https://github.com/AminMal/maskit.git
-cd maskit
+git clone https://github.com/OpenMaskitMCP/openmaskit.git
+cd openmaskit
 uv sync
-uv run maskit
+uv run openmaskit
 ```
 
 Then open the dashboard at **http://127.0.0.1:9473** — add servers from the marketplace, connect your AI agent with one click, and configure masking from the UI.
 
 ## Configuration
 
-Maskit runs with no config at all — add servers from the dashboard.
+OpenMaskit runs with no config at all — add servers from the dashboard.
 
-If you'd rather pre-declare servers, drop a `maskit.yaml` next to where you run it:
+If you'd rather pre-declare servers, drop a `openmaskit.yaml` next to where you run it:
 
 ```yaml
 targets:
@@ -83,25 +83,25 @@ oauth_port: 3131
 ### CLI
 
 ```bash
-maskit                              # use ./maskit.yaml (or start empty)
-maskit path/to/config.yaml          # custom config
-maskit -c path/to/config.yaml       # same, via flag
-maskit -w 9473 -m 9474 -o 3131      # override ports
-maskit -s ~/.maskit/store.db        # override SQLite path
-maskit --version
+openmaskit                              # use ./openmaskit.yaml (or start empty)
+openmaskit path/to/config.yaml          # custom config
+openmaskit -c path/to/config.yaml       # same, via flag
+openmaskit -w 9473 -m 9474 -o 3131      # override ports
+openmaskit -s ~/.openmaskit/store.db        # override SQLite path
+openmaskit --version
 ```
 
 ### Environment variables
 
 | Variable | Purpose |
 |---|---|
-| `MASKIT_HOST` | Bind address (default `127.0.0.1`; Docker image uses `0.0.0.0`) |
-| `MASKIT_ENCRYPTION_KEY` | Override the at-rest encryption key (otherwise read from `~/.maskit/.key`) |
-| `MASKIT_LOG_FORMAT` | `text` (default) or `json` |
-| `MASKIT_SHUTDOWN_TIMEOUT` | Graceful shutdown deadline in seconds (default 30) |
-| `MASKIT_TRAFFIC_DB_PATH` | Path to the traffic audit database (default `~/.maskit/traffic.db`) |
-| `MASKIT_TRAFFIC_MAX_ROWS` | Cap on stored audit rows (default 10000, oldest evicted first) |
-| `MASKIT_ALLOWED_ORIGINS` | Comma-separated extra origins allowed to call `/api/*` |
+| `OPENMASKIT_HOST` | Bind address (default `127.0.0.1`; Docker image uses `0.0.0.0`) |
+| `OPENMASKIT_ENCRYPTION_KEY` | Override the at-rest encryption key (otherwise read from `~/.openmaskit/.key`) |
+| `OPENMASKIT_LOG_FORMAT` | `text` (default) or `json` |
+| `OPENMASKIT_SHUTDOWN_TIMEOUT` | Graceful shutdown deadline in seconds (default 30) |
+| `OPENMASKIT_TRAFFIC_DB_PATH` | Path to the traffic audit database (default `~/.openmaskit/traffic.db`) |
+| `OPENMASKIT_TRAFFIC_MAX_ROWS` | Cap on stored audit rows (default 10000, oldest evicted first) |
+| `OPENMASKIT_ALLOWED_ORIGINS` | Comma-separated extra origins allowed to call `/api/*` |
 
 ## Dashboard
 
@@ -120,35 +120,35 @@ Connect an AI agent to a server with the "Connect Agent" button on its page — 
 
 A few things worth knowing about:
 
-- **Container runtime auto-detection** — Marketplace servers shipped as `docker run …` automatically run on Podman, nerdctl, or Finch if that's what you have. No flag needed; override with `container_runtime` in `maskit.yaml` if you want to pin a specific one.
-- **Container lifecycle management** — When you deactivate, delete, or stop Maskit, any containers it spawned are stopped with it. No orphaned containers sitting around using ports.
+- **Container runtime auto-detection** — Marketplace servers shipped as `docker run …` automatically run on Podman, nerdctl, or Finch if that's what you have. No flag needed; override with `container_runtime` in `openmaskit.yaml` if you want to pin a specific one.
+- **Container lifecycle management** — When you deactivate, delete, or stop OpenMaskit, any containers it spawned are stopped with it. No orphaned containers sitting around using ports.
 - **Stable aliases across restarts** — `prod-db.internal.net` always becomes `host_1`, the same alias your agent saw last week. Aliases are persisted, so multi-turn conversations stay coherent.
 - **Encrypted traffic audit log** — Every tool call is recorded with its unmasked args and response, Fernet-encrypted at rest. Lazy-loaded from the UI on demand and capped at 10k rows by default.
-- **OAuth with Dynamic Client Registration** (experimental) — Adding an HTTP server that supports DCR? Maskit can discover its OAuth endpoints and register a client automatically. Manual credentials are also supported and more reliable for providers that don't fully implement DCR.
+- **OAuth with Dynamic Client Registration** (experimental) — Adding an HTTP server that supports DCR? OpenMaskit can discover its OAuth endpoints and register a client automatically. Manual credentials are also supported and more reliable for providers that don't fully implement DCR.
 - **Hot add/remove servers** — Marketplace installs, custom server adds, deactivations, and deletes all happen live. No restart needed.
 - **Argument guardrails and injections** — Block `DROP TABLE` before it leaves your machine; silently inject `read_only: true` on every database call.
 - **Field stripping** — Some fields shouldn't be aliased, they should just be gone. SSNs, credit cards — strip them from responses entirely.
-- **Localhost-safe by default** — `Origin` allow-listing, CSRF protection, and OAuth `state` validation are on out of the box, so a malicious webpage can't reach into your local Maskit.
+- **Localhost-safe by default** — `Origin` allow-listing, CSRF protection, and OAuth `state` validation are on out of the box, so a malicious webpage can't reach into your local OpenMaskit.
 
 ## Docker
 
 ```bash
-docker build -t maskit .
-docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 maskit
+docker build -t openmaskit .
+docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 openmaskit
 ```
 
-The container supports HTTP-based MCP servers. For stdio servers (`uvx`, `npx`), run Maskit natively.
+The container supports HTTP-based MCP servers. For stdio servers (`uvx`, `npx`), run OpenMaskit natively.
 
 ## Data safety
 
 Two files matter:
 
-- `~/.maskit/.key` — encrypts OAuth tokens and the traffic audit log. **Back this up.** Lose it and you'll re-authenticate every server.
-- `~/.maskit/store.db` — masking rules, aliases, server configs.
+- `~/.openmaskit/.key` — encrypts OAuth tokens and the traffic audit log. **Back this up.** Lose it and you'll re-authenticate every server.
+- `~/.openmaskit/store.db` — masking rules, aliases, server configs.
 
-`~/.maskit/traffic.db` is the audit log; safe to drop.
+`~/.openmaskit/traffic.db` is the audit log; safe to drop.
 
-For production-style setups, hold the key in `MASKIT_ENCRYPTION_KEY` instead of on disk.
+For production-style setups, hold the key in `OPENMASKIT_ENCRYPTION_KEY` instead of on disk.
 
 ## Contributing
 

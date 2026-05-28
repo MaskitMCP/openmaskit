@@ -9,9 +9,9 @@ from textwrap import dedent
 import anyio
 import pytest
 
-from maskit.__main__ import _flush_loop, async_main
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.store import MaskingStore
+from openmaskit.__main__ import _flush_loop, async_main
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest.fixture
@@ -86,11 +86,11 @@ class TestStartup:
     async def test_startup_with_empty_config(self, tmp_path, monkeypatch):
         """Application starts with no pre-configured targets."""
         # Create empty config
-        config_file = tmp_path / "maskit.yaml"
+        config_file = tmp_path / "openmaskit.yaml"
         config_file.write_text("")
 
         # Mock sys.argv
-        monkeypatch.setattr("sys.argv", ["maskit", str(config_file)])
+        monkeypatch.setattr("sys.argv", ["openmaskit", str(config_file)])
 
         # Can't easily test full async_main without it blocking
         # This is a placeholder for integration-style test
@@ -171,8 +171,8 @@ class TestStartup:
         pass
 
     def test_bind_host_from_environment(self, monkeypatch):
-        """MASKIT_HOST env var sets bind address."""
-        monkeypatch.setenv("MASKIT_HOST", "0.0.0.0")
+        """OPENMASKIT_HOST env var sets bind address."""
+        monkeypatch.setenv("OPENMASKIT_HOST", "0.0.0.0")
         # Would verify uvicorn configs use 0.0.0.0
         # Placeholder
         pass
@@ -226,7 +226,7 @@ class TestStartup:
 
     def test_config_file_not_found_uses_defaults(self, monkeypatch, tmp_path):
         """Missing config file doesn't crash, uses defaults."""
-        monkeypatch.setattr("sys.argv", ["maskit", str(tmp_path / "missing.yaml")])
+        monkeypatch.setattr("sys.argv", ["openmaskit", str(tmp_path / "missing.yaml")])
         # Should start with empty targets
         # Placeholder
         pass

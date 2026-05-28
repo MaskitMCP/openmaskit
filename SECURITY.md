@@ -29,4 +29,4 @@ We ask that you give us reasonable time to address the issue before any public d
 
 ## Encryption of stored credentials
 
-Maskit encrypts OAuth tokens and other credentials at rest using Fernet symmetric encryption. The encryption key is derived per-installation and stored at `~/.maskit/`. If you believe the key derivation or storage has a weakness, please report it.
+OpenMaskit encrypts OAuth tokens and other credentials at rest using Fernet symmetric encryption. The encryption key is derived per-installation and stored at `~/.openmaskit/`. If you believe the key derivation or storage has a weakness, please report it.

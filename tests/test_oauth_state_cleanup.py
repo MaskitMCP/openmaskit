@@ -11,7 +11,7 @@ class TestOAuthStateCleanup:
     @pytest.mark.anyio
     async def test_expired_oauth_states_are_cleaned_up(self):
         """Expired OAuth states are removed by cleanup task."""
-        from maskit.web.routes.oauth_callback import OAUTH_STATE_TTL
+        from openmaskit.web.routes.oauth_callback import OAUTH_STATE_TTL
 
         oauth_states = {
             "fresh_state": {"server_id": "server1", "handle": "server1", "timestamp": time.time()},
@@ -41,7 +41,7 @@ class TestOAuthStateCleanup:
     @pytest.mark.anyio
     async def test_dos_attack_via_repeated_oauth_initiation(self):
         """Memory exhaustion attack prevented by cleanup."""
-        from maskit.web.routes.oauth_callback import OAUTH_STATE_TTL
+        from openmaskit.web.routes.oauth_callback import OAUTH_STATE_TTL
 
         oauth_states = {}
 
@@ -74,7 +74,7 @@ class TestOAuthStateCleanup:
     @pytest.mark.anyio
     async def test_cleanup_preserves_active_oauth_flows(self):
         """Active OAuth flows are not affected by cleanup."""
-        from maskit.web.routes.oauth_callback import OAUTH_STATE_TTL
+        from openmaskit.web.routes.oauth_callback import OAUTH_STATE_TTL
 
         oauth_states = {
             "active_flow_1": {"server_id": "slack", "handle": "slack", "timestamp": time.time()},

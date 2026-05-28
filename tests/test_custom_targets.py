@@ -4,11 +4,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.web.app import create_app
-from maskit.web.routes.custom_targets import _slugify
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.web.app import create_app
+from openmaskit.web.routes.custom_targets import _slugify
 
 
 @pytest_asyncio.fixture
@@ -170,14 +170,14 @@ class TestCustomTargetContainerNameValidation:
     """When user supplies --name on a `docker run`, validate at submission."""
 
     @pytest.mark.anyio
-    async def test_reserved_maskit_prefix_rejected(self, client):
+    async def test_reserved_openmaskit_prefix_rejected(self, client):
         resp = await client.post(
             "/api/targets/custom",
             json={
                 "name": "My Container",
                 "transport": "stdio",
                 "command": "docker",
-                "args": ["run", "--rm", "--name", "maskit-evil", "img"],
+                "args": ["run", "--rm", "--name", "openmaskit-evil", "img"],
             },
         )
         assert resp.status_code == 400
@@ -237,7 +237,7 @@ class TestCustomTargetContainerNameValidation:
                 "name": "uvx thing",
                 "transport": "stdio",
                 "command": "uvx",
-                "args": ["--name", "maskit-foo", "some-server"],
+                "args": ["--name", "openmaskit-foo", "some-server"],
             },
         )
         assert resp.status_code == 201

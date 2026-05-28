@@ -8,10 +8,10 @@ import pytest
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage, JSONRPCRequest, JSONRPCResponse
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.rules import MaskingRule
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import TargetState, run_proxy_for_target
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.rules import MaskingRule
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import TargetState, run_proxy_for_target
 
 
 def make_request(method: str, params: dict | None = None, req_id: int = 1) -> SessionMessage:
@@ -35,11 +35,11 @@ def make_response(result: dict, req_id: int | str = 1) -> SessionMessage:
 
 BOOTSTRAP_INIT_RESPONSE = make_response(
     {"protocolVersion": "2025-03-26", "capabilities": {"tools": {}}, "serverInfo": {"name": "test", "version": "0.1"}},
-    req_id="__maskit_init__",
+    req_id="__openmaskit_init__",
 )
 BOOTSTRAP_TOOLS_RESPONSE = make_response(
     {"tools": [{"name": "get_db", "description": "Get DB", "inputSchema": {"type": "object"}}]},
-    req_id="__maskit_tools_list__",
+    req_id="__openmaskit_tools_list__",
 )
 
 

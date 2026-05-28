@@ -8,10 +8,10 @@ import pytest
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.proxy.manager import TargetManager, _build_upstream_config
-from maskit.models import UpstreamStdioConfig, UpstreamHttpConfig
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.proxy.manager import TargetManager, _build_upstream_config
+from openmaskit.models import UpstreamStdioConfig, UpstreamHttpConfig
 
 
 @pytest.fixture
@@ -135,7 +135,7 @@ class TestTargetManager:
     async def test_remove_target_cleans_up_state(self, manager, state):
         """remove_target removes TargetState and closes streams."""
         # Manually create a target
-        from maskit.masking.engine import MaskingEngine
+        from openmaskit.masking.engine import MaskingEngine
         engine = MaskingEngine([], state.store, target_name="test")
         await engine.load_aliases()
 
@@ -163,7 +163,7 @@ class TestTargetManager:
     @pytest.mark.anyio
     async def test_flush_loop_flushes_pending_writes(self, manager, store):
         """Flush loop periodically writes pending aliases."""
-        from maskit.masking.engine import MaskingEngine
+        from openmaskit.masking.engine import MaskingEngine
         engine = MaskingEngine([], store, target_name="test")
         await engine.load_aliases()
 
@@ -222,8 +222,8 @@ class TestTargetManager:
         call stop_container. This is the deactivate/delete code path — relying
         on connect_upstream's `finally` doesn't work because the stack is
         closed from a different task than the one that entered it."""
-        from maskit.masking.engine import MaskingEngine
-        from maskit.proxy import manager as manager_mod
+        from openmaskit.masking.engine import MaskingEngine
+        from openmaskit.proxy import manager as manager_mod
 
         stop_calls: list[tuple[str, str]] = []
 
@@ -242,13 +242,13 @@ class TestTargetManager:
             engine=engine,
             ds_read_send=ds_send,
             ds_read_recv=ds_recv,
-            container_info=("docker", "maskit-containerized"),
+            container_info=("docker", "openmaskit-containerized"),
         )
         state.targets["containerized"] = target
 
         await manager.remove_target("containerized")
 
-        assert stop_calls == [("docker", "maskit-containerized")]
+        assert stop_calls == [("docker", "openmaskit-containerized")]
         assert "containerized" not in state.targets
 
     @pytest.mark.anyio
@@ -257,8 +257,8 @@ class TestTargetManager:
     ):
         """A target with container_info=None (HTTP, stdio non-container) must
         not trigger stop_container."""
-        from maskit.masking.engine import MaskingEngine
-        from maskit.proxy import manager as manager_mod
+        from openmaskit.masking.engine import MaskingEngine
+        from openmaskit.proxy import manager as manager_mod
 
         stop_calls: list[tuple[str, str]] = []
 
@@ -293,8 +293,8 @@ class TestTargetManager:
         defending against), stop_container must still have been invoked
         because we call it *before* the stack close."""
         from contextlib import AsyncExitStack
-        from maskit.masking.engine import MaskingEngine
-        from maskit.proxy import manager as manager_mod
+        from openmaskit.masking.engine import MaskingEngine
+        from openmaskit.proxy import manager as manager_mod
 
         stop_calls: list[tuple[str, str]] = []
 
@@ -334,7 +334,7 @@ class TestTargetManager:
     @pytest.mark.anyio
     async def test_multiple_targets_coexist(self, manager, state):
         """Multiple targets can be added and removed independently."""
-        from maskit.masking.engine import MaskingEngine
+        from openmaskit.masking.engine import MaskingEngine
 
         # Add first target
         engine1 = MaskingEngine([], state.store, target_name="target1")

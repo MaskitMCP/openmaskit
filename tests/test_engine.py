@@ -6,10 +6,10 @@ import json
 import pytest
 import pytest_asyncio
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.mappers import ResponseMapper
-from maskit.masking.rules import MaskingRule, delete_nested_value, get_nested_value, set_nested_value
-from maskit.masking.store import MaskingStore
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.mappers import ResponseMapper
+from openmaskit.masking.rules import MaskingRule, delete_nested_value, get_nested_value, set_nested_value
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@
 Pure-function helpers are tested directly. Async helpers (`stop_container`,
 `sweep_server_orphans`) patch `anyio.run_process` so no real container runtime
 is needed. A key invariant pinned by these tests: no code path ever invokes
-`<runtime> rm` — Maskit only stops, never removes.
+`<runtime> rm` — OpenMaskit only stops, never removes.
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 import anyio
 import pytest
 
-from maskit import container as container_mod
-from maskit.container import (
-    MASKIT_LABEL_KEY,
-    MASKIT_NAME_PREFIX,
+from openmaskit import container as container_mod
+from openmaskit.container import (
+    OPENMASKIT_LABEL_KEY,
+    OPENMASKIT_NAME_PREFIX,
     extract_container_name,
     inject_container_label,
     inject_container_name,
@@ -79,43 +79,43 @@ class TestExtractContainerName:
 
 class TestInjectContainerName:
     def test_inserts_after_run(self):
-        result = inject_container_name(["run", "-i", "img"], "maskit-x")
-        assert result == ["run", "--name", "maskit-x", "-i", "img"]
+        result = inject_container_name(["run", "-i", "img"], "openmaskit-x")
+        assert result == ["run", "--name", "openmaskit-x", "-i", "img"]
 
     def test_preserves_user_name(self):
         original = ["run", "--name", "user-pick", "img"]
-        assert inject_container_name(original, "maskit-x") == original
+        assert inject_container_name(original, "openmaskit-x") == original
 
     def test_preserves_user_equals_form(self):
         original = ["run", "--name=user-pick", "img"]
-        assert inject_container_name(original, "maskit-x") == original
+        assert inject_container_name(original, "openmaskit-x") == original
 
     def test_no_run_returns_copy_unchanged(self):
         original = ["exec", "container", "sh"]
-        result = inject_container_name(original, "maskit-x")
+        result = inject_container_name(original, "openmaskit-x")
         assert result == original
         assert result is not original  # always a copy
 
     def test_returns_new_list_when_injecting(self):
         original = ["run", "img"]
-        result = inject_container_name(original, "maskit-x")
+        result = inject_container_name(original, "openmaskit-x")
         assert result is not original
         assert original == ["run", "img"]  # input not mutated
 
 
 class TestInjectContainerLabel:
     def test_inserts_after_run(self):
-        result = inject_container_label(["run", "img"], MASKIT_LABEL_KEY, "abc")
-        assert result == ["run", "--label", f"{MASKIT_LABEL_KEY}=abc", "img"]
+        result = inject_container_label(["run", "img"], OPENMASKIT_LABEL_KEY, "abc")
+        assert result == ["run", "--label", f"{OPENMASKIT_LABEL_KEY}=abc", "img"]
 
     def test_always_inserts_even_if_user_has_label(self):
         # Multiple --label flags are valid; injection is unconditional.
         original = ["run", "--label", "user.tag=1", "img"]
-        result = inject_container_label(original, MASKIT_LABEL_KEY, "abc")
+        result = inject_container_label(original, OPENMASKIT_LABEL_KEY, "abc")
         assert result == [
             "run",
             "--label",
-            f"{MASKIT_LABEL_KEY}=abc",
+            f"{OPENMASKIT_LABEL_KEY}=abc",
             "--label",
             "user.tag=1",
             "img",
@@ -123,7 +123,7 @@ class TestInjectContainerLabel:
 
     def test_no_run_returns_copy_unchanged(self):
         original = ["ps", "-aq"]
-        result = inject_container_label(original, MASKIT_LABEL_KEY, "abc")
+        result = inject_container_label(original, OPENMASKIT_LABEL_KEY, "abc")
         assert result == original
         assert result is not original
 
@@ -146,7 +146,7 @@ class TestValidateUserContainerName:
         assert validate_user_container_name("") is not None
 
     @pytest.mark.parametrize(
-        "name", ["maskit-foo", f"{MASKIT_NAME_PREFIX}slack", "maskit-"]
+        "name", ["openmaskit-foo", f"{OPENMASKIT_NAME_PREFIX}slack", "openmaskit-"]
     )
     def test_reserved_prefix_rejected(self, name):
         err = validate_user_container_name(name)
@@ -212,16 +212,16 @@ def recorder(monkeypatch):
 class TestStopContainer:
     @pytest.mark.anyio
     async def test_invokes_runtime_stop_with_name(self, recorder):
-        await stop_container("docker", "maskit-slack")
+        await stop_container("docker", "openmaskit-slack")
         assert recorder.all_commands() == [
-            ["docker", "stop", "--time=3", "maskit-slack"]
+            ["docker", "stop", "--time=3", "openmaskit-slack"]
         ]
         assert recorder.calls[0].kwargs.get("check") is False
 
     @pytest.mark.anyio
     async def test_never_calls_rm(self, recorder):
         # Critical invariant: stop only, no rm.
-        await stop_container("podman", "maskit-x")
+        await stop_container("podman", "openmaskit-x")
         assert recorder.has_rm_call() is False
 
     @pytest.mark.anyio
@@ -267,7 +267,7 @@ class TestSweepServerOrphans:
             "ps",
             "-aq",
             "--filter",
-            f"label={MASKIT_LABEL_KEY}=slack-7f3a",
+            f"label={OPENMASKIT_LABEL_KEY}=slack-7f3a",
         ]
 
     @pytest.mark.anyio
@@ -322,8 +322,8 @@ class TestSweepServerOrphans:
     async def test_label_filter_uses_correct_key(self, recorder):
         await sweep_server_orphans("docker", "my-id")
         ps_cmd = recorder.all_commands()[0]
-        # The filter expression must include MASKIT_LABEL_KEY.
-        assert f"label={MASKIT_LABEL_KEY}=my-id" in ps_cmd
+        # The filter expression must include OPENMASKIT_LABEL_KEY.
+        assert f"label={OPENMASKIT_LABEL_KEY}=my-id" in ps_cmd
 
 
 class TestNoRmInvariant:

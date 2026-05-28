@@ -1,0 +1,372 @@
+/**
+ * Onboarding & First-Time User Experience Styles
+ * OpenMaskit - Comprehensive onboarding flow
+ */
+
+/* ===== Welcome Modal Backdrop ===== */
+.modal-backdrop:has(.modal-onboarding) {
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+}
+
+/* ===== Welcome Modal Styles ===== */
+.modal-onboarding {
+    max-width: 620px;
+    background: #1a1d29;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.onboarding-hero {
+    text-align: center;
+    padding: 2rem 2rem 1.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.onboarding-hero-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 1.5rem;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--teal) 100%);
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.onboarding-hero-icon svg {
+    width: 48px;
+    height: 48px;
+    color: white;
+}
+
+.onboarding-hero h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem;
+    background: linear-gradient(135deg, var(--accent), var(--teal));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.onboarding-hero-desc {
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.onboarding-steps {
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.onboarding-step {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.onboarding-step:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+}
+
+.onboarding-step-number {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-dim);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.onboarding-step-content h4 {
+    margin: 0 0 0.25rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.onboarding-step-content p {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.onboarding-actions {
+    padding: 1.5rem 2rem;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
+.btn-onboarding-primary {
+    padding: 0.625rem 1.5rem;
+    background: linear-gradient(135deg, var(--accent), var(--teal));
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-onboarding-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(88, 166, 255, 0.3);
+}
+
+.btn-onboarding-skip {
+    padding: 0.625rem 1.5rem;
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-onboarding-skip:hover {
+    border-color: var(--text-muted);
+    color: var(--text-primary);
+}
+
+/* ===== Enhanced Empty State ===== */
+.empty-state-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    max-width: 900px;
+    margin: 2rem auto 0;
+    padding: 0 2rem;
+}
+
+.empty-state-card {
+    background: var(--bg-surface);
+    border: 2px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.empty-state-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+}
+
+.empty-state-card.card-marketplace {
+    border-color: var(--accent);
+}
+
+.empty-state-card.card-marketplace:hover {
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.05), transparent);
+    box-shadow: 0 12px 32px rgba(88, 166, 255, 0.15);
+}
+
+.empty-state-card.card-custom {
+    border-color: var(--teal);
+}
+
+.empty-state-card.card-custom:hover {
+    background: linear-gradient(135deg, rgba(45, 212, 191, 0.05), transparent);
+    box-shadow: 0 12px 32px rgba(45, 212, 191, 0.15);
+}
+
+.empty-state-card.card-help {
+    border-color: #a78bfa;
+}
+
+.empty-state-card.card-help:hover {
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.05), transparent);
+    box-shadow: 0 12px 32px rgba(167, 139, 250, 0.15);
+}
+
+.empty-card-icon {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 1.25rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+}
+
+.card-marketplace .empty-card-icon {
+    background: var(--accent-dim);
+    color: var(--accent);
+}
+
+.card-custom .empty-card-icon {
+    background: rgba(45, 212, 191, 0.15);
+    color: var(--teal);
+}
+
+.card-help .empty-card-icon {
+    background: rgba(167, 139, 250, 0.15);
+    color: #a78bfa;
+}
+
+.empty-card-icon svg {
+    width: 48px;
+    height: 48px;
+}
+
+.empty-card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: var(--text-primary);
+}
+
+.empty-card-desc {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin: 0 0 1.5rem;
+}
+
+.empty-card-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: 6px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.card-marketplace .empty-card-action {
+    background: var(--accent);
+    color: white;
+}
+
+.card-marketplace .empty-card-action:hover {
+    background: #4a92e5;
+    transform: translateY(-2px);
+}
+
+.card-custom .empty-card-action {
+    background: var(--teal);
+    color: white;
+}
+
+.card-custom .empty-card-action:hover {
+    background: #28c4ab;
+    transform: translateY(-2px);
+}
+
+.card-help .empty-card-action {
+    background: #a78bfa;
+    color: white;
+}
+
+.card-help .empty-card-action:hover {
+    background: #9575e8;
+    transform: translateY(-2px);
+}
+
+/* ===== Help Button in Header ===== */
+.btn-help {
+    padding: 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-help:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.btn-help svg {
+    width: 18px;
+    height: 18px;
+}
+
+/* ===== Pulse Animation for Highlighting ===== */
+@keyframes pulse-highlight {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(88, 166, 255, 0);
+    }
+}
+
+.highlight-pulse {
+    animation: pulse-highlight 2s infinite;
+}
+
+/* ===== Responsive Design ===== */
+@media (max-width: 768px) {
+    .empty-state-cards {
+        grid-template-columns: 1fr;
+        padding: 0 1rem;
+    }
+
+    .modal-onboarding {
+        max-width: 95vw;
+    }
+
+    .onboarding-steps {
+        padding: 1.5rem 1rem;
+    }
+
+    .onboarding-hero {
+        padding: 1.5rem 1rem 1rem;
+    }
+
+    .onboarding-actions {
+        padding: 1rem 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .onboarding-hero h2 {
+        font-size: 1.5rem;
+    }
+
+    .empty-card-icon {
+        width: 80px;
+        height: 80px;
+    }
+
+    .empty-card-icon svg {
+        width: 40px;
+        height: 40px;
+    }
+
+    .empty-state-card {
+        padding: 1.5rem 1rem;
+    }
+}

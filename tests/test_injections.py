@@ -5,9 +5,9 @@ import json
 import pytest
 import pytest_asyncio
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.rules import ArgumentInjection, MaskingRule
-from maskit.masking.store import MaskingStore
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.rules import ArgumentInjection, MaskingRule
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest_asyncio.fixture

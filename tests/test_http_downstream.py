@@ -12,10 +12,10 @@ from starlette.testclient import TestClient
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.proxy.http_downstream import create_mcp_app
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.proxy.http_downstream import create_mcp_app
 
 
 @pytest.fixture

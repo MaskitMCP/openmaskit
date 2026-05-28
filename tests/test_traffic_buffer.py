@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from maskit.traffic.buffer import TrafficBuffer
-from maskit.traffic.store import TrafficEntry, TrafficStore
+from openmaskit.traffic.buffer import TrafficBuffer
+from openmaskit.traffic.store import TrafficEntry, TrafficStore
 
 
 def _entry(target: str = "srv", rid: str = "1") -> TrafficEntry:

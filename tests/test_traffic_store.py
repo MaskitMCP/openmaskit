@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from maskit.traffic.store import TrafficEntry, TrafficStore
+from openmaskit.traffic.store import TrafficEntry, TrafficStore
 
 
 @pytest.fixture

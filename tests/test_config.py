@@ -8,8 +8,8 @@ from textwrap import dedent
 import pytest
 import yaml
 
-from maskit.config import load_config
-from maskit.models import MultiTargetConfig
+from openmaskit.config import load_config
+from openmaskit.models import MultiTargetConfig
 
 
 class TestLoadConfig:
@@ -19,7 +19,7 @@ class TestLoadConfig:
         assert config.web_port == 9473
         assert config.mcp_port == 9474
         assert config.oauth_port == 3131
-        assert config.store_path == "~/.maskit/store.db"
+        assert config.store_path == "~/.openmaskit/store.db"
         assert config.targets == {}
 
     def test_load_multi_target_config(self, tmp_path):
@@ -74,7 +74,7 @@ class TestLoadConfig:
                 field_path: "timezone"
             web_port: 9473
             mcp_port: 9474
-            store_path: "~/.maskit/store.db"
+            store_path: "~/.openmaskit/store.db"
         """)
         config_file = tmp_path / "legacy.yaml"
         config_file.write_text(config_yaml)

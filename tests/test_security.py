@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
-from maskit.security import (
+from openmaskit.security import (
     validate_server_id,
     TokenEncryption,
     read_token_file,
@@ -125,7 +125,7 @@ class TestTokenEncryption:
 
     def test_key_generation(self, tmp_path, monkeypatch):
         key_path = tmp_path / ".key"
-        monkeypatch.setattr("maskit.security.TokenEncryption._KEY_PATH", key_path)
+        monkeypatch.setattr("openmaskit.security.TokenEncryption._KEY_PATH", key_path)
 
         enc = TokenEncryption()
         enc._load_key()
@@ -134,7 +134,7 @@ class TestTokenEncryption:
         assert oct(key_path.stat().st_mode)[-3:] == "600"
 
     def test_env_var_override(self, monkeypatch):
-        monkeypatch.setenv("MASKIT_ENCRYPTION_KEY", "test-key-override")
+        monkeypatch.setenv("OPENMASKIT_ENCRYPTION_KEY", "test-key-override")
         enc = TokenEncryption()
 
         key = enc._load_key()

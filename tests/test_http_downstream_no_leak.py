@@ -20,10 +20,10 @@ from httpx import ASGITransport, AsyncClient
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.proxy.http_downstream import create_mcp_app
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.proxy.http_downstream import create_mcp_app
 
 
 # Sentinel "secrets" we plant in engine.alias_cache. If any of these strings
@@ -198,8 +198,8 @@ class TestMcpEndpointNoLeak:
     @pytest.mark.anyio
     async def test_response_does_not_contain_traffic_preview_fields(self, state):
         """Traffic-buffer entries (with unmasked previews) must not leak through the MCP endpoint."""
-        from maskit.traffic.buffer import TrafficBuffer
-        from maskit.traffic.store import TrafficEntry
+        from openmaskit.traffic.buffer import TrafficBuffer
+        from openmaskit.traffic.store import TrafficEntry
 
         app = create_mcp_app(state)
         target = state.targets["test"]

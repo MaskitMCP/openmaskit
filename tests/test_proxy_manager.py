@@ -4,10 +4,10 @@ import pytest
 import pytest_asyncio
 import anyio
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.proxy.manager import TargetManager
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.proxy.manager import TargetManager
 
 
 @pytest_asyncio.fixture
@@ -51,7 +51,7 @@ class TestTargetManagerInit:
     @pytest.mark.anyio
     async def test_init_with_callback_server(self, state, store, tmp_path):
         """Initialize manager with callback server."""
-        from maskit.oauth.handler import OAuthCallbackServer
+        from openmaskit.oauth.handler import OAuthCallbackServer
 
         callback_server = OAuthCallbackServer(port=3131)
 
@@ -177,7 +177,7 @@ class TestConfigValidation:
             "args": ["mcp-server-time"],
         }
 
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         upstream = _build_upstream_config(config)
 
@@ -194,7 +194,7 @@ class TestConfigValidation:
             "url": "https://mcp.example.com/mcp",
         }
 
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         upstream = _build_upstream_config(config)
 
@@ -214,7 +214,7 @@ class TestConfigValidation:
             }
         }
 
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         upstream = _build_upstream_config(config)
 
@@ -381,7 +381,7 @@ class TestManagerErrorHandling:
     @pytest.mark.anyio
     async def test_invalid_config_structure(self):
         """Handle invalid configuration structure."""
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         # Missing required fields
         config = {
@@ -395,7 +395,7 @@ class TestManagerErrorHandling:
     @pytest.mark.anyio
     async def test_unknown_transport_type(self):
         """Handle unknown transport type."""
-        from maskit.proxy.manager import _build_upstream_config
+        from openmaskit.proxy.manager import _build_upstream_config
 
         config = {
             "transport": "websocket",  # Not supported

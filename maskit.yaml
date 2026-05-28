@@ -1,7 +1,0 @@
-web_port: 9473
-mcp_port: 9474
-store_path: "~/.maskit/store.db"
-
-# Optional: Override container runtime for containerized MCP servers
-# Maskit will auto-detect docker, podman, nerdctl, or finch if this is not set
-# container_runtime: "podman"  # or "docker", "nerdctl", "finch"

@@ -5,10 +5,10 @@ import anyio
 from collections import deque
 from unittest.mock import MagicMock
 
-from maskit.__main__ import _graceful_shutdown, _flush_loop
-from maskit.proxy.core import ProxyState, TargetState, ResponseDispatcher, cleanup_target_state
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.store import MaskingStore
+from openmaskit.__main__ import _graceful_shutdown, _flush_loop
+from openmaskit.proxy.core import ProxyState, TargetState, ResponseDispatcher, cleanup_target_state
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest.mark.asyncio

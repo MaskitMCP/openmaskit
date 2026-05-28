@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from maskit import __version__
-from maskit.cli import parse_args
+from openmaskit import __version__
+from openmaskit.cli import parse_args
 
 
 class TestParseArgs:
     def test_no_args_uses_defaults(self):
         """No arguments should use default config path."""
         args = parse_args([])
-        assert args.config_path == Path("maskit.yaml")
+        assert args.config_path == Path("openmaskit.yaml")
         assert args.web_port is None
         assert args.mcp_port is None
         assert args.oauth_port is None
@@ -73,14 +73,14 @@ class TestParseArgs:
                 "-o",
                 "9002",
                 "-s",
-                "/data/maskit.db",
+                "/data/openmaskit.db",
             ]
         )
         assert args.config_path == Path("my-config.yaml")
         assert args.web_port == 9000
         assert args.mcp_port == 9001
         assert args.oauth_port == 9002
-        assert args.store_path == "/data/maskit.db"
+        assert args.store_path == "/data/openmaskit.db"
 
 
 class TestVersion:

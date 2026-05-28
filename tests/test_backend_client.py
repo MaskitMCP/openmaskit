@@ -5,7 +5,7 @@ import pytest_asyncio
 import httpx
 import respx
 
-from maskit.backend_client import BackendClient
+from openmaskit.backend_client import BackendClient
 
 
 @pytest_asyncio.fixture
@@ -13,7 +13,7 @@ async def client():
     """Create backend client instance."""
     c = BackendClient(
         installation_id="test-install-123",
-        maskit_version="0.1.0",
+        openmaskit_version="0.1.0",
         auth_url="https://test-auth.example.com",
         marketplace_url="https://test-api.example.com",
         timeout=5.0,
@@ -30,26 +30,26 @@ class TestBackendClientInit:
         """Initialize client with explicit URLs."""
         client = BackendClient(
             installation_id="test-123",
-            maskit_version="1.0.0",
+            openmaskit_version="1.0.0",
             auth_url="https://custom-auth.com",
             marketplace_url="https://custom-api.com",
         )
         assert client.auth_url == "https://custom-auth.com"
         assert client.marketplace_url == "https://custom-api.com"
         assert client.installation_id == "test-123"
-        assert client.maskit_version == "1.0.0"
+        assert client.openmaskit_version == "1.0.0"
         assert client.enabled is True
         await client.close()
 
     @pytest.mark.anyio
     async def test_init_with_env_vars(self, monkeypatch):
         """Initialize client with environment variables."""
-        monkeypatch.setenv("MASKIT_AUTH_BACKEND_URL", "https://env-auth.com")
-        monkeypatch.setenv("MASKIT_MARKETPLACE_API_URL", "https://env-api.com")
+        monkeypatch.setenv("OPENMASKIT_AUTH_BACKEND_URL", "https://env-auth.com")
+        monkeypatch.setenv("OPENMASKIT_MARKETPLACE_API_URL", "https://env-api.com")
 
         client = BackendClient(
             installation_id="test-456",
-            maskit_version="2.0.0",
+            openmaskit_version="2.0.0",
         )
         assert client.auth_url == "https://env-auth.com"
         assert client.marketplace_url == "https://env-api.com"
@@ -58,12 +58,12 @@ class TestBackendClientInit:
     @pytest.mark.anyio
     async def test_init_with_defaults(self, monkeypatch):
         """Initialize client with default URLs when no config provided."""
-        monkeypatch.delenv("MASKIT_AUTH_BACKEND_URL", raising=False)
-        monkeypatch.delenv("MASKIT_MARKETPLACE_API_URL", raising=False)
+        monkeypatch.delenv("OPENMASKIT_AUTH_BACKEND_URL", raising=False)
+        monkeypatch.delenv("OPENMASKIT_MARKETPLACE_API_URL", raising=False)
 
         client = BackendClient(
             installation_id="test-789",
-            maskit_version="3.0.0",
+            openmaskit_version="3.0.0",
         )
         assert client.auth_url == "https://auth.maskitmcp.com"
         assert client.marketplace_url == "https://api.maskitmcp.com"
@@ -74,10 +74,10 @@ class TestBackendClientInit:
         """Verify required headers are set correctly."""
         client = BackendClient(
             installation_id="test-abc",
-            maskit_version="4.5.6",
+            openmaskit_version="4.5.6",
         )
-        assert client.required_headers["User-Agent"] == "Maskit/4.5.6"
-        assert client.required_headers["X-Maskit-Installation-Id"] == "test-abc"
+        assert client.required_headers["User-Agent"] == "OpenMaskit/4.5.6"
+        assert client.required_headers["X-OpenMaskit-Installation-Id"] == "test-abc"
         await client.close()
 
 
@@ -179,8 +179,8 @@ class TestMarketplaceCatalog:
         await client.get_catalog()
 
         request = route.calls.last.request
-        assert request.headers["User-Agent"] == "Maskit/0.1.0"
-        assert request.headers["X-Maskit-Installation-Id"] == "test-install-123"
+        assert request.headers["User-Agent"] == "OpenMaskit/0.1.0"
+        assert request.headers["X-OpenMaskit-Installation-Id"] == "test-install-123"
 
     @pytest.mark.anyio
     @respx.mock
@@ -232,7 +232,7 @@ class TestMarketplaceCatalog:
         """Return empty when marketplace URL is None."""
         client = BackendClient(
             installation_id="test",
-            maskit_version="1.0.0",
+            openmaskit_version="1.0.0",
             marketplace_url=None,
         )
 
@@ -294,7 +294,7 @@ class TestServerInfo:
         """Return None when marketplace URL is not configured."""
         client = BackendClient(
             installation_id="test",
-            maskit_version="1.0.0",
+            openmaskit_version="1.0.0",
             marketplace_url=None,
         )
 
@@ -321,8 +321,8 @@ class TestVersionCheck:
         result = await client.check_version()
         assert result == payload
         # Version travels in User-Agent
-        assert route.calls.last.request.headers["User-Agent"] == "Maskit/0.1.0"
-        assert route.calls.last.request.headers["X-Maskit-Installation-Id"] == "test-install-123"
+        assert route.calls.last.request.headers["User-Agent"] == "OpenMaskit/0.1.0"
+        assert route.calls.last.request.headers["X-OpenMaskit-Installation-Id"] == "test-install-123"
 
     @pytest.mark.anyio
     @respx.mock
@@ -551,7 +551,7 @@ class TestClientLifecycle:
         """Close client properly."""
         client = BackendClient(
             installation_id="test",
-            maskit_version="1.0.0",
+            openmaskit_version="1.0.0",
         )
 
         # Should not raise
@@ -565,7 +565,7 @@ class TestClientLifecycle:
         """Use client in async context (manual close)."""
         client = BackendClient(
             installation_id="test",
-            maskit_version="1.0.0",
+            openmaskit_version="1.0.0",
         )
 
         try:

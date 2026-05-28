@@ -1,10 +1,10 @@
-# Contributing to Maskit
+# Contributing to OpenMaskit
 
-Thanks for your interest in contributing! Maskit is in early development and contributions of all kinds are welcome — bug reports, fixes, features, docs, and marketplace catalog entries.
+Thanks for your interest in contributing! OpenMaskit is in early development and contributions of all kinds are welcome — bug reports, fixes, features, docs, and marketplace catalog entries.
 
 ## Reporting issues
 
-1. Check [existing issues](https://github.com/AminMal/maskit/issues) to avoid duplicates.
+1. Check [existing issues](https://github.com/OpenMaskitMCP/openmaskit/issues) to avoid duplicates.
 2. Open a new issue with:
    - A clear title and description
    - Steps to reproduce (for bugs)
@@ -14,16 +14,16 @@ Thanks for your interest in contributing! Maskit is in early development and con
 ## Development setup
 
 ```bash
-git clone https://github.com/AminMal/maskit.git
-cd maskit
+git clone https://github.com/OpenMaskitMCP/openmaskit.git
+cd openmaskit
 uv sync
 ```
 
-Run Maskit locally:
+Run OpenMaskit locally:
 
 ```bash
-uv run maskit                    # uses ./maskit.yaml if present
-uv run maskit path/to/config.yaml
+uv run openmaskit                    # uses ./openmaskit.yaml if present
+uv run openmaskit path/to/config.yaml
 ```
 
 Then open the dashboard at `http://127.0.0.1:9473`.
@@ -49,7 +49,7 @@ New features and bug fixes should come with tests.
 ### Pull request guidelines
 
 - One feature or fix per PR.
-- Update docs (`README.md`, `CLAUDE.md`) if your change affects how Maskit is used or how it's structured.
+- Update docs (`README.md`, `CLAUDE.md`) if your change affects how OpenMaskit is used or how it's structured.
 - Be responsive to review feedback.
 - For large changes, open an issue first to align on direction before writing code.
 

@@ -5,11 +5,11 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, MagicMock
 
-from maskit.masking.engine import MaskingEngine
-from maskit.masking.rules import MaskingRule
-from maskit.masking.store import MaskingStore
-from maskit.proxy.core import ProxyState, TargetState
-from maskit.web.app import create_app
+from openmaskit.masking.engine import MaskingEngine
+from openmaskit.masking.rules import MaskingRule
+from openmaskit.masking.store import MaskingStore
+from openmaskit.proxy.core import ProxyState, TargetState
+from openmaskit.web.app import create_app
 
 
 # Mock catalog data matching the old marketplace.json structure
@@ -417,7 +417,7 @@ class TestMarketplaceVersionGating:
         )
         assert resp.status_code == 426
         body = resp.json()
-        assert "Maskit" in body["error"]
+        assert "OpenMaskit" in body["error"]
         assert body["latest_version"] == "9.9.9"
         # Confirm the install side-effect did NOT happen.
         assert await state.store.get_server("docker") is None

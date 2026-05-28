@@ -11,8 +11,8 @@ from starlette.testclient import TestClient
 
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from maskit.models import HttpOAuthConfig
-from maskit.oauth.handler import FileTokenStorage, OAuthCallbackServer, create_oauth_provider
+from openmaskit.models import HttpOAuthConfig
+from openmaskit.oauth.handler import FileTokenStorage, OAuthCallbackServer, create_oauth_provider
 
 
 class TestFileTokenStorage:
@@ -369,7 +369,7 @@ class TestOAuthEncryption:
     """Test OAuth flow with encryption."""
 
     async def test_file_token_storage_encrypts(self, tmp_path):
-        from maskit.oauth.handler import FileTokenStorage
+        from openmaskit.oauth.handler import FileTokenStorage
         from mcp.shared.auth import OAuthToken
 
         storage = FileTokenStorage(tmp_path / "test.json")
@@ -394,7 +394,7 @@ class TestOAuthEncryption:
 
     async def test_migration_preserves_tokens(self, tmp_path):
         import json
-        from maskit.oauth.handler import FileTokenStorage
+        from openmaskit.oauth.handler import FileTokenStorage
 
         path = tmp_path / "legacy.json"
         legacy_data = {
