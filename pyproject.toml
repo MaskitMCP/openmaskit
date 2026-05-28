@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Drop-in MCP proxy that keeps your secrets out of the context window"
 readme = "README.md"
 authors = [
-    { name = "Amin Malekloo", email = "amin.malekloo@yahoo.com" }
+    { name = "Amin Malekloo", email = "openmaskit@maskitmcp.com" }
 ]
 license = { text = "MIT" }
 requires-python = ">=3.10"

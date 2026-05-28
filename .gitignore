@@ -8,15 +8,28 @@ wheels/
 
 # Virtual environments
 .venv
+test-venv/
+
+# Test / coverage artifacts
+.coverage
+coverage.json
+htmlcov/
+.pytest_cache/
 
 # Mac related files
 .DS_Store
 */.DS_Store
-./mask*.yaml
+
+# Local Maskit config (root-level only)
+/maskit*.yaml
 
 # Jetbrains related files
 .idea
 .bsp
+
+# Local tooling config (not for the public repo)
+.claude/settings.json
+.mcp.json
 
 .codegraph
 bench_unmask.py
