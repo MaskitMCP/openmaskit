@@ -303,6 +303,61 @@ class TestServerInfo:
         await client.close()
 
 
+class TestVersionCheck:
+    """Test the version_check endpoint."""
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_check_version_supported(self, client):
+        payload = {
+            "supported": True,
+            "update_required": False,
+            "update_available": False,
+            "latest_version": "0.1.0",
+        }
+        route = respx.get("https://test-api.example.com/api/version_check").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        result = await client.check_version()
+        assert result == payload
+        # Version travels in User-Agent
+        assert route.calls.last.request.headers["User-Agent"] == "Maskit/0.1.0"
+        assert route.calls.last.request.headers["X-Maskit-Installation-Id"] == "test-install-123"
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_check_version_update_required(self, client):
+        payload = {
+            "supported": False,
+            "update_required": True,
+            "update_available": True,
+            "latest_version": "0.5.0",
+        }
+        respx.get("https://test-api.example.com/api/version_check").mock(
+            return_value=httpx.Response(200, json=payload)
+        )
+        result = await client.check_version()
+        assert result["update_required"] is True
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_check_version_network_error_returns_none(self, client):
+        respx.get("https://test-api.example.com/api/version_check").mock(
+            side_effect=httpx.TimeoutException("boom")
+        )
+        result = await client.check_version()
+        assert result is None
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_check_version_http_error_returns_none(self, client):
+        respx.get("https://test-api.example.com/api/version_check").mock(
+            return_value=httpx.Response(500, text="internal")
+        )
+        result = await client.check_version()
+        assert result is None
+
+
 class TestOAuthAuthorizeURL:
     """Test OAuth authorization URL building."""
 

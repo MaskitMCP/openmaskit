@@ -12,6 +12,8 @@ from starlette.responses import FileResponse, JSONResponse
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage, JSONRPCRequest
 
+from maskit import __version__
+
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
@@ -29,7 +31,17 @@ async def tool_detail_page(request: Request):
 
 async def api_config(request: Request):
     state = request.app.state.proxy_state
-    return JSONResponse({"mcp_port": state.mcp_port})
+    vs = state.version_status or {}
+    return JSONResponse({
+        "mcp_port": state.mcp_port,
+        "current_version": __version__,
+        "version_status": {
+            "supported": vs.get("supported", True),
+            "update_required": vs.get("update_required", False),
+            "update_available": vs.get("update_available", False),
+            "latest_version": vs.get("latest_version"),
+        },
+    })
 
 
 async def api_targets(request: Request):

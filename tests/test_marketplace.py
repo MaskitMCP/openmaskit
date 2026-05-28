@@ -363,3 +363,107 @@ class TestMarketplaceActivate:
             json={"server_id": "docker"},
         )
         assert resp.status_code == 409
+
+
+class TestApiConfig:
+    """The /api/config endpoint feeds shared.js on every page load."""
+
+    @pytest.mark.anyio
+    async def test_config_includes_version_status_defaults(self, client, state):
+        # state.version_status is None by default
+        resp = await client.get("/api/config")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "mcp_port" in body
+        assert "current_version" in body
+        vs = body["version_status"]
+        # Fail-open defaults when no check has run
+        assert vs == {
+            "supported": True,
+            "update_required": False,
+            "update_available": False,
+            "latest_version": None,
+        }
+
+    @pytest.mark.anyio
+    async def test_config_reflects_version_status(self, client, state):
+        state.version_status = {
+            "supported": False,
+            "update_required": True,
+            "update_available": True,
+            "latest_version": "0.5.0",
+        }
+        resp = await client.get("/api/config")
+        body = resp.json()
+        assert body["version_status"]["update_required"] is True
+        assert body["version_status"]["latest_version"] == "0.5.0"
+
+
+class TestMarketplaceVersionGating:
+    """When the marketplace backend marks this client as unsupported,
+    install and activate must return 426. Other reads/writes are unaffected."""
+
+    @pytest.mark.anyio
+    async def test_install_returns_426_when_update_required(self, client, state):
+        state.version_status = {
+            "supported": False,
+            "update_required": True,
+            "update_available": True,
+            "latest_version": "9.9.9",
+        }
+        resp = await client.post(
+            "/api/marketplace/install",
+            json={"server_id": "docker", "backend_id": "docker-uuid"},
+        )
+        assert resp.status_code == 426
+        body = resp.json()
+        assert "Maskit" in body["error"]
+        assert body["latest_version"] == "9.9.9"
+        # Confirm the install side-effect did NOT happen.
+        assert await state.store.get_server("docker") is None
+
+    @pytest.mark.anyio
+    async def test_activate_returns_426_when_update_required(self, client, state):
+        await state.store.install_server("docker", "Docker", {"transport": "stdio", "command": "uvx"})
+        await state.store.deactivate_server("docker")
+        state.version_status = {
+            "supported": False,
+            "update_required": True,
+            "update_available": True,
+            "latest_version": "9.9.9",
+        }
+        resp = await client.post(
+            "/api/marketplace/activate",
+            json={"server_id": "docker"},
+        )
+        assert resp.status_code == 426
+
+    @pytest.mark.anyio
+    async def test_list_still_works_when_update_required(self, client, state):
+        state.version_status = {"update_required": True, "latest_version": "9.9.9"}
+        resp = await client.get("/api/marketplace")
+        assert resp.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_deactivate_still_works_when_update_required(self, client, state):
+        await state.store.install_server("docker", "Docker", {"transport": "stdio", "command": "uvx"})
+        state.version_status = {"update_required": True, "latest_version": "9.9.9"}
+        resp = await client.post(
+            "/api/marketplace/deactivate",
+            json={"server_id": "docker"},
+        )
+        assert resp.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_install_works_when_only_update_available(self, client, state):
+        state.version_status = {
+            "supported": True,
+            "update_required": False,
+            "update_available": True,
+            "latest_version": "9.9.9",
+        }
+        resp = await client.post(
+            "/api/marketplace/install",
+            json={"server_id": "docker", "backend_id": "docker-uuid"},
+        )
+        assert resp.status_code == 201

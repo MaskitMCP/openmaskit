@@ -85,6 +85,25 @@ class BackendClient:
             logger.warning(f"Failed to fetch backend catalog: {e}")
             return {"data": [], "meta": {"total": 0, "page": 1, "size": size, "total_pages": 0}}
 
+    async def check_version(self) -> dict[str, Any] | None:
+        """Ask the marketplace backend whether this client version is supported.
+
+        The current version travels in the User-Agent header (set in required_headers).
+        Returns the parsed response body, or None on any failure (fail-open).
+        """
+        if not self.marketplace_url:
+            return None
+        try:
+            resp = await self.client.get(
+                f"{self.marketplace_url}/api/version_check",
+                headers=self.required_headers,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.warning(f"version_check failed: {e}")
+            return None
+
     async def get_server_info(self, server_id: str) -> dict[str, Any] | None:
         """Get server details by UUID.
 

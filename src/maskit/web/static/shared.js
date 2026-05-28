@@ -14,24 +14,27 @@ const AGENTS = [
     { id: 'opencode', label: 'OpenCode' },
 ];
 
-// MCP port cache (shared across all pages)
-let _mcpPortCache = null;
+// Shared config (loaded once per page from /api/config)
+let _configPromise = null;
+
+async function getConfig() {
+    if (_configPromise === null) {
+        _configPromise = fetch('/api/config')
+            .then(r => r.json())
+            .catch(() => ({ mcp_port: 9474, version_status: {} }));
+    }
+    return _configPromise;
+}
 
 /**
  * Get the MCP port from the API (cached)
  */
 async function getMcpPort() {
-    if (_mcpPortCache === null) {
-        try {
-            const res = await fetch('/api/config');
-            const data = await res.json();
-            _mcpPortCache = data.mcp_port;
-        } catch {
-            _mcpPortCache = 9474;
-        }
-    }
-    return _mcpPortCache;
+    const cfg = await getConfig();
+    return cfg.mcp_port ?? 9474;
 }
+
+window.MaskitConfig = { get: getConfig };
 
 /**
  * Build the full MCP URL for a target
@@ -252,6 +255,57 @@ function integrationHelper() {
  * Global toast notification helper
  * Compatible with Alpine.js toast systems in pages
  */
+/**
+ * Render the global version-update banner.
+ * - update_required (server says we're unsupported): red, non-dismissible.
+ * - update_available (newer release exists, still supported): info, dismissible
+ *   via localStorage keyed by latest_version so a new release re-shows it.
+ */
+const VERSION_DISMISS_KEY = 'maskit:dismissed_update';
+
+function isUpdateDismissed(latest) {
+    try {
+        return localStorage.getItem(VERSION_DISMISS_KEY) === latest;
+    } catch {
+        return false;
+    }
+}
+
+function dismissUpdate(latest) {
+    try {
+        localStorage.setItem(VERSION_DISMISS_KEY, latest);
+    } catch {}
+    const el = document.getElementById('version-banner');
+    if (el) el.remove();
+}
+window.dismissUpdate = dismissUpdate;
+
+async function renderVersionBanner() {
+    const cfg = await getConfig();
+    const vs = cfg.version_status || {};
+    if (!vs.update_required && !vs.update_available) return;
+    if (vs.update_available && !vs.update_required && isUpdateDismissed(vs.latest_version)) return;
+
+    const required = !!vs.update_required;
+    const banner = document.createElement('div');
+    banner.id = 'version-banner';
+    banner.className = 'version-banner ' + (required ? 'version-banner-warn' : 'version-banner-info');
+    const message = required
+        ? `Maskit ${cfg.current_version} is no longer supported. Update to ${vs.latest_version || 'the latest version'} to install new servers.`
+        : `Maskit ${vs.latest_version} is available (you're on ${cfg.current_version}).`;
+    banner.innerHTML = `
+        <span class="version-banner-text">${message}</span>
+        ${required ? '' : `<button type="button" class="version-banner-dismiss" aria-label="Dismiss" onclick="dismissUpdate('${vs.latest_version || ''}')">&times;</button>`}
+    `;
+    document.body.insertBefore(banner, document.body.firstChild);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderVersionBanner);
+} else {
+    renderVersionBanner();
+}
+
 window.showToast = function(msg, type = 'success') {
     // Dispatch custom event that Alpine.js components can listen to
     const event = new CustomEvent('show-toast', {

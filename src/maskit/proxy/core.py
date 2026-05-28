@@ -192,6 +192,7 @@ class ProxyState:
         self.callback_server: Any | None = None
         self.config_target_ids: set[str] = set()
         self.mcp_port: int = 9474
+        self.version_status: dict[str, Any] | None = None
 
     def get_target(self, name: str) -> TargetState | None:
         return self.targets.get(name)

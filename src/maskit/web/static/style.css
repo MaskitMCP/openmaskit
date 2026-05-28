@@ -4653,3 +4653,46 @@ code {
     padding: 0.75rem;
     border-top: 1px solid var(--border-subtle);
 }
+
+/* --- Version update banner --- */
+.version-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.6rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.version-banner-warn {
+    background: var(--red-dim);
+    border-bottom-color: var(--red-border);
+    color: var(--red);
+}
+
+.version-banner-info {
+    background: var(--blue-dim);
+    border-bottom-color: var(--blue-border);
+    color: var(--blue);
+}
+
+.version-banner-text {
+    flex: 1;
+}
+
+.version-banner-dismiss {
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    opacity: 0.7;
+}
+
+.version-banner-dismiss:hover {
+    opacity: 1;
+}

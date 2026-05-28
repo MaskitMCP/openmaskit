@@ -74,7 +74,8 @@
 
                             <button x-show="!server.installed"
                                     class="btn-primary btn-install"
-                                    :disabled="server.installing"
+                                    :disabled="server.installing || updateRequired"
+                                    :title="updateRequired ? 'Update Maskit to install' : ''"
                                     :aria-label="'Install ' + server.name"
                                     @click.stop="installServer(server)">
                                 <span x-show="!server.installing">Install</span>
@@ -257,6 +258,7 @@ function marketplacePage() {
         search: '',
         loading: true,
         toasts: [],
+        updateRequired: false,
 
         // Pagination state
         currentPage: 1,
@@ -352,6 +354,13 @@ function marketplacePage() {
             const error = urlParams.get('error');
             const message = urlParams.get('message');
             const installed = urlParams.get('installed');
+
+            try {
+                const cfg = await window.MaskitConfig.get();
+                this.updateRequired = !!(cfg.version_status && cfg.version_status.update_required);
+            } catch {
+                this.updateRequired = false;
+            }
 
             try {
                 await this.loadCatalog();

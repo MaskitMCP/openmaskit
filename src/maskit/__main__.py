@@ -335,6 +335,19 @@ async def async_main():
     # Store backend_client in state for token refresh
     state.backend_client = backend_client
 
+    state.version_status = await backend_client.check_version()
+    if state.version_status:
+        if not state.version_status.get("supported", True):
+            logger.warning(
+                "Maskit %s is no longer supported. Latest: %s",
+                maskit_version, state.version_status.get("latest_version"),
+            )
+        elif state.version_status.get("update_available"):
+            logger.info(
+                "Maskit update available: %s (you have %s)",
+                state.version_status.get("latest_version"), maskit_version,
+            )
+
     logger.info("Maskit proxy starting")
     logger.info(f"Dashboard: http://{bind_host}:{config.web_port}")
     logger.info(f"OAuth callback: http://{bind_host}:{config.oauth_port}/callback")

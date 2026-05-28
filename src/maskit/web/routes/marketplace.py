@@ -17,6 +17,22 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
+def _require_supported(state) -> JSONResponse | None:
+    """Return a 426 response if the marketplace backend has declared this
+    Maskit version unsupported. Otherwise return None and let the route proceed.
+    """
+    vs = state.version_status or {}
+    if vs.get("update_required"):
+        return JSONResponse(
+            {
+                "error": "Maskit must be updated to install new servers.",
+                "latest_version": vs.get("latest_version"),
+            },
+            status_code=426,
+        )
+    return None
+
+
 def _build_config_from_server_info(
     server_info: dict,
     user_env_vars: dict | None = None,
@@ -147,6 +163,10 @@ async def marketplace_install(request: Request):
     backend_client = getattr(request.app.state, "backend_client", None)
     oauth_states = getattr(request.app.state, "oauth_states", {})
 
+    blocked = _require_supported(state)
+    if blocked is not None:
+        return blocked
+
     if not backend_client:
         return JSONResponse({"error": "Backend not available"}, status_code=503)
 
@@ -259,6 +279,10 @@ async def marketplace_activate(request: Request):
     state = request.app.state.proxy_state
     store = state.store
     manager = state.target_manager
+
+    blocked = _require_supported(state)
+    if blocked is not None:
+        return blocked
 
     body = await request.json()
     server_id = body.get("server_id", "").strip()
