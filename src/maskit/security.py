@@ -101,6 +101,18 @@ class TokenEncryption:
         encrypted_data = ciphertext[len(self._MAGIC_PREFIX):].encode()
         return self._fernet.decrypt(encrypted_data).decode()
 
+    def encrypt_bytes(self, data: bytes) -> bytes:
+        """Encrypt arbitrary bytes (for BLOB storage, no magic prefix)."""
+        if self._fernet is None:
+            self._fernet = Fernet(self._load_key())
+        return self._fernet.encrypt(data)
+
+    def decrypt_bytes(self, data: bytes) -> bytes:
+        """Decrypt bytes produced by encrypt_bytes."""
+        if self._fernet is None:
+            self._fernet = Fernet(self._load_key())
+        return self._fernet.decrypt(data)
+
 
 def read_token_file(path: Path) -> dict:
     """Read and decrypt token file with auto-migration."""
