@@ -4624,3 +4624,32 @@ code {
         animation: none !important;
     }
 }
+
+/* --- Panel header with right-aligned actions --- */
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.panel-header h2 { margin-bottom: 0; }
+
+.panel-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.traffic-count {
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+}
+
+.traffic-load-more {
+    display: flex;
+    justify-content: center;
+    padding: 0.75rem;
+    border-top: 1px solid var(--border-subtle);
+}

@@ -47,7 +47,7 @@ The system has four concurrent components running in one asyncio event loop (via
 
 3. **Masking Engine** (`masking/engine.py`) — Synchronous mask/unmask using an in-memory cache. Aliases are created in-memory for speed (`_alias_cache`, `_reverse_cache`) and flushed to SQLite periodically by `_flush_loop`. The engine handles both `structuredContent` dicts (path-based masking) and `TextContent` blocks (JSON/Python-repr-parse-then-mask, fallback to string replacement). Supports two mapper types: `regex_replace` (regex pattern matching on text) and `json_field_mask` (dot-notation path targeting specific fields in parsed JSON/repr).
 
-4. **Web UI** (`web/app.py`, Starlette on port 9473) — Dashboard for viewing tool schemas, managing masking rules, trying out tools, and observing live traffic over WebSocket.
+4. **Web UI** (`web/app.py`, Starlette on port 9473) — Dashboard for viewing tool schemas, managing masking rules, trying out tools, and inspecting the traffic audit log (lazy-loaded, paginated).
 
 ### Key data flow
 
@@ -77,6 +77,16 @@ HTTP clients (MCP endpoint and web UI "Try it out") register a waiter by request
 ### Masking engine's dual-layer caching
 
 `MaskingEngine.mask_response()` is synchronous (called from the proxy relay hot path). It writes new aliases to `_pending_writes` which are batch-flushed to SQLite every second by `_flush_loop` in `__main__.py`. This avoids blocking the relay on DB I/O.
+
+### Traffic audit log (`traffic/`)
+
+Tool-call records are persisted to a **separate** SQLite database (`~/.maskit/traffic.db`, configurable via `MASKIT_TRAFFIC_DB_PATH`) so rotation/vacuum is isolated and a corrupt traffic DB can't kill masking config.
+
+- **`TrafficStore` (`traffic/store.py`)** — async aiosqlite wrapper. Opens with `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL` for low-latency batched writes (WAL is critical here — the flush loop writes every 1s and rotation deletes are concurrent with reads from the GET endpoint). Unmasked args + unmasked response columns are encrypted at rest using the shared Fernet key from `security.TokenEncryption`. Masked args/response columns are plaintext (safe to read without the key).
+- **`TrafficBuffer` (`traffic/buffer.py`)** — process-wide in-memory queue. `_intercept_response` (and the two block paths in `_intercept_request`) call `target.traffic_buffer.append(...)` synchronously on **terminal state only** — there are no pending/in-flight rows. `_traffic_flush_loop` in `__main__.py` drains the buffer to the store every 1s. This mirrors the `MaskingEngine._pending_writes` + `_flush_loop` idiom.
+- **Rotation** — `_traffic_rotation_loop` enforces a global row cap (`MASKIT_TRAFFIC_MAX_ROWS`, default 10000) every 5 minutes by deleting the oldest rows beyond the cap.
+- **Lazy UI** — there is no WebSocket stream. The dashboard fetches pages on demand via `GET /api/targets/{target_name}/traffic?limit=&before=<id>`. The endpoint flushes the buffer before reading so the response reflects the latest writes.
+- **Status values** — `ok`, `error`, `blocked`. Blocked entries (hidden tool or guardrail violation) record the unmasked args (encrypted) and put the block reason into `masked_response`.
 
 ### Hidden tools
 
@@ -108,7 +118,9 @@ The `try_parse_structured` utility attempts JSON first, then falls back to `ast.
 
 ### Persistence
 
-SQLite database (default `~/.maskit/store.db`) with tables:
+Two SQLite databases:
+
+**`~/.maskit/store.db`** (masking config + state):
 - `mappings` — alias ↔ real_value (persists across restarts so the same real value always gets the same alias)
 - `rules` — masking rules created via Web UI (merged with config-file rules at startup), supports `action` column (`mask` or `strip`)
 - `response_mappers` — output mapper configs (regex or json_field_mask) with optional `config` JSON column
@@ -116,6 +128,9 @@ SQLite database (default `~/.maskit/store.db`) with tables:
 - `guardrails` — argument validation rules that block tool calls matching dangerous patterns
 - `injections` — argument injection rules that inject/override values before forwarding
 - `mcp_servers` — marketplace and custom servers (id, name, config JSON, active flag). Used for both marketplace installs and custom targets added via the UI
+
+**`~/.maskit/traffic.db`** (audit log, separate file by design):
+- `traffic` — one row per terminal-state tool call. Columns: `id`, `ts`, `target_name`, `tool_name`, `request_id`, `status`, `duration_ms`, `args_enc` (BLOB, Fernet), `response_enc` (BLOB, Fernet), `masked_args` (TEXT), `masked_resp` (TEXT). Indexed on `(target_name, id DESC)`.
 
 ### Marketplace
 
@@ -167,7 +182,7 @@ All target-scoped routes: `/api/targets/{target_name}/...`
 - `GET/POST/PUT/DELETE /api/targets/{target_name}/injections` — argument injection CRUD
 - `GET /api/targets/{target_name}/mappings` — current alias mappings
 - `GET/POST /api/targets/{target_name}/hidden_tools` — hide/unhide tools from the agent
-- `WS /ws/traffic` — live traffic stream
+- `GET /api/targets/{target_name}/traffic?limit=&before=<id>` — paginated audit log (cursor pagination; newest first; flushes pending buffer before reading)
 
 Marketplace routes:
 

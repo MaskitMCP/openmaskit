@@ -299,6 +299,26 @@ class TestWebAppIntegration:
         assert resp.status_code == 403
 
     @pytest.mark.anyio
+    async def test_traffic_endpoint_cross_origin_blocked(self, web_state):
+        """The traffic GET returns encrypted-at-rest unmasked previews — must reject cross-origin."""
+        app = create_app(web_state)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get(
+                "/api/targets/test/traffic", headers={"Origin": EVIL}
+            )
+        assert resp.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_traffic_endpoint_allowed_origin(self, web_state):
+        app = create_app(web_state)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get(
+                "/api/targets/test/traffic", headers={"Origin": ALLOWED}
+            )
+        # Middleware allows; the route's own response (200 or 404) is fine.
+        assert resp.status_code != 403
+
+    @pytest.mark.anyio
     async def test_static_page_unaffected_by_origin(self, web_state):
         """GET / should serve the dashboard regardless of Origin (it's HTML, not data)."""
         app = create_app(web_state)

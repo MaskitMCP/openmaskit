@@ -221,24 +221,55 @@
         </section>
 
         <section class="panel traffic-panel">
-            <h2>Live Traffic</h2>
-            <p x-show="traffic.length === 0" class="muted">No traffic yet. Call a tool to see requests and responses here.</p>
-            <div class="traffic-split" x-show="traffic.length > 0">
+            <div class="panel-header">
+                <h2>Traffic</h2>
+                <div class="panel-header-actions">
+                    <span class="muted traffic-count"
+                          x-show="trafficLoaded && traffic.length > 0"
+                          x-text="traffic.length + (hasMoreTraffic ? '+' : '') + ' entries'"></span>
+                    <button class="btn-small"
+                            x-show="trafficLoaded"
+                            :disabled="trafficLoading"
+                            @click="refreshTraffic()"
+                            x-text="trafficLoading ? 'Loading…' : 'Refresh'"></button>
+                    <button class="btn-primary btn-small"
+                            x-show="!trafficLoaded"
+                            :disabled="trafficLoading"
+                            @click="loadTraffic()"
+                            x-text="trafficLoading ? 'Loading…' : 'Load traffic'"></button>
+                </div>
+            </div>
+
+            <p x-show="!trafficLoaded && !trafficLoading" class="muted">
+                No traffic loaded yet. Click "Load traffic" to fetch recent calls.
+            </p>
+
+            <p x-show="trafficLoaded && traffic.length === 0" class="muted">
+                No traffic recorded yet. Call a tool to see requests and responses here.
+            </p>
+
+            <div class="traffic-split" x-show="trafficLoaded && traffic.length > 0">
                 <div class="traffic-list">
-                    <template x-for="entry in traffic.slice().reverse()" :key="entry.id">
+                    <template x-for="entry in traffic" :key="entry.id">
                         <div class="traffic-row"
                              :class="{
                                  'traffic-row-selected': selectedEntry && selectedEntry.id === entry.id,
                                  'traffic-row-blocked': entry.status === 'blocked',
-                                 'traffic-row-pending': entry.status === 'pending'
+                                 'traffic-row-pending': entry.status === 'error'
                              }"
                              @click="selectedEntry = entry">
                             <span class="traffic-icon" x-text="entryIcon(entry)"></span>
-                            <span class="traffic-tool" x-text="entry.tool_name || 'tools/list'"></span>
-                            <span class="traffic-duration" x-show="entry.duration_ms != null" x-text="Math.round(entry.duration_ms) + 'ms'"></span>
-                            <span class="traffic-time" x-text="formatTime(entry.timestamp)"></span>
+                            <span class="traffic-tool" x-text="entry.tool_name || '—'"></span>
+                            <span class="traffic-duration" x-show="entry.duration_ms != null" x-text="entry.duration_ms + 'ms'"></span>
+                            <span class="traffic-time" x-text="formatTime(entry.ts)"></span>
                         </div>
                     </template>
+                    <div class="traffic-load-more" x-show="hasMoreTraffic">
+                        <button class="btn-small"
+                                :disabled="trafficLoading"
+                                @click="loadMore()"
+                                x-text="trafficLoading ? 'Loading…' : 'Load more'"></button>
+                    </div>
                 </div>
 
                 <div class="traffic-detail" x-show="selectedEntry"
@@ -248,52 +279,45 @@
                     <template x-if="selectedEntry">
                         <div>
                             <div class="detail-header">
-                                <h3 x-text="selectedEntry.tool_name || 'tools/list'"></h3>
+                                <h3 x-text="selectedEntry.tool_name || '—'"></h3>
                                 <button class="detail-close" @click="selectedEntry = null" aria-label="Close details">&times;</button>
                             </div>
 
                             <div class="detail-meta">
-                                <span class="detail-badge" :class="'badge-' + selectedEntry.status" x-text="selectedEntry.status"></span>
-                                <span x-show="selectedEntry.duration_ms != null" class="detail-duration" x-text="selectedEntry.duration_ms.toFixed(1) + ' ms'"></span>
-                                <span class="detail-time" x-text="new Date(selectedEntry.timestamp * 1000).toLocaleTimeString()"></span>
-                            </div>
-
-                            <div x-show="selectedEntry.reason" class="detail-section detail-blocked-reason">
-                                <h4>Blocked</h4>
-                                <p x-text="selectedEntry.reason"></p>
+                                <span class="detail-badge"
+                                      :class="{
+                                          'badge-complete': selectedEntry.status === 'ok',
+                                          'badge-blocked': selectedEntry.status === 'blocked',
+                                          'badge-pending': selectedEntry.status === 'error'
+                                      }"
+                                      x-text="selectedEntry.status"></span>
+                                <span x-show="selectedEntry.duration_ms != null"
+                                      class="detail-duration"
+                                      x-text="selectedEntry.duration_ms + ' ms'"></span>
+                                <span class="detail-time"
+                                      x-text="new Date(selectedEntry.ts * 1000).toLocaleTimeString()"></span>
                             </div>
 
                             <div x-show="selectedEntry.masked_args" class="detail-section">
                                 <h4>Arguments (as sent by agent)</h4>
-                                <pre class="detail-code" x-text="JSON.stringify(selectedEntry.masked_args, null, 2)"></pre>
+                                <pre class="detail-code" x-text="prettyJson(selectedEntry.masked_args)"></pre>
                             </div>
 
-                            <div x-show="selectedEntry.unmasked_fields && selectedEntry.unmasked_fields.length > 0" class="detail-section">
-                                <h4>Fields Unmasked</h4>
-                                <ul class="detail-field-list">
-                                    <template x-for="f in selectedEntry.unmasked_fields" :key="f">
-                                        <li x-text="f"></li>
-                                    </template>
-                                </ul>
+                            <div x-show="selectedEntry.unmasked_args && selectedEntry.unmasked_args !== selectedEntry.masked_args"
+                                 class="detail-section">
+                                <h4>Arguments (after unmasking)</h4>
+                                <pre class="detail-code detail-preview" x-text="prettyJson(selectedEntry.unmasked_args)"></pre>
                             </div>
 
-                            <div x-show="selectedEntry.masked_response_fields && selectedEntry.masked_response_fields.length > 0" class="detail-section">
-                                <h4>Fields Masked in Response</h4>
-                                <ul class="detail-field-list">
-                                    <template x-for="f in selectedEntry.masked_response_fields" :key="f">
-                                        <li x-text="f"></li>
-                                    </template>
-                                </ul>
-                            </div>
-
-                            <div x-show="selectedEntry.response_preview" class="detail-section">
+                            <div x-show="selectedEntry.unmasked_response" class="detail-section">
                                 <h4>Response (from server)</h4>
-                                <pre class="detail-code detail-preview" x-text="selectedEntry.response_preview"></pre>
+                                <pre class="detail-code detail-preview" x-text="selectedEntry.unmasked_response"></pre>
                             </div>
 
-                            <div x-show="selectedEntry.masked_preview && selectedEntry.masked_preview !== selectedEntry.response_preview" class="detail-section">
+                            <div x-show="selectedEntry.masked_response && selectedEntry.masked_response !== selectedEntry.unmasked_response"
+                                 class="detail-section">
                                 <h4>Response (sent to agent)</h4>
-                                <pre class="detail-code detail-preview" x-text="selectedEntry.masked_preview"></pre>
+                                <pre class="detail-code" x-text="selectedEntry.masked_response"></pre>
                             </div>
                         </div>
                     </template>
@@ -373,8 +397,10 @@ function toolsPage() {
         mappings: [],
         traffic: [],
         selectedEntry: null,
+        trafficLoaded: false,
+        trafficLoading: false,
+        hasMoreTraffic: false,
         loading: true,
-        ws: null,
         _mappingsInterval: null,
         newRule: { field_path: '', alias_prefix: '' },
         newMapper: { pattern: '', alias_prefix: '' },
@@ -441,7 +467,6 @@ function toolsPage() {
                 this.showToast('Failed to load data', 'error');
             }
             this.loading = false;
-            this.connectWebSocket();
             this._mappingsInterval = setInterval(() => this.loadMappings(), 5000);
         },
 
@@ -564,54 +589,59 @@ function toolsPage() {
             }
         },
 
-        _wsReconnectDelay: 2000,
-
-        connectWebSocket() {
-            if (this.ws) {
-                this.ws.onclose = null;
-                this.ws.close();
+        async loadTraffic() {
+            this.trafficLoading = true;
+            try {
+                const res = await fetch(`${this.apiBase()}/traffic?limit=50`);
+                if (!res.ok) throw new Error('Failed to load traffic');
+                const data = await res.json();
+                this.traffic = data.entries;
+                this.hasMoreTraffic = data.has_more;
+                this.trafficLoaded = true;
+            } catch (e) {
+                this.showToast('Failed to load traffic', 'error');
+            } finally {
+                this.trafficLoading = false;
             }
-            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            this.ws = new WebSocket(`${proto}//${location.host}/ws/targets/${encodeURIComponent(this.targetName)}/traffic`);
-            this.ws.onopen = () => {
-                this._wsReconnectDelay = 2000;
-                this.traffic = [];
-                this.selectedEntry = null;
-            };
-            this.ws.onmessage = (event) => {
-                try {
-                    const msg = JSON.parse(event.data);
-                    if (msg.type === 'new') {
-                        this.traffic.push(msg.entry);
-                        if (this.traffic.length > 100) {
-                            this.traffic = this.traffic.slice(-100);
-                        }
-                    } else if (msg.type === 'update') {
-                        const idx = this.traffic.findIndex(e => e.id === msg.id);
-                        if (idx !== -1) {
-                            this.traffic[idx] = { ...this.traffic[idx], ...msg.updates };
-                            if (this.selectedEntry && this.selectedEntry.id === msg.id) {
-                                this.selectedEntry = this.traffic[idx];
-                            }
-                        }
-                    }
-                } catch {}
-            };
-            this.ws.onclose = () => {
-                setTimeout(() => this.connectWebSocket(), this._wsReconnectDelay);
-                this._wsReconnectDelay = Math.min(this._wsReconnectDelay * 2, 30000);
-            };
+        },
+
+        async loadMore() {
+            if (this.trafficLoading || !this.hasMoreTraffic || this.traffic.length === 0) return;
+            this.trafficLoading = true;
+            try {
+                const cursor = this.traffic[this.traffic.length - 1].id;
+                const res = await fetch(`${this.apiBase()}/traffic?limit=50&before=${cursor}`);
+                if (!res.ok) throw new Error('Failed to load more');
+                const data = await res.json();
+                this.traffic = this.traffic.concat(data.entries);
+                this.hasMoreTraffic = data.has_more;
+            } catch (e) {
+                this.showToast('Failed to load more', 'error');
+            } finally {
+                this.trafficLoading = false;
+            }
+        },
+
+        async refreshTraffic() {
+            this.selectedEntry = null;
+            this.traffic = [];
+            await this.loadTraffic();
         },
 
         entryIcon(entry) {
             if (entry.status === 'blocked') return '✘';
-            if (entry.status === 'pending') return '•';
-            if (entry.type === 'tools_list') return '☰';
+            if (entry.status === 'error') return '!';
             return '✓';
         },
 
         formatTime(ts) {
             return new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+        },
+
+        prettyJson(s) {
+            if (s == null) return '';
+            try { return JSON.stringify(JSON.parse(s), null, 2); }
+            catch { return s; }
         },
 
         async openIntegration() {

@@ -26,7 +26,7 @@ AI coding assistants see everything your MCP tools return — production databas
 - 🛡️ **Guardrails** — Block dangerous operations before they reach servers
 - 💉 **Injections** — Force safe defaults (e.g., `read_only: true`)
 - 🏪 **Marketplace** — One-click server installation with OAuth support
-- 📊 **Dashboard** — Visual tool management and live traffic monitoring
+- 📊 **Dashboard** — Visual tool management and encrypted traffic audit log
 
 ## Security Features
 
@@ -192,15 +192,18 @@ MASKIT_HOST=0.0.0.0                    # Bind address (default: 127.0.0.1)
 MASKIT_ENCRYPTION_KEY=<base64-key>     # Override token encryption key
 MASKIT_LOG_FORMAT=json                 # JSON logging for production
 MASKIT_SHUTDOWN_TIMEOUT=30             # Graceful shutdown timeout (seconds)
-MASKIT_ALLOWED_ORIGINS=https://a,https://b  # Extra origins permitted to call /api/* and /ws/* (comma-separated). The dashboard's localhost origin is always allowed.
+MASKIT_TRAFFIC_DB_PATH=/path/traffic.db  # Override traffic audit DB location (default: ~/.maskit/traffic.db)
+MASKIT_TRAFFIC_MAX_ROWS=10000          # Global cap on traffic audit log rows (oldest dropped first)
+MASKIT_ALLOWED_ORIGINS=https://a,https://b  # Extra origins permitted to call /api/* (comma-separated). The dashboard's localhost origin is always allowed.
 ```
 
 ### Backup and Data Safety
 
 **What to backup:**
 
-1. **Encryption key**: `~/.maskit/.key` (required to decrypt OAuth tokens)
+1. **Encryption key**: `~/.maskit/.key` (required to decrypt OAuth tokens AND the traffic audit log)
 2. **Database**: `~/.maskit/store.db` (masking rules, aliases, server configs)
+3. **Traffic audit log** (optional): `~/.maskit/traffic.db` — historical tool calls. Safe to drop; losing it doesn't break Maskit.
 
 ```bash
 # Backup both critical files
@@ -266,7 +269,7 @@ Open `http://127.0.0.1:9473` to:
 - **Masking rules**: Configure input/output masking per tool
 - **Guardrails**: Block dangerous operations by pattern
 - **Injections**: Force safe argument defaults
-- **Live traffic**: Monitor tool calls and alias mappings in real-time
+- **Traffic audit log**: Inspect recent tool calls on demand — encrypted at rest, paginated, lazily loaded (click "Load traffic" to fetch)
 
 ### Server States
 

@@ -74,7 +74,7 @@ def create_app(
         injections_update,
     )
     from maskit.web.routes.rules import rules_create, rules_delete, rules_list, rules_update
-    from maskit.web.routes.traffic import api_mappings
+    from maskit.web.routes.traffic import api_mappings, api_traffic
     from maskit.web.health import health_check
 
     routes = [
@@ -122,6 +122,7 @@ def create_app(
         Route("/api/targets/{target_name}/hidden_tools", hidden_tools_list, methods=["GET"]),
         Route("/api/targets/{target_name}/hidden_tools/toggle", hidden_tools_toggle, methods=["POST"]),
         Route("/api/targets/{target_name}/mappings", api_mappings),
+        Route("/api/targets/{target_name}/traffic", api_traffic),
         Route("/targets/{target_name}/tools/{tool_name:path}", tool_detail_page),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static"),
     ]
