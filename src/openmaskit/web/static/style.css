@@ -4013,6 +4013,11 @@ code {
     margin-bottom: 0.75rem;
 }
 
+.integration-snippet-tabbed {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
 .integration-snippet pre {
     margin: 0;
     font-family: var(--font-mono);
@@ -4056,6 +4061,11 @@ code {
     font-size: 0.78rem;
     color: var(--text-muted);
     line-height: 1.5;
+}
+
+.integration-note-above {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-secondary);
 }
 
 .integration-note code {

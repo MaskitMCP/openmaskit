@@ -361,23 +361,23 @@
                 <div class="integration-agents">
                     <template x-for="a in agents" :key="a.id">
                         <button class="integration-agent-btn" :class="{ active: integration.agent === a.id }"
-                                @click="integration.agent = a.id; integration.copied = false; integration.mode = hasCli() ? 'cli' : 'json'"
+                                @click="integration.agent = a.id; integration.copied = false; integration.mode = 'json'"
                                 x-text="a.label"></button>
                     </template>
                 </div>
 
-                <div class="response-tabs" style="margin-bottom: 0;">
-                    <button x-show="hasCli()" class="response-tab" :class="{'response-tab-active': integration.mode === 'cli'}" @click="integration.mode = 'cli'; integration.copied = false">CLI</button>
+                <div x-show="hasCli()" class="response-tabs" style="margin-bottom: 0;">
+                    <button class="response-tab" :class="{'response-tab-active': integration.mode === 'cli'}" @click="integration.mode = 'cli'; integration.copied = false">CLI</button>
                     <button class="response-tab" :class="{'response-tab-active': integration.mode === 'json'}" @click="integration.mode = 'json'; integration.copied = false">JSON</button>
                 </div>
 
-                <div class="integration-snippet" style="border-top-left-radius: 0; border-top-right-radius: 0;">
+                <p x-show="integration.mode === 'json'" class="integration-note integration-note-above" x-text="getNote()"></p>
+
+                <div class="integration-snippet" :class="{ 'integration-snippet-tabbed': hasCli() && integration.mode === 'cli' }">
                     <button class="integration-copy-btn" :class="{ copied: integration.copied }" @click="copySnippet()"
                             x-text="integration.copied ? 'Copied!' : 'Copy'"></button>
                     <pre x-text="integration.mode === 'cli' ? getCliSnippet() : getSnippet()"></pre>
                 </div>
-
-                <p x-show="integration.mode === 'json'" class="integration-note" x-text="getNote()"></p>
             </div>
         </div>
     </div>

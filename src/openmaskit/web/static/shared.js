@@ -44,10 +44,12 @@ function buildMcpUrl(targetName, mcpPort) {
 }
 
 /**
- * Check if agent supports CLI integration
+ * Check if agent supports a self-contained CLI integration.
+ * Only true when a single command genuinely completes the setup — not when
+ * the CLI requires a JSON file to already exist (e.g. `codex --mcp-config`).
  */
 function hasCli(agentId) {
-    return ['claude-code', 'codex'].includes(agentId);
+    return ['claude-code', 'vscode'].includes(agentId);
 }
 
 /**
@@ -60,8 +62,8 @@ function getCliSnippet(targetName, mcpPort, agentId) {
     switch (agentId) {
         case 'claude-code':
             return `claude mcp add --scope project ${name} --transport http ${url}`;
-        case 'codex':
-            return `codex --mcp-config mcp.json`;
+        case 'vscode':
+            return `code --add-mcp '${JSON.stringify({ name, type: 'http', url })}'`;
         default:
             return '';
     }
