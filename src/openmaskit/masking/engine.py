@@ -294,8 +294,8 @@ class MaskingEngine:
             r for r in self._rules if r.active and r.matches_tool(tool_name)
         ]
         if applicable_rules:
-            if "structuredContent" in result and isinstance(result["structuredContent"], dict):
-                result["structuredContent"] = self._mask_dict(
+            if "structuredContent" in result and isinstance(result["structuredContent"], (dict, list)):
+                result["structuredContent"] = self._mask_structured(
                     result["structuredContent"], tool_name, applicable_rules
                 )
 
@@ -338,6 +338,21 @@ class MaskingEngine:
                     set_nested_value(data, rule.field_path, alias)
         return data
 
+    def _mask_structured(
+        self, data: Any, tool_name: str, rules: list[MaskingRule]
+    ) -> Any:
+        """Apply rules to a structured payload that may be a dict, a list of
+        dicts, or arbitrarily nested combinations. Rules target dict items
+        only; list elements are recursed into so the same rule applies to
+        every dict in the list."""
+        if isinstance(data, dict):
+            return self._mask_dict(data, tool_name, rules)
+        if isinstance(data, list):
+            for i, item in enumerate(data):
+                if isinstance(item, (dict, list)):
+                    data[i] = self._mask_structured(item, tool_name, rules)
+        return data
+
     def _get_or_create_alias(
         self, real_value: str, tool_name: str, field_path: str, prefix: str
     ) -> str:
@@ -367,8 +382,8 @@ class MaskingEngine:
             return block
 
         parse_result = try_parse_structured(text)
-        if parse_result is not None and isinstance(parse_result.data, dict):
-            masked = self._mask_dict(parse_result.data, tool_name, rules)
+        if parse_result is not None and isinstance(parse_result.data, (dict, list)):
+            masked = self._mask_structured(parse_result.data, tool_name, rules)
             block["text"] = serialize(masked, parse_result.format)
             return block
 

@@ -1,0 +1,16 @@
+{
+    "id": "masking",
+    "title": "Masking",
+    "steps": [
+        {
+            "text": "Masking replaces sensitive values in tool responses with stable aliases. The AI sees the aliases; OpenMaskit swaps them back to real values when the agent sends them in a subsequent call.",
+            "target": "section.panel:contains('Masking')",
+            "position": "bottom"
+        },
+        {
+            "text": "You can write a regex pattern here at any time, but Preview needs a real response to test against. Call your tool in 'Try It Out' above first — then you can either click 'Mask' on a value in the tree, or come back and preview a regex.",
+            "target": ".mapper-form",
+            "position": "top"
+        }
+    ]
+}

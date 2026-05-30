@@ -135,148 +135,79 @@
             </div>
         </section>
 
-        <!-- Input Masking -->
+        <!-- Masking -->
         <section class="panel">
             <h2>
-                Input Masking
-                <button class="help-icon" onclick="startTutorial('input-masking')"
-                        title="Show tutorial" aria-label="Show input masking tutorial"></button>
+                Masking
+                <button class="help-icon" @click="startTutorial(tryResult ? 'masking-with-result' : 'masking')"
+                        title="Show tutorial" aria-label="Show masking tutorial"></button>
             </h2>
-            <p class="section-hint">Mask specific input fields so the AI agent sees aliases instead of real values.</p>
+            <p class="section-hint">Mask sensitive values in tool responses. Click <strong>Mask</strong> on a node in the tree above for point-and-click, or add a regex pattern below. Aliases are auto-unmasked when the agent sends them back.</p>
 
-            <div x-show="toolRules.length > 0" style="margin-bottom: 1rem;">
-                <h3 class="subsection-title">Active Rules</h3>
+            <div x-show="toolMaskingEntries.length > 0" style="margin-bottom: 1rem;">
+                <h3 class="subsection-title">Active</h3>
                 <table>
                     <thead>
                         <tr>
-                            <th>Field Path</th>
-                            <th>Action</th>
+                            <th>Type</th>
+                            <th>Pattern</th>
                             <th>Alias Prefix</th>
                             <th>Scope</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        <template x-for="rule in toolRules" :key="rule.id">
+                        <template x-for="entry in toolMaskingEntries" :key="entry.kind + ':' + entry.id">
                             <tr>
-                                <td><code x-text="rule.field_path"></code></td>
-                                <td><span class="badge-tool" x-text="rule.action || 'mask'"></span></td>
                                 <td>
-                                    <span x-show="(rule.action || 'mask') === 'strip'">—</span>
-                                    <span x-show="(rule.action || 'mask') !== 'strip' && editingRule?.id !== rule.id" x-text="rule.alias_prefix || ('_masked_' + rule.field_path.split('.').pop())"></span>
-                                    <input x-show="(rule.action || 'mask') !== 'strip' && editingRule?.id === rule.id" type="text" class="edit-input" x-model="editingRule.alias_prefix" @keydown.enter="saveEditRule()" @keydown.escape="cancelEditRule()">
+                                    <span x-show="entry.type === 'Path'" class="badge-tool">Path</span>
+                                    <span x-show="entry.type === 'Strip'" class="badge-tool">Strip</span>
+                                    <span x-show="entry.type === 'JSON path'" class="badge-type badge-json">JSON path</span>
+                                    <span x-show="entry.type === 'Regex'" class="badge-type badge-regex">Regex</span>
                                 </td>
                                 <td>
-                                    <span x-show="rule.tool_name === '*'" class="badge-global">Global</span>
-                                    <span x-show="rule.tool_name !== '*'" class="badge-tool">This tool</span>
+                                    <template x-if="entry.kind === 'mapper' && editingMapper?.id === entry.id">
+                                        <input type="text" class="edit-input mono-input" x-model="editingMapper.pattern" @keydown.escape="cancelEditMapper()">
+                                    </template>
+                                    <template x-if="!(entry.kind === 'mapper' && editingMapper?.id === entry.id)">
+                                        <code x-text="entry.pattern"></code>
+                                    </template>
                                 </td>
-                                <td class="actions-cell">
-                                    <template x-if="editingRule?.id !== rule.id">
-                                        <span class="action-buttons">
-                                            <button class="btn-edit" @click="startEditRule(rule)">Edit</button>
-                                            <button class="btn-danger" @click="deleteRule(rule.id)">Delete</button>
+                                <td>
+                                    <span x-show="entry.type === 'Strip'">—</span>
+                                    <template x-if="entry.type !== 'Strip'">
+                                        <span>
+                                            <span x-show="entry.kind === 'rule' && editingRule?.id !== entry.id" x-text="entry.alias_prefix"></span>
+                                            <input x-show="entry.kind === 'rule' && editingRule?.id === entry.id" type="text" class="edit-input" x-model="editingRule.alias_prefix" @keydown.enter="saveEditRule()" @keydown.escape="cancelEditRule()">
+                                            <span x-show="entry.kind === 'mapper' && editingMapper?.id !== entry.id" x-text="entry.alias_prefix"></span>
+                                            <input x-show="entry.kind === 'mapper' && editingMapper?.id === entry.id" type="text" class="edit-input" x-model="editingMapper.alias_prefix" @keydown.enter="saveEditMapper()" @keydown.escape="cancelEditMapper()">
                                         </span>
                                     </template>
-                                    <template x-if="editingRule?.id === rule.id">
+                                </td>
+                                <td>
+                                    <span x-show="entry.scope === 'global'" class="badge-global">Global</span>
+                                    <span x-show="entry.scope === 'tool'" class="badge-tool">This tool</span>
+                                </td>
+                                <td class="actions-cell">
+                                    <template x-if="entry.kind === 'rule' && editingRule?.id !== entry.id">
+                                        <span class="action-buttons">
+                                            <button class="btn-edit" @click="startEditRule(entry.raw)" x-show="entry.type !== 'Strip'">Edit</button>
+                                            <button class="btn-danger" @click="deleteRule(entry.id)">Delete</button>
+                                        </span>
+                                    </template>
+                                    <template x-if="entry.kind === 'rule' && editingRule?.id === entry.id">
                                         <span class="action-buttons">
                                             <button class="btn-save-inline" @click="saveEditRule()">Save</button>
                                             <button class="btn-cancel" @click="cancelEditRule()">Cancel</button>
                                         </span>
                                     </template>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
-            </div>
-
-            <div x-show="tool && tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0">
-                <h3 class="subsection-title">Schema Fields</h3>
-                <p class="section-hint">Click "Mask" to add a rule for a field.</p>
-                <div class="schema-fields">
-                    <template x-for="(prop, name) in (tool ? tool.inputSchema?.properties || {} : {})" :key="name">
-                        <div class="field-mask-row">
-                            <code x-text="name"></code>
-                            <span class="field-type" x-text="prop.type || 'any'"></span>
-                            <span class="field-desc" x-text="prop.description || ''"></span>
-                            <button class="btn-small" @click="quickAddRule(name)" x-show="!hasRuleForField(name)">Mask</button>
-                            <span x-show="hasRuleForField(name)" class="muted">masked</span>
-                        </div>
-                    </template>
-                </div>
-            </div>
-
-            <div class="manual-rule-form" style="margin-top: 1rem;">
-                <h3 class="subsection-title">Custom Field Path</h3>
-                <form @submit.prevent="addRule()" class="form-row">
-                    <label>
-                        Field Path
-                        <input type="text" x-model="newRule.field_path" placeholder="e.g. nested.field.path" required>
-                    </label>
-                    <label>
-                        Action
-                        <select x-model="newRule.action">
-                            <option value="mask">Mask</option>
-                            <option value="strip">Strip</option>
-                        </select>
-                    </label>
-                    <label x-show="newRule.action === 'mask'">
-                        Alias Prefix
-                        <input type="text" x-model="newRule.alias_prefix" placeholder="auto from field name">
-                    </label>
-                    <button type="submit" class="btn-primary">Add Rule</button>
-                </form>
-            </div>
-        </section>
-
-        <!-- Output Masking -->
-        <section class="panel">
-            <h2>
-                Output Masking
-                <button class="help-icon" @click="startTutorial(tryResult ? 'output-mappers-with-result' : 'output-mappers')"
-                        title="Show tutorial" aria-label="Show output mappers tutorial"></button>
-            </h2>
-            <p class="section-hint">Apply regex patterns to mask sensitive values in tool responses.</p>
-
-            <div x-show="toolMappers.length > 0" style="margin-bottom: 1rem;">
-                <h3 class="subsection-title">Active Mappers</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>Pattern / Path</th>
-                            <th>Alias Prefix</th>
-                            <th>Scope</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="mapper in toolMappers" :key="mapper.id">
-                            <tr>
-                                <td>
-                                    <span x-show="mapper.mapper_type === 'regex_replace'" class="badge-type badge-regex">Regex</span>
-                                    <span x-show="mapper.mapper_type === 'json_field_mask'" class="badge-type badge-json">JSON Field</span>
-                                </td>
-                                <td>
-                                    <code x-show="editingMapper?.id !== mapper.id" x-text="mapper.pattern"></code>
-                                    <input x-show="editingMapper?.id === mapper.id" type="text" class="edit-input mono-input" x-model="editingMapper.pattern" @keydown.escape="cancelEditMapper()">
-                                </td>
-                                <td>
-                                    <span x-show="editingMapper?.id !== mapper.id" x-text="mapper.alias_prefix"></span>
-                                    <input x-show="editingMapper?.id === mapper.id" type="text" class="edit-input" x-model="editingMapper.alias_prefix" @keydown.enter="saveEditMapper()" @keydown.escape="cancelEditMapper()">
-                                </td>
-                                <td>
-                                    <span x-show="mapper.tool_name === '*'" class="badge-global">Global</span>
-                                    <span x-show="mapper.tool_name !== '*'" class="badge-tool">This tool</span>
-                                </td>
-                                <td class="actions-cell">
-                                    <template x-if="editingMapper?.id !== mapper.id">
+                                    <template x-if="entry.kind === 'mapper' && editingMapper?.id !== entry.id">
                                         <span class="action-buttons">
-                                            <button class="btn-edit" @click="startEditMapper(mapper)">Edit</button>
-                                            <button class="btn-danger" @click="deleteMapper(mapper.id)">Delete</button>
+                                            <button class="btn-edit" @click="startEditMapper(entry.raw)">Edit</button>
+                                            <button class="btn-danger" @click="deleteMapper(entry.id)">Delete</button>
                                         </span>
                                     </template>
-                                    <template x-if="editingMapper?.id === mapper.id">
+                                    <template x-if="entry.kind === 'mapper' && editingMapper?.id === entry.id">
                                         <span class="action-buttons">
                                             <button class="btn-save-inline" @click="saveEditMapper()">Save</button>
                                             <button class="btn-cancel" @click="cancelEditMapper()">Cancel</button>
@@ -289,12 +220,8 @@
                 </table>
             </div>
 
-            <div x-show="!tryResult" class="section-hint">
-                Call the tool above to see a response, then add output mappers based on the result.
-            </div>
-
-            <div x-show="tryResult">
-                <h3 class="subsection-title">Add Mapper</h3>
+            <div>
+                <h3 class="subsection-title">Add a regex pattern</h3>
                 <div class="mapper-form">
                     <label class="try-field">
                         <span>Regex Pattern</span>
@@ -305,10 +232,11 @@
                         <input type="text" x-model="newMapper.alias_prefix" placeholder="channel">
                     </label>
                     <div class="mapper-actions">
-                        <button class="btn-primary" @click="previewMapper()" :disabled="mapperPreviewLoading || !newMapper.pattern || !newMapper.alias_prefix">
+                        <button class="btn-primary" @click="previewMapper()" :disabled="mapperPreviewLoading || !newMapper.pattern || !newMapper.alias_prefix || !tryResult">
                             <span x-text="mapperPreviewLoading ? 'Loading...' : 'Preview'"></span>
                         </button>
                         <button x-show="mapperPreview" class="btn-save-inline" @click="saveMapper()">Save Mapper</button>
+                        <span x-show="!tryResult" class="section-hint" style="margin: 0;">Call the tool above to enable Preview.</span>
                     </div>
 
                     <div x-show="mapperPreviewError" class="try-error">
@@ -335,6 +263,29 @@
                     </div>
                 </div>
             </div>
+
+            <details class="manual-rule-form" style="margin-top: 1rem;">
+                <summary class="subsection-title" style="cursor: pointer;">Add a field path manually</summary>
+                <p class="section-hint">For paths you can't see in a sample response yet. Use dot notation (e.g. <code>data.host</code>).</p>
+                <form @submit.prevent="addRule()" class="form-row">
+                    <label>
+                        Field Path
+                        <input type="text" x-model="newRule.field_path" placeholder="e.g. nested.field.path" required>
+                    </label>
+                    <label>
+                        Action
+                        <select x-model="newRule.action">
+                            <option value="mask">Mask</option>
+                            <option value="strip">Strip</option>
+                        </select>
+                    </label>
+                    <label x-show="newRule.action === 'mask'">
+                        Alias Prefix
+                        <input type="text" x-model="newRule.alias_prefix" placeholder="auto from field name">
+                    </label>
+                    <button type="submit" class="btn-primary">Add Rule</button>
+                </form>
+            </details>
         </section>
 
         <!-- Argument Guardrails -->
@@ -533,10 +484,32 @@ function toolDetail() {
             return this.injections.filter(i => i.tool_name === this.toolName || i.tool_name === '*');
         },
 
-        hasRuleForField(fieldName) {
-            return this.rules.some(r =>
-                (r.tool_name === this.toolName || r.tool_name === '*') && r.field_path === fieldName
-            );
+        get toolMaskingEntries() {
+            const ruleEntries = this.toolRules.map(r => {
+                const action = r.action || 'mask';
+                return {
+                    kind: 'rule',
+                    id: r.id,
+                    type: action === 'strip' ? 'Strip' : 'Path',
+                    pattern: r.field_path,
+                    alias_prefix: action === 'strip' ? '' : (r.alias_prefix || ('_masked_' + r.field_path.split('.').pop())),
+                    scope: r.tool_name === '*' ? 'global' : 'tool',
+                    raw: r,
+                };
+            });
+            const mapperEntries = this.toolMappers.map(m => ({
+                kind: 'mapper',
+                id: m.id,
+                type: m.mapper_type === 'json_field_mask' ? 'JSON path' : 'Regex',
+                pattern: m.pattern,
+                alias_prefix: m.alias_prefix,
+                scope: m.tool_name === '*' ? 'global' : 'tool',
+                raw: m,
+            }));
+            return [...ruleEntries, ...mapperEntries].sort((a, b) => {
+                if (a.kind !== b.kind) return a.kind === 'rule' ? -1 : 1;
+                return a.id - b.id;
+            });
         },
 
         showToast(msg, type = 'success') {
@@ -741,23 +714,6 @@ function toolDetail() {
                 if (data.id) {
                     this.editingMapper = { id: data.id, pattern: path, alias_prefix: aliasPrefix };
                 }
-            } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
-        },
-
-        async quickAddRule(fieldName) {
-            try {
-                const res = await fetch(`${this.apiBase()}/rules/create`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        tool_name: this.toolName,
-                        field_path: fieldName,
-                        alias_prefix: '',
-                    }),
-                });
-                if (!res.ok) { const d = await res.json(); this.showToast(d.error || 'Failed to add rule', 'error'); return; }
-                this.showToast('Rule added');
-                await this.loadRules();
             } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
 

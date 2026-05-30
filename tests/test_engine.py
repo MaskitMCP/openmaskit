@@ -364,6 +364,67 @@ class TestStripAction:
         assert masked["structuredContent"]["user"]["name"] == "Alice"
 
     @pytest.mark.anyio
+    async def test_strip_removes_field_from_every_dict_in_list_text(self, store):
+        rules = [
+            MaskingRule(tool_name="list_users", field_path="email", action="strip"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        # Python-repr list of dicts — the shape the user hit
+        text = (
+            "[{'id': 1, 'name': 'John Krasinsky', 'email': 'user1@yahoo.com', 'phone_number': None}, "
+            "{'id': 2, 'name': 'John Doe', 'email': 'john.doe@gmail.com', 'phone_number': '+31_phone_1'}]"
+        )
+        result = {"content": [{"type": "text", "text": text}]}
+        masked = engine.mask_response("list_users", result)
+        parsed = ast.literal_eval(masked["content"][0]["text"])
+        assert isinstance(parsed, list) and len(parsed) == 2
+        for item in parsed:
+            assert "email" not in item
+        assert parsed[0]["name"] == "John Krasinsky"
+        assert parsed[1]["name"] == "John Doe"
+
+    @pytest.mark.anyio
+    async def test_mask_applies_to_every_dict_in_list_text(self, store):
+        rules = [
+            MaskingRule(tool_name="list_users", field_path="email", alias_prefix="email"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        text = (
+            '[{"id": 1, "email": "a@x.com"}, '
+            '{"id": 2, "email": "b@x.com"}, '
+            '{"id": 3, "email": "a@x.com"}]'
+        )
+        result = {"content": [{"type": "text", "text": text}]}
+        masked = engine.mask_response("list_users", result)
+        parsed = json.loads(masked["content"][0]["text"])
+        assert parsed[0]["email"] == "email_1"
+        assert parsed[1]["email"] == "email_2"
+        # same real value → same alias (cache dedup)
+        assert parsed[2]["email"] == "email_1"
+
+    @pytest.mark.anyio
+    async def test_strip_on_list_structured_content(self, store):
+        rules = [
+            MaskingRule(tool_name="list_users", field_path="email", action="strip"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": [
+                {"id": 1, "email": "a@x.com"},
+                {"id": 2, "email": "b@x.com"},
+            ]
+        }
+        masked = engine.mask_response("list_users", result)
+        for item in masked["structuredContent"]:
+            assert "email" not in item
+
+    @pytest.mark.anyio
     async def test_strip_and_mask_combined(self, store):
         rules = [
             MaskingRule(tool_name="*", field_path="password", action="strip"),
