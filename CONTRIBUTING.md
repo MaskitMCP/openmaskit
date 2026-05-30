@@ -65,7 +65,7 @@ New features and bug fixes should come with tests.
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the MIT License.
+By contributing, you agree that your contributions are licensed under the Apache License, Version 2.0 (see [LICENSE](LICENSE)). This includes the patent grant in §3 of that license.
 
 ## Questions?
 

@@ -6,13 +6,13 @@ readme = "README.md"
 authors = [
     { name = "Amin Malekloo", email = "openmaskit@maskitmcp.com" }
 ]
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 keywords = ["mcp", "proxy", "security", "data-masking", "ai", "model-context-protocol"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

@@ -2,7 +2,7 @@
   <img src="assets/icon.png" alt="OpenMaskit" width="120">
 </p>
 
-<h1 align="center">OpenMaskit</h1>
+<h1 align="center">OpenMaskit&trade;</h1>
 
 <p align="center">
   <em>Secure MCP proxy that keeps your secrets out of AI context windows</em>
@@ -156,4 +156,8 @@ Bug reports, feature requests, and pull requests are welcome. See [CONTRIBUTING.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Trademark
+
+"OpenMaskit"™ and the OpenMaskit logo are trademarks of Amin Malekloo. The Apache 2.0 license does not grant trademark rights — see [TRADEMARKS.md](TRADEMARKS.md) for permitted uses (forks must use a different name; "compatible with OpenMaskit" is fine).
