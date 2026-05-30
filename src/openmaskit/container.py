@@ -39,7 +39,7 @@ def detect_container_runtime() -> str | None:
     """
     for runtime in CONTAINER_RUNTIMES:
         if shutil.which(runtime):
-            logger.info(f"Detected container runtime: {runtime}")
+            logger.debug(f"Detected container runtime: {runtime}")
             return runtime
 
     logger.warning("No container runtime detected (checked: docker, podman, nerdctl, finch)")
@@ -59,7 +59,7 @@ def get_container_runtime(override: str | None = None) -> str | None:
     # Use override if provided
     if override:
         if shutil.which(override):
-            logger.info(f"Using configured container runtime: {override}")
+            logger.debug(f"Using configured container runtime: {override}")
             return override
         else:
             logger.warning(f"Configured runtime '{override}' not found in PATH, falling back to auto-detect")
@@ -102,7 +102,7 @@ def preprocess_container_command(command: str, runtime: str | None = None) -> tu
 
     # Substitute docker with detected runtime
     substituted = command.replace("docker", runtime, 1)
-    logger.info(f"Substituted container runtime: docker → {runtime}")
+    logger.debug(f"Substituted container runtime: docker → {runtime}")
     return substituted, True
 
 

@@ -32,14 +32,31 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data)
 
 
-def setup_logging() -> None:
-    """Configure logging based on OPENMASKIT_LOG_FORMAT environment variable.
+_VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
 
-    Supported formats:
-    - "json": Structured JSON logs (for production log aggregation)
-    - "text" (default): Human-readable text logs
+
+def resolve_log_level(value: str | None) -> int:
+    """Resolve a user-supplied level string to a logging constant.
+
+    Unknown values fall back to INFO so a typo never silences logging
+    entirely or floods the console.
+    """
+    if not value:
+        return logging.INFO
+    normalized = value.strip().upper()
+    if normalized in _VALID_LEVELS:
+        return getattr(logging, normalized)
+    return logging.INFO
+
+
+def setup_logging() -> None:
+    """Configure logging based on OPENMASKIT_LOG_* environment variables.
+
+    OPENMASKIT_LOG_LEVEL — DEBUG / INFO (default) / WARNING / ERROR.
+    OPENMASKIT_LOG_FORMAT — "json" for structured logs, "text" (default) otherwise.
     """
     log_format = os.getenv("OPENMASKIT_LOG_FORMAT", "text").lower()
+    log_level = resolve_log_level(os.getenv("OPENMASKIT_LOG_LEVEL"))
 
     if log_format == "json":
         formatter = JSONFormatter()
@@ -54,8 +71,4 @@ def setup_logging() -> None:
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
-    root_logger.setLevel(logging.INFO)
-
-    # Set debug level for specific modules
-    logging.getLogger("mcp.client.auth").setLevel(logging.DEBUG)
-    logging.getLogger("openmaskit.proxy.upstream").setLevel(logging.DEBUG)
+    root_logger.setLevel(log_level)

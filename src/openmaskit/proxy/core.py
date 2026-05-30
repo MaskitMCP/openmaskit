@@ -218,7 +218,7 @@ async def _bootstrap_upstream(
             "clientInfo": {"name": "openmaskit", "version": "0.1.0"},
         },
     )
-    logger.info("[%s] Sending initialize to upstream...", target.name)
+    logger.debug("[%s] Sending initialize to upstream...", target.name)
     await us_write.send(SessionMessage(message=JSONRPCMessage(root=init_req)))
 
     # Wait for initialize response
@@ -234,7 +234,7 @@ async def _bootstrap_upstream(
         logger.warning("[%s] Upstream stream closed before initialize response", target.name)
         return
 
-    logger.info("[%s] Initialize response received", target.name)
+    logger.debug("[%s] Initialize response received", target.name)
     target.initialized = True
 
     # Send initialized notification
@@ -247,7 +247,7 @@ async def _bootstrap_upstream(
         id="__openmaskit_tools_list__",
         jsonrpc="2.0",
     )
-    logger.info("[%s] Sending tools/list to upstream...", target.name)
+    logger.debug("[%s] Sending tools/list to upstream...", target.name)
     await us_write.send(SessionMessage(message=JSONRPCMessage(root=tools_req)))
 
     # Wait for tools/list response
@@ -262,7 +262,7 @@ async def _bootstrap_upstream(
                 tools = result.get("tools", [])
                 if tools and isinstance(tools, list):
                     target.cache_tool_schemas(tools)
-                    logger.info("[%s] Cached %d tool schemas from upstream", target.name, len(tools))
+                    logger.debug("[%s] Cached %d tool schemas from upstream", target.name, len(tools))
             else:
                 logger.warning("[%s] tools/list response had no tools: %s", target.name, result)
             break
@@ -431,8 +431,8 @@ def _intercept_request(msg: SessionMessage, target: TargetState) -> SessionMessa
                 if unmasked != arguments:
                     masked_str = ", ".join(f"{v}" for v in arguments.values())
                     real_str = ", ".join(f"{v}" for v in unmasked.values())
-                    logger.info("[%s] Received tool call: %s(%s)", target.name, tool_name, masked_str)
-                    logger.info("[%s] Translating to:    %s(%s)", target.name, tool_name, real_str)
+                    logger.debug("[%s] Received tool call: %s(%s)", target.name, tool_name, masked_str)
+                    logger.debug("[%s] Translating to:    %s(%s)", target.name, tool_name, real_str)
                 params["arguments"] = unmasked
 
                 violation = target.engine.check_guardrails(tool_name, params["arguments"])
@@ -499,7 +499,7 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
             tools = result.get("tools", [])
             if tools and isinstance(tools, list):
                 target.cache_tool_schemas(tools)
-                logger.info("[%s] Cached %d tool schemas from upstream", target.name, len(tools))
+                logger.debug("[%s] Cached %d tool schemas from upstream", target.name, len(tools))
         return None
 
     # Check if this is a response to a tracked request
@@ -542,7 +542,7 @@ def _intercept_response(msg: SessionMessage, target: TargetState) -> SessionMess
             root.result = target.engine.mask_response(tool_name, result)
             new_masks = target.engine.get_new_masks_since(pending_before)
             for alias, real_value, _, field_path in new_masks:
-                logger.info("[%s] Masked %s.%s: %s → %s", target.name, tool_name, field_path, real_value, alias)
+                logger.debug("[%s] Masked %s.%s: %s → %s", target.name, tool_name, field_path, real_value, alias)
 
         # Extract masked response preview (what the agent sees)
         masked_preview = None

@@ -355,9 +355,7 @@ async def async_main():
     logger.info(f"Dashboard: http://{bind_host}:{config.web_port}")
     logger.info(f"OAuth callback: http://{bind_host}:{config.oauth_port}/callback")
     if backend_client.enabled:
-        logger.info(f"Backend integration enabled:")
-        logger.info(f"  Auth backend: {backend_client.auth_url}")
-        logger.info(f"  Marketplace API: {backend_client.marketplace_url}")
+        logger.info("Backend integration enabled.")
     logger.info("MCP servers:")
     for name in state.target_names:
         logger.info(f"  {name}: http://{bind_host}:{config.mcp_port}/{name}/mcp")
@@ -369,7 +367,16 @@ async def async_main():
         allowed_origins.extend(
             o.strip() for o in extra_origins_env.split(",") if o.strip()
         )
-    logger.info(f"Allowed dashboard origins: {allowed_origins}")
+    logger.debug(f"Allowed dashboard origins: {allowed_origins}")
+
+    # Route upstream MCP child stderr based on log level. Upstream servers
+    # emit their own protocol chatter ("Processing request of type …") that
+    # we cannot demote from inside our process; we can only mute the stream.
+    if logger.isEnabledFor(logging.DEBUG):
+        upstream_errlog = sys.stderr
+    else:
+        upstream_errlog = open(os.devnull, "w")
+        logger.info("Upstream stderr is suppressed. Set OPENMASKIT_LOG_LEVEL=DEBUG to see it.")
 
     web_app = create_app(state, allowed_origins=allowed_origins)
     web_app.state.backend_client = backend_client
@@ -410,7 +417,7 @@ async def async_main():
                     target_config = config.targets[name]
                     us_read, us_write, container_info = await stack.enter_async_context(
                         connect_upstream(target_config.upstream, config.store_path,
-                                       errlog=sys.stderr, server_id=name,
+                                       errlog=upstream_errlog, server_id=name,
                                        callback_server=callback_server,
                                        container_runtime=config.container_runtime)
                     )
@@ -441,7 +448,7 @@ async def async_main():
                         try:
                             r, w, ci = await own_stack.enter_async_context(
                                 connect_upstream(upstream_cfg, config.store_path,
-                                               errlog=sys.stderr, server_id=name,
+                                               errlog=upstream_errlog, server_id=name,
                                                callback_server=callback_server,
                                                container_runtime=config.container_runtime)
                             )

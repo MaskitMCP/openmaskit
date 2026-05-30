@@ -214,7 +214,7 @@ async def connect_upstream(
         command, was_substituted = preprocess_container_command(upstream.command, runtime)
 
         if was_substituted:
-            logger.info(f"Substituted container command: {upstream.command} → {command}")
+            logger.debug(f"Substituted container command: {upstream.command} → {command}")
 
         # Container lifecycle management: when the upstream is a
         # `<runtime> run ...` command, inject a deterministic --name and
