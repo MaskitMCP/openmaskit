@@ -1,0 +1,140 @@
+# Tag-triggered publish to TestPyPI and then PyPI.
+#
+# Trigger: pushing a tag matching `v*` (e.g. `git tag v0.1.0 && git push --tags`).
+#
+# One-time setup before this workflow will succeed (does not need to be done
+# again until you change repo/workflow/env names):
+#
+# 1. TestPyPI Trusted Publisher
+#    https://test.pypi.org/manage/account/publishing/ → Add a new pending publisher
+#      Owner:       MaskitMCP
+#      Repository:  openmaskit
+#      Workflow:    publish.yml
+#      Environment: testpypi
+#
+# 2. PyPI Trusted Publisher
+#    https://pypi.org/manage/account/publishing/ → Add a new pending publisher
+#      Owner:       MaskitMCP
+#      Repository:  openmaskit
+#      Workflow:    publish.yml
+#      Environment: pypi
+#
+# 3. GitHub Environments (Settings → Environments)
+#    Create two environments named `testpypi` and `pypi`. On the `pypi` one,
+#    add yourself as a required reviewer so the real-PyPI publish only runs
+#    after manual approval. TestPyPI doesn't need a reviewer — it's the
+#    smoke test that gates the manual approval.
+#
+# Until step 1-3 are done, this workflow will fail at the publish step with an
+# OIDC error. That's expected and harmless.
+
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+
+run-name: Publish ${{ github.ref_name }}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+  build:
+    name: Build sdist + wheel
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Verify tag matches pyproject.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(uv run python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag v$tag does not match pyproject.toml version $version. Bump pyproject.toml or retag."
+            exit 1
+          fi
+          echo "Tag and pyproject.toml agree on version: $version"
+
+      - name: Build
+        run: uv build
+
+      - name: Validate distributions with twine
+        run: uvx twine check dist/*
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/openmaskit/
+    permissions:
+      id-token: write  # required for OIDC trusted publishing
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/openmaskit/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
