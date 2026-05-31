@@ -32,12 +32,35 @@ Real MCP Server
 
 ## Quick start
 
+OpenMaskit ships as a Python CLI. Requires Python 3.10+ — if you don't have it, the recommended installer (`uvx`) will fetch a compatible one for you.
+
+> ⚠️ **Pre-release.** OpenMaskit is currently published to **TestPyPI** while we finalize the first release. The commands below pull from there; once we cut `0.1.0` on real PyPI the install becomes a plain `uvx openmaskit`.
+
+**With [uv](https://docs.astral.sh/uv/) (recommended):**
+
 ```bash
-git clone https://github.com/OpenMaskitMCP/openmaskit.git
-cd openmaskit
-uv sync
-uv run openmaskit
+# Install uv if you don't have it (one line, no Python prereq):
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Then run OpenMaskit:
+UV_INDEX_URL=https://test.pypi.org/simple/ \
+UV_EXTRA_INDEX_URL=https://pypi.org/simple/ \
+uvx --from openmaskit==0.1.0 openmaskit
 ```
+
+`uvx` downloads a compatible Python (if needed), installs OpenMaskit in an isolated environment, and runs it — one command, no venv to manage. The `UV_EXTRA_INDEX_URL` is required because OpenMaskit's runtime dependencies live on real PyPI, not TestPyPI.
+
+**With [pipx](https://pipx.pypa.io/) (alternative):**
+
+```bash
+pipx install \
+  --index-url https://test.pypi.org/simple/ \
+  --pip-args "--extra-index-url https://pypi.org/simple/" \
+  openmaskit==0.1.0
+openmaskit
+```
+
+`pipx` doesn't auto-fetch Pythons, so you'll need a 3.10+ interpreter available first.
 
 Then open the dashboard at **http://127.0.0.1:9473** — add servers from the marketplace, connect your AI agent with one click, and configure masking from the UI.
 
@@ -153,6 +176,15 @@ For production-style setups, hold the key in `OPENMASKIT_ENCRYPTION_KEY` instead
 ## Contributing
 
 Bug reports, feature requests, and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
+
+To run from source instead of a published wheel:
+
+```bash
+git clone https://github.com/MaskitMCP/openmaskit.git
+cd openmaskit
+uv sync
+uv run openmaskit
+```
 
 ## License
 
