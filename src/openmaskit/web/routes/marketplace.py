@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 
 from openmaskit.security import TokenEncryption, validate_server_id
+from openmaskit.web.routes._http_config import clean_http_headers
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,13 @@ STATIC_DIR = Path(__file__).parent.parent / "static"
 _ENV_VAR_TYPES = {"text", "secret", "path", "number"}
 
 
-def _normalize_env_var(name: str, value) -> dict:
-    """Normalize a catalog meta.env entry into the shape the install modal expects.
+def _normalize_credential_var(name: str, value, *, target: str) -> dict:
+    """Normalize a catalog meta.env / meta.headers entry for the install modal.
 
-    Accepts either the legacy form (string placeholder) or the new object form
-    ({label, description, type, required}). Unknown/missing fields get safe defaults.
+    Accepts either the legacy form (string placeholder) or the object form
+    ({label, description, type, required}). Unknown/missing fields get safe
+    defaults. ``target`` distinguishes env-var vs HTTP-header credentials so
+    the modal can post them under separate payload keys.
     """
     if isinstance(value, dict):
         var_type = value.get("type", "text")
@@ -37,6 +40,7 @@ def _normalize_env_var(name: str, value) -> dict:
             "description": value.get("description") or value.get("placeholder") or "",
             "type": var_type,
             "required": bool(value.get("required", True)),
+            "target": target,
         }
     # Legacy: bare string was the placeholder.
     return {
@@ -45,7 +49,19 @@ def _normalize_env_var(name: str, value) -> dict:
         "description": str(value) if value else "",
         "type": "text",
         "required": True,
+        "target": target,
     }
+
+
+def _normalize_env_var(name: str, value) -> dict:
+    """Backwards-compatible wrapper around _normalize_credential_var for env vars."""
+    return _normalize_credential_var(name, value, target="env")
+
+
+def _normalize_header_var(name: str, value) -> dict:
+    """Normalize a catalog meta.headers entry. The key is the literal HTTP
+    header name (sent verbatim — no case normalization)."""
+    return _normalize_credential_var(name, value, target="header")
 
 
 def _require_supported(state) -> JSONResponse | None:
@@ -169,11 +185,18 @@ async def marketplace_list(request: Request):
         record = installed_map.get(server_id)
         target = state.get_target(server_id)
 
-        # Normalize meta.env entries — values may be legacy placeholder strings
-        # or the new object shape ({label, description, type, required}).
-        meta_env = entry.get("meta", {}) or {}
+        # Normalize meta.env / meta.headers entries — values may be legacy
+        # placeholder strings or the object shape ({label, description, type,
+        # required}). Header-auth entries (HTTP + meta.headers, no OAuth) feed
+        # the same install-modal credential prompt as env vars, with a `target`
+        # discriminator so the client posts them under separate payload keys.
+        meta_data = entry.get("meta", {}) or {}
         env_vars = [
-            _normalize_env_var(k, v) for k, v in meta_env.get("env", {}).items()
+            _normalize_env_var(k, v) for k, v in meta_data.get("env", {}).items()
+        ]
+        header_vars = [
+            _normalize_header_var(k, v)
+            for k, v in (meta_data.get("headers") or {}).items()
         ]
 
         servers.append({
@@ -189,7 +212,9 @@ async def marketplace_list(request: Request):
             "requires_oauth": entry.get("requires_oauth", False),
             "oauth_mode": entry.get("oauth_mode"),  # "byo" | "dcr" | None
             "mcp_host": entry.get("mcp_host"),  # Upstream URL — needed for BYO/DCR install
+            "transport_type": entry.get("transport_type", "stdio"),
             "env_vars": env_vars,  # Array of env var names to prompt for
+            "header_vars": header_vars,  # Array of HTTP header names to prompt for
             "meta": entry.get("meta", {}),  # Includes configurable_args, available_scopes, setup_guide_url
             "installed": record is not None,
             "active": record["active"] if record else False,
@@ -317,6 +342,37 @@ async def marketplace_install(request: Request):
 
         logger.info(f"Initiating OAuth flow for {server_id}: {oauth_url}")
         return JSONResponse({"ok": True, "requires_oauth": True, "oauth_url": oauth_url})
+
+    # HTTP + static-header auth (Datadog-style): no OAuth, but the catalog
+    # entry declares header-name credentials in meta.headers.
+    transport_type = server_info.get("transport_type", "stdio")
+    declared_headers = (server_info.get("meta") or {}).get("headers") or {}
+    if transport_type == "http" and declared_headers:
+        mcp_host = server_info.get("mcp_host")
+        if not mcp_host:
+            return JSONResponse(
+                {"error": "Catalog entry is missing mcp_host"}, status_code=500
+            )
+        user_headers, header_err = clean_http_headers(body.get("headers"))
+        if header_err:
+            return JSONResponse({"error": header_err}, status_code=400)
+        # Required-header check: every declared `required: true` entry must
+        # have a non-empty value in the request.
+        for name, decl in declared_headers.items():
+            required = True if not isinstance(decl, dict) else bool(
+                decl.get("required", True)
+            )
+            if required and name.strip() not in user_headers:
+                return JSONResponse(
+                    {"error": f"header '{name}' is required"}, status_code=400
+                )
+        config = {
+            "transport": "http",
+            "url": mcp_host,
+            "headers": user_headers,
+            "backend_id": server_info.get("id"),
+        }
+        return await _install_and_connect(store, manager, server_id, server_info, config)
 
     # Non-OAuth server: connect immediately
     # Get user-provided env vars and args from request
