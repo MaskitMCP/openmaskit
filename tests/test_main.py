@@ -124,17 +124,12 @@ class TestStartup:
     @pytest.mark.anyio
     async def test_marketplace_targets_loaded_from_db(self, tmp_path, store):
         """Active marketplace servers are loaded from DB on startup."""
-        # Insert a marketplace server
         server_config = {
             "transport": "stdio",
             "command": "echo",
             "args": ["test"],
         }
-        await store._db.execute(
-            "INSERT INTO mcp_servers (id, name, config, active) VALUES (?, ?, ?, ?)",
-            ("test-server", "Test Server", str(server_config), 1),
-        )
-        await store._db.commit()
+        await store.install_server("test-server", "Test Server", server_config)
 
         # Would verify server loaded in startup
         # Placeholder
