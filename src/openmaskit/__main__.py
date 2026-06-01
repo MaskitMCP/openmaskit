@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import signal
@@ -100,6 +101,41 @@ async def _traffic_rotation_loop(
             await store.enforce_row_cap(max_rows)
         except Exception:
             logger.exception("Failed to enforce traffic row cap")
+
+
+def _install_shutdown_noise_filter(shutdown_event: anyio.Event) -> None:
+    """Quiet anyio/MCP-SDK async-generator teardown noise during shutdown.
+
+    The MCP SDK's stdio_client holds anyio task-group cancel scopes whose
+    teardown happens in Python's asyncgen finalizer task — not the task that
+    entered them. The resulting 'cancel scope in a different task' and
+    'aclose(): asynchronous generator is already running' errors are harmless
+    but loud. Swallow them once shutdown has been signalled.
+    """
+    loop = asyncio.get_running_loop()
+
+    def _is_known_shutdown_noise(exc: BaseException | None, message: str) -> bool:
+        if "asynchronous generator" in message:
+            return True
+        if exc is None:
+            return False
+        if isinstance(exc, GeneratorExit):
+            return True
+        s = str(exc).lower()
+        if "cancel scope" in s or "asynchronous generator" in s:
+            return True
+        sub = getattr(exc, "exceptions", None)
+        if sub:
+            return bool(sub) and all(_is_known_shutdown_noise(e, "") for e in sub)
+        return False
+
+    def handler(loop, context):
+        if shutdown_event.is_set():
+            if _is_known_shutdown_noise(context.get("exception"), context.get("message", "")):
+                return
+        loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
 
 
 async def _graceful_shutdown(
@@ -309,6 +345,7 @@ async def async_main():
         marketplace_configs[server_id] = record["config"]
 
     shutdown_event = anyio.Event()
+    _install_shutdown_noise_filter(shutdown_event)
 
     # Shared OAuth callback server (always running)
     callback_server = OAuthCallbackServer(port=config.oauth_port)
