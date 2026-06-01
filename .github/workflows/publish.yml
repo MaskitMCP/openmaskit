@@ -1,6 +1,15 @@
-# Tag-triggered publish to TestPyPI and then PyPI.
+# Two-step publish: tag pushes → TestPyPI; manual dispatch against the same tag → PyPI.
 #
-# Trigger: pushing a tag matching `v*` (e.g. `git tag v0.1.0 && git push --tags`).
+# Flow:
+# 1. `git tag v0.1.1 && git push origin v0.1.1`
+#    → runs tests, builds wheel, publishes to TestPyPI.
+# 2. Smoke-test the TestPyPI release (`uvx --from openmaskit==0.1.1 ...`).
+# 3. Actions UI → "Publish" → "Run workflow" against ref `v0.1.1`
+#    → runs tests, rebuilds wheel, publishes to PyPI.
+#
+# Splitting the PyPI half off the tag trigger gives us the same gate that a
+# "required reviewer on the pypi environment" would on a public repo —
+# without needing GitHub Pro/Team on a private repo.
 #
 # One-time setup before this workflow will succeed (does not need to be done
 # again until you change repo/workflow/env names):
@@ -20,10 +29,9 @@
 #      Environment: pypi
 #
 # 3. GitHub Environments (Settings → Environments)
-#    Create two environments named `testpypi` and `pypi`. On the `pypi` one,
-#    add yourself as a required reviewer so the real-PyPI publish only runs
-#    after manual approval. TestPyPI doesn't need a reviewer — it's the
-#    smoke test that gates the manual approval.
+#    Create two environments named `testpypi` and `pypi`. The `pypi`
+#    environment should have a deployment tag policy restricting it to
+#    `v*` tags so only tagged commits can deploy.
 #
 # Until step 1-3 are done, this workflow will fail at the publish step with an
 # OIDC error. That's expected and harmless.
@@ -33,6 +41,7 @@ name: Publish
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 run-name: Publish ${{ github.ref_name }}
 
@@ -102,6 +111,7 @@ jobs:
   publish-testpypi:
     name: Publish to TestPyPI
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -122,7 +132,8 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    needs: publish-testpypi
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -130,6 +141,13 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: Refuse non-tag refs
+        run: |
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            echo "::error::PyPI publish must be dispatched against a v* tag, got ${GITHUB_REF}."
+            exit 1
+          fi
+
       - name: Download dist artifact
         uses: actions/download-artifact@v4
         with:
