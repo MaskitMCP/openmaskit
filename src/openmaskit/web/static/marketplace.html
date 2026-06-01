@@ -209,9 +209,8 @@
                                     <label class="modal-scope-item" :class="{ disabled: s.required }">
                                         <input type="checkbox"
                                                :value="s.scope"
-                                               :checked="modal.selectedScopes.includes(s.scope)"
-                                               :disabled="s.required"
-                                               @change="toggleScope(s.scope, $event.target.checked)">
+                                               x-model="modal.selectedScopes"
+                                               :disabled="s.required">
                                         <span class="modal-scope-text">
                                             <span class="modal-scope-label" x-text="s.label || s.scope"></span>
                                             <code class="modal-scope-raw" x-text="s.scope"></code>
@@ -283,8 +282,7 @@
                                     <label class="modal-scope-item">
                                         <input type="checkbox"
                                                :value="scope"
-                                               :checked="modal.selectedScopes.includes(scope)"
-                                               @change="toggleScope(scope, $event.target.checked)">
+                                               x-model="modal.selectedScopes">
                                         <span class="modal-scope-text">
                                             <code class="modal-scope-raw" x-text="scope"></code>
                                         </span>
@@ -585,12 +583,6 @@ function marketplacePage() {
             if (this.modal.oauthMode === 'byo') return `Connect ${this.modal.server?.name || 'server'}`;
             if (this.modal.oauthMode === 'dcr') return `Connect ${this.modal.server?.name || 'server'}`;
             return 'Configuration Required';
-        },
-
-        toggleScope(scope, checked) {
-            const set = new Set(this.modal.selectedScopes);
-            if (checked) set.add(scope); else set.delete(scope);
-            this.modal.selectedScopes = Array.from(set);
         },
 
         async copyRedirectUri() {

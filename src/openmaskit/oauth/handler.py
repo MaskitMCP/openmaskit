@@ -24,6 +24,7 @@ from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
 from openmaskit.models import HttpOAuthConfig
+from openmaskit.oauth.sdk_patches import register_scope_override
 from openmaskit.security import TokenEncryption
 
 logger = logging.getLogger(__name__)
@@ -418,6 +419,11 @@ async def create_oauth_provider(
 
     async def callback_handler() -> tuple[str, str | None]:
         return await callback_server.wait_for_callback()
+
+    # Pin the user-selected scope so the SDK's spec-compliant strategy
+    # (which would otherwise overwrite it with PRM scopes_supported) returns
+    # what the operator actually chose. See oauth/sdk_patches.py.
+    register_scope_override(client_metadata, scope)
 
     # Always use the full server_url - the MCP SDK handles OAuth discovery internally
     provider = OAuthClientProvider(
