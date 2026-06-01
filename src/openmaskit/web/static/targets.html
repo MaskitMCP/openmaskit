@@ -601,6 +601,69 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Custom HTTP Headers -->
+                    <div class="custom-headers-section" x-data="{ open: modal.headers.some(h => h.key || h.value) }">
+                        <button type="button" class="dcr-advanced-toggle" @click="open = !open">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" :class="{ 'rotate-90': open }">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                            <span>Custom headers <span class="optional-hint">(API-key auth, etc.)</span></span>
+                        </button>
+                        <div x-show="open" x-transition.opacity class="custom-headers-body">
+                            <p class="dcr-field-hint" style="margin-bottom: 0.5rem;">
+                                Static headers sent on every request to the upstream MCP server. Use this for services like Datadog that authenticate with API-key headers instead of OAuth.
+                            </p>
+                            <template x-for="(header, idx) in modal.headers" :key="idx">
+                                <div class="custom-header-row" x-data="{ show: false }">
+                                    <input type="text" class="modal-input custom-header-name"
+                                           placeholder="Header name (e.g. DD-API-KEY)"
+                                           x-model="header.key"
+                                           autocomplete="off">
+                                    <div class="custom-header-value-wrap">
+                                        <input class="modal-input"
+                                               :type="header.secret && !show ? 'password' : 'text'"
+                                               placeholder="Value"
+                                               x-model="header.value"
+                                               :class="header.secret ? 'modal-input-with-eye' : ''"
+                                               autocomplete="off">
+                                        <button type="button" x-show="header.secret" class="modal-eye-btn"
+                                                @click.prevent.stop="show = !show"
+                                                :aria-label="show ? 'Hide value' : 'Show value'"
+                                                :aria-pressed="show">
+                                            <svg x-show="!show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                                <circle cx="12" cy="12" r="3"/>
+                                            </svg>
+                                            <svg x-show="show" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                                                <line x1="1" y1="1" x2="23" y2="23"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <label class="custom-header-secret" title="Treat value as a secret (mask in form)">
+                                        <input type="checkbox" x-model="header.secret">
+                                        <span>secret</span>
+                                    </label>
+                                    <button type="button" class="config-remove-btn"
+                                            @click="removeHeader(idx)"
+                                            aria-label="Remove header">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </template>
+                            <button type="button" class="dcr-advanced-toggle" @click="addHeader()">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                                <span>Add header</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div x-show="modal.error" class="modal-error" x-text="modal.error" x-transition.opacity></div>
@@ -763,6 +826,11 @@ function targetsPage() {
             // Manual fields (existing)
             oauth: { client_id: '', client_secret: '', scope: '' },
 
+            // Custom HTTP headers (http transport)
+            // Each row: { key, value, secret }. `secret` toggles password masking
+            // in the form only; values are stored as-is in the config.
+            headers: [],
+
             // Discovery state
             discovering: false,
             discoveryError: null,
@@ -845,6 +913,8 @@ function targetsPage() {
                 // Manual fields
                 oauth: { client_id: '', client_secret: '', scope: '' },
 
+                headers: [],
+
                 // Discovery state
                 discovering: false,
                 discoveryError: null,
@@ -885,6 +955,10 @@ function targetsPage() {
                     // Manual fields
                     oauth: config.oauth ? { client_id: config.oauth.client_id || '', client_secret: config.oauth.client_secret || '', scope: config.oauth.scope || '' } : { client_id: '', client_secret: '', scope: '' },
 
+                    headers: config.headers
+                        ? Object.entries(config.headers).map(([k, v]) => ({ key: k, value: v, secret: true }))
+                        : [],
+
                     // Discovery state
                     discovering: false,
                     discoveryError: null,
@@ -907,6 +981,9 @@ function targetsPage() {
             this.modal.env.splice(idx, 1);
             if (this.modal.env.length === 0) this.modal.env.push({ key: '', value: '' });
         },
+
+        addHeader() { this.modal.headers.push({ key: '', value: '', secret: true }); },
+        removeHeader(idx) { this.modal.headers.splice(idx, 1); },
 
         async previewDiscovery() {
             // Triggered on blur from URL field when OAuth is enabled in DCR mode
@@ -984,6 +1061,15 @@ function targetsPage() {
                         payload.oauth_mode = 'manual';
                         payload.oauth = { ...this.modal.oauth };
                     }
+                }
+                const headersObj = {};
+                this.modal.headers.forEach(h => {
+                    const key = (h.key || '').trim();
+                    const val = (h.value || '').trim();
+                    if (key && val) headersObj[key] = val;
+                });
+                if (Object.keys(headersObj).length > 0) {
+                    payload.headers = headersObj;
                 }
             }
 

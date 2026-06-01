@@ -63,6 +63,7 @@ def _build_upstream_config(config: dict) -> UpstreamStdioConfig | UpstreamHttpCo
         return UpstreamHttpConfig(
             url=config["url"],
             oauth=oauth,
+            headers=config.get("headers") or {},
         )
 
 

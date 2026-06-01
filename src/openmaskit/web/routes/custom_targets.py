@@ -14,6 +14,7 @@ from openmaskit.container import (
     is_container_run_command,
     validate_user_container_name,
 )
+from openmaskit.web.routes._http_config import clean_http_headers
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,10 @@ _DELETE_DISCONNECT_TIMEOUT = 15
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     return slug[:64]
+
+
+# Re-exported for tests that imported the private name.
+_clean_http_headers = clean_http_headers
 
 
 def _build_config(body: dict) -> tuple[dict | None, str | None]:
@@ -63,6 +68,24 @@ def _build_config(body: dict) -> tuple[dict | None, str | None]:
             config["oauth"] = {
                 k: v for k, v in oauth.items() if v
             }
+
+        headers, header_err = clean_http_headers(body.get("headers"))
+        if header_err:
+            return None, header_err
+        if headers:
+            # Reject Authorization when OAuth is configured: the OAuth flow
+            # sets that header itself and a stale value would silently win or
+            # collide. The model validator also enforces this, but checking
+            # here gives a friendlier 400 from the API.
+            if "oauth" in config:
+                for name in headers:
+                    if name.lower() == "authorization":
+                        return (
+                            None,
+                            "headers must not include 'Authorization' when "
+                            "oauth is configured",
+                        )
+            config["headers"] = headers
     else:
         return None, "transport must be 'stdio' or 'http'"
 

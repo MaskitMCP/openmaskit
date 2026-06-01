@@ -263,6 +263,11 @@ async def connect_upstream(
                     await stop_container(rt, name)
 
     elif isinstance(upstream, UpstreamHttpConfig):
+        # Static request headers configured on the target (e.g. API-key auth
+        # for non-OAuth servers like Datadog). These are merged into every
+        # request the proxy makes upstream.
+        static_headers = dict(upstream.headers or {})
+
         # Check if there's a backend-managed OAuth token first
         access_token = None
         if upstream.oauth and server_id:
@@ -271,7 +276,8 @@ async def connect_upstream(
         if access_token:
             # Backend-managed OAuth: use simple Bearer token auth
             logger.info(f"Using backend-managed OAuth token for {server_id}")
-            headers = {"Authorization": f"Bearer {access_token}"}
+            headers = dict(static_headers)
+            headers["Authorization"] = f"Bearer {access_token}"
             http_client = httpx.AsyncClient(headers=headers, follow_redirects=True)
             async with http_client:
                 async with streamable_http_client(
@@ -301,7 +307,9 @@ async def connect_upstream(
                 callback_server=callback_server,
             )
 
-            http_client = httpx.AsyncClient(auth=provider, follow_redirects=True)
+            http_client = httpx.AsyncClient(
+                auth=provider, headers=static_headers, follow_redirects=True
+            )
             async with http_client:
                 async with streamable_http_client(
                     upstream.url, http_client=http_client
@@ -309,8 +317,10 @@ async def connect_upstream(
                     yield read_stream, write_stream, None
 
         else:
-            # No OAuth: simple HTTP connection
-            http_client = httpx.AsyncClient(follow_redirects=True)
+            # No OAuth: simple HTTP connection (optionally with static headers).
+            http_client = httpx.AsyncClient(
+                headers=static_headers, follow_redirects=True
+            )
             async with http_client:
                 async with streamable_http_client(
                     upstream.url, http_client=http_client

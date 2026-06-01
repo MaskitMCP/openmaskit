@@ -222,6 +222,41 @@ class TestConfigValidation:
         assert upstream.oauth is not None
         assert upstream.oauth.client_id == "test-client"
 
+    @pytest.mark.anyio
+    async def test_config_with_headers_propagates_to_model(self, state, store, tmp_path):
+        """Regression: static HTTP headers on a stored config dict must reach
+        UpstreamHttpConfig.headers — connect_upstream relies on this to wire
+        DD-API-KEY / DD-APPLICATION-KEY etc. into the httpx client. Dropping
+        them here is what caused Datadog header-auth installs to 401.
+        """
+        config = {
+            "transport": "http",
+            "url": "https://mcp.datadoghq.eu/api/unstable/mcp-server/mcp",
+            "headers": {
+                "DD-API-KEY": "abc",
+                "DD-APPLICATION-KEY": "def",
+            },
+        }
+
+        from openmaskit.proxy.manager import _build_upstream_config
+
+        upstream = _build_upstream_config(config)
+
+        assert upstream.headers == {
+            "DD-API-KEY": "abc",
+            "DD-APPLICATION-KEY": "def",
+        }
+
+    @pytest.mark.anyio
+    async def test_config_without_headers_defaults_to_empty_dict(self, state, store, tmp_path):
+        config = {"transport": "http", "url": "https://mcp.example.com/mcp"}
+
+        from openmaskit.proxy.manager import _build_upstream_config
+
+        upstream = _build_upstream_config(config)
+
+        assert upstream.headers == {}
+
 
 class TestExitStackManagement:
     """Test async exit stack management for resources."""

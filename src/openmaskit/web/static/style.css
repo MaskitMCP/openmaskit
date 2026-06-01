@@ -5034,3 +5034,38 @@ code {
 .modal-advanced-toggle:hover {
     color: var(--text-primary);
 }
+
+/* Custom HTTP headers (Add/Edit Server modal) */
+.custom-headers-section {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+.custom-headers-body {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.custom-header-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto auto;
+    gap: 0.4rem;
+    align-items: center;
+}
+.custom-header-value-wrap {
+    position: relative;
+    min-width: 0;
+}
+.custom-header-secret {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    user-select: none;
+    white-space: nowrap;
+}
+.custom-header-secret input[type="checkbox"] {
+    accent-color: var(--primary, #58a6ff);
+}
