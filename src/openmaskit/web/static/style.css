@@ -2037,6 +2037,57 @@ code {
     font-size: 0.75rem;
     color: var(--accent);
     font-weight: 500;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+}
+
+.modal-var-optional {
+    font-family: var(--font-body);
+    font-size: 0.7rem;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--text-muted);
+    letter-spacing: 0;
+}
+
+.modal-input-wrap {
+    position: relative;
+    display: block;
+    width: 100%;
+}
+
+.modal-input-with-eye {
+    padding-right: 2.25rem !important;
+}
+
+.modal-eye-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.5rem;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+}
+.modal-eye-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-default);
+}
+.modal-eye-btn:focus-visible {
+    outline: none;
+    color: var(--accent);
+    border-color: var(--accent);
 }
 
 .modal-field input {

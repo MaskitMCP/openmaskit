@@ -18,6 +18,36 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
+_ENV_VAR_TYPES = {"text", "secret", "path", "number"}
+
+
+def _normalize_env_var(name: str, value) -> dict:
+    """Normalize a catalog meta.env entry into the shape the install modal expects.
+
+    Accepts either the legacy form (string placeholder) or the new object form
+    ({label, description, type, required}). Unknown/missing fields get safe defaults.
+    """
+    if isinstance(value, dict):
+        var_type = value.get("type", "text")
+        if var_type not in _ENV_VAR_TYPES:
+            var_type = "text"
+        return {
+            "name": name,
+            "label": value.get("label") or name,
+            "description": value.get("description") or value.get("placeholder") or "",
+            "type": var_type,
+            "required": bool(value.get("required", True)),
+        }
+    # Legacy: bare string was the placeholder.
+    return {
+        "name": name,
+        "label": name,
+        "description": str(value) if value else "",
+        "type": "text",
+        "required": True,
+    }
+
+
 def _require_supported(state) -> JSONResponse | None:
     """Return a 426 response if the marketplace backend has declared this
     OpenMaskit version unsupported. Otherwise return None and let the route proceed.
@@ -64,8 +94,14 @@ def _build_config_from_server_info(
         return config
     else:  # stdio (local/docker)
         meta = server_info.get("meta", {})
-        # Use user-provided env vars if available, otherwise use backend placeholders
-        env = user_env_vars if user_env_vars else meta.get("env", {})
+        # Use user-provided env vars if available, otherwise fall back to keys with
+        # empty values. (Catalog meta.env values may be metadata dicts, not real
+        # values, so we can't pass them through as-is.)
+        if user_env_vars:
+            env = user_env_vars
+        else:
+            raw_env = meta.get("env", {})
+            env = {k: (v if isinstance(v, str) else "") for k, v in raw_env.items()}
 
         # Process user_args into meta.user_args format
         processed_user_args = {}
@@ -133,9 +169,12 @@ async def marketplace_list(request: Request):
         record = installed_map.get(server_id)
         target = state.get_target(server_id)
 
-        # Extract env var names from meta.env (keys are var names, values are placeholders)
-        meta_env = entry.get("meta", {})
-        env_vars = list(meta_env.get("env", {}).keys()) if meta_env else []
+        # Normalize meta.env entries — values may be legacy placeholder strings
+        # or the new object shape ({label, description, type, required}).
+        meta_env = entry.get("meta", {}) or {}
+        env_vars = [
+            _normalize_env_var(k, v) for k, v in meta_env.get("env", {}).items()
+        ]
 
         servers.append({
             "id": server_id,
