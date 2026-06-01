@@ -85,6 +85,14 @@ targets:
       - pattern: "DROP TABLE"
         message: "Destructive SQL blocked"
 
+  datadog:
+    upstream:
+      transport: http
+      url: https://mcp.datadoghq.eu/api/unstable/mcp-server/mcp
+      headers:
+        DD-API-KEY: replace-with-your-key
+        DD-APPLICATION-KEY: replace-with-your-key
+
 # Optional overrides (defaults shown)
 web_port: 9473
 mcp_port: 9474
@@ -137,6 +145,7 @@ A few things worth knowing about:
 - **Stable aliases across restarts** — `prod-db.internal.net` always becomes `host_1`, the same alias your agent saw last week. Aliases are persisted, so multi-turn conversations stay coherent.
 - **Encrypted traffic audit log** — Every tool call is recorded with its unmasked args and response, Fernet-encrypted at rest. Lazy-loaded from the UI on demand and capped at 10k rows by default.
 - **Three OAuth install paths** — Marketplace servers can ship as **BYO** (paste your own `client_id`/`client_secret`, OpenMaskit runs the flow locally), **DCR** (OpenMaskit registers a client with the provider automatically), or **hosted-broker** (zero setup — fully implemented but disabled by default until we're confident it's the safest option). The "Re-authorize" button on each server card runs a fresh flow when tokens expire. Setup guides for the BYO ones live at [maskitmcp.com/connect](https://maskitmcp.com/connect/).
+- **API-key auth for non-OAuth HTTP servers** — Marketplace and custom HTTP servers can authenticate with static headers (Datadog `DD-API-KEY`, Stripe `Authorization: Bearer`, etc.). Header values are stored Fernet-encrypted alongside everything else.
 - **Hot add/remove servers** — Marketplace installs, custom server adds, deactivations, and deletes all happen live. No restart needed.
 - **Argument guardrails and injections** — Block `DROP TABLE` before it leaves your machine; silently inject `read_only: true` on every database call.
 - **Field stripping** — Some fields shouldn't be aliased, they should just be gone. SSNs, credit cards — strip them from responses entirely.
@@ -155,12 +164,14 @@ The container supports HTTP-based MCP servers. For stdio servers (`uvx`, `npx`),
 
 Two files matter:
 
-- `~/.openmaskit/.key` — encrypts OAuth tokens and the traffic audit log. **Back this up.** Lose it and you'll re-authenticate every server.
+- `~/.openmaskit/.key` — encrypts OAuth tokens, the traffic audit log, and stored server configs (env vars, HTTP headers, OAuth secrets). Worth backing up — without it, the stored credentials can't be decrypted and servers will need to be re-installed.
 - `~/.openmaskit/store.db` — masking rules, aliases, server configs.
 
 `~/.openmaskit/traffic.db` is the audit log; safe to drop.
 
 For production-style setups, hold the key in `OPENMASKIT_ENCRYPTION_KEY` instead of on disk.
+
+See [CHANGELOG.md](CHANGELOG.md) for upgrade notes between versions.
 
 ## Contributing
 
