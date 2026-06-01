@@ -3,10 +3,10 @@ FROM python:3.12-slim
 # Metadata (shows up on Docker Hub)
 LABEL org.opencontainers.image.title="OpenMaskit"
 LABEL org.opencontainers.image.description="Drop-in MCP proxy that keeps your secrets out of the context window"
-LABEL org.opencontainers.image.url="https://github.com/OpenMaskitMCP/openmaskit"
-LABEL org.opencontainers.image.source="https://github.com/OpenMaskitMCP/openmaskit"
-LABEL org.opencontainers.image.version="0.1.0"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.url="https://github.com/MaskitMCP/openmaskit"
+LABEL org.opencontainers.image.source="https://github.com/MaskitMCP/openmaskit"
+LABEL org.opencontainers.image.version="0.1.2"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 # Copy uv binary from official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -22,9 +22,6 @@ COPY src ./src
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_SYSTEM_PYTHON=1
 RUN uv pip install .
-
-# Copy remaining runtime files
-COPY assets ./assets
 
 # Bind to all interfaces for container networking
 ENV OPENMASKIT_HOST=0.0.0.0

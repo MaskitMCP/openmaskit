@@ -4,7 +4,7 @@ Thanks for your interest in contributing! OpenMaskit is in early development and
 
 ## Reporting issues
 
-1. Check [existing issues](https://github.com/OpenMaskitMCP/openmaskit/issues) to avoid duplicates.
+1. Check [existing issues](https://github.com/MaskitMCP/openmaskit/issues) to avoid duplicates.
 2. Open a new issue with:
    - A clear title and description
    - Steps to reproduce (for bugs)
@@ -14,7 +14,7 @@ Thanks for your interest in contributing! OpenMaskit is in early development and
 ## Development setup
 
 ```bash
-git clone https://github.com/OpenMaskitMCP/openmaskit.git
+git clone https://github.com/MaskitMCP/openmaskit.git
 cd openmaskit
 uv sync
 ```

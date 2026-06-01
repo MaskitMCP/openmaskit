@@ -1,6 +1,6 @@
 [project]
 name = "openmaskit"
-version = "0.1.1"
+version = "0.1.2"
 description = "Drop-in MCP proxy that keeps your secrets out of the context window"
 readme = "README.md"
 authors = [
@@ -48,6 +48,16 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/openmaskit"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".claude",
+    ".codegraph",
+    ".coverage",
+    "coverage.json",
+    "bench_unmask.py",
+    "CLAUDE.md",
+]
 
 [dependency-groups]
 dev = [

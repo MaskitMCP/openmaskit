@@ -27,7 +27,7 @@ Examples:
   openmaskit -w 8080 -m 8081 -o 8082   Override all ports
   OPENMASKIT_HOST=0.0.0.0 openmaskit       Bind to all interfaces
 
-Documentation: https://github.com/OpenMaskitMCP/openmaskit"""
+Documentation: https://github.com/MaskitMCP/openmaskit"""
 
     parser = argparse.ArgumentParser(
         prog="openmaskit",

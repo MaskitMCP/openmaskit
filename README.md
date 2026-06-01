@@ -34,8 +34,6 @@ Real MCP Server
 
 OpenMaskit ships as a Python CLI. Requires Python 3.10+ — if you don't have it, the recommended installer (`uvx`) will fetch a compatible one for you.
 
-> ⚠️ **Pre-release.** OpenMaskit is currently published to **TestPyPI** while we finalize the first release. The commands below pull from there; once we cut `0.1.1` on real PyPI the install becomes a plain `uvx openmaskit`.
-
 **With [uv](https://docs.astral.sh/uv/) (recommended):**
 
 ```bash
@@ -43,20 +41,15 @@ OpenMaskit ships as a Python CLI. Requires Python 3.10+ — if you don't have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Then run OpenMaskit:
-UV_INDEX_URL=https://test.pypi.org/simple/ \
-UV_EXTRA_INDEX_URL=https://pypi.org/simple/ \
-uvx --from openmaskit==0.1.1 openmaskit
+uvx openmaskit
 ```
 
-`uvx` downloads a compatible Python (if needed), installs OpenMaskit in an isolated environment, and runs it — one command, no venv to manage. The `UV_EXTRA_INDEX_URL` is required because OpenMaskit's runtime dependencies live on real PyPI, not TestPyPI.
+`uvx` downloads a compatible Python (if needed), installs OpenMaskit in an isolated environment, and runs it — one command, no venv to manage.
 
 **With [pipx](https://pipx.pypa.io/) (alternative):**
 
 ```bash
-pipx install \
-  --index-url https://test.pypi.org/simple/ \
-  --pip-args "--extra-index-url https://pypi.org/simple/" \
-  openmaskit==0.1.1
+pipx install openmaskit
 openmaskit
 ```
 
@@ -81,17 +74,18 @@ targets:
       - tool_name: get_time
         field_path: timezone
 
-  slack:
+  postgres:
     upstream:
-      transport: http
-      url: https://mcp.slack.com/mcp
-      oauth:
-        client_id: your-client-id
+      transport: stdio
+      command: docker
+      args: ["run", "-i", "--rm", "-e", "DATABASE_URI", "crystaldba/postgres-mcp"]
+      env:
+        DATABASE_URI: postgresql://user:pass@localhost:5432/mydb
     guardrails:
       - pattern: "DROP TABLE"
         message: "Destructive SQL blocked"
     injections:
-      - tool_name: query_db
+      - tool_name: execute_sql
         argument_name: read_only
         value: "true"
         mode: set

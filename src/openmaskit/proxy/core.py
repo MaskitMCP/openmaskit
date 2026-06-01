@@ -23,6 +23,7 @@ from mcp.types import (
     JSONRPCResponse,
 )
 
+from openmaskit import __version__
 from openmaskit.traffic.store import TrafficEntry
 
 if TYPE_CHECKING:
@@ -216,7 +217,7 @@ async def _bootstrap_upstream(
         params={
             "protocolVersion": "2025-03-26",
             "capabilities": {},
-            "clientInfo": {"name": "openmaskit", "version": "0.1.0"},
+            "clientInfo": {"name": "openmaskit", "version": __version__},
         },
     )
     logger.debug("[%s] Sending initialize to upstream...", target.name)
