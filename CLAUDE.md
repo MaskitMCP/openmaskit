@@ -152,7 +152,7 @@ Catalog entries carry an `oauth_mode` field that determines the install flow. Th
 | `"byo"`         | Bring-your-own OAuth client. User pastes `client_id` / `client_secret` in the install modal; OpenMaskit runs the OAuth flow directly against the provider.        | `http://localhost:3131/callback`          |
 | `"dcr"`         | Dynamic Client Registration. OpenMaskit fetches the provider's well-known doc, registers a client at install time, then runs the OAuth flow against the provider. | `http://localhost:3131/callback`          |
 
-For BYO entries the catalog provides `meta.available_scopes` (`[{scope, label, required, default}]`) which the modal renders as a checklist; required scopes are locked-checked. For DCR entries scopes are discovered live from the well-known doc via `/api/oauth/discover` — catalog doesn't need to ship them. Optionally, either mode can ship `meta.setup_guide_url` and the modal renders a link.
+For BYO entries the catalog provides `meta.available_scopes` (`[{scope, label, required, default}]`) which the modal renders as a checklist; required scopes are locked-checked. For DCR entries scopes are discovered live from the well-known doc via `/api/oauth/discover` — catalog doesn't need to ship them. Any catalog entry — BYO, DCR, or a plain env-var stdio install — can ship `meta.setup_guide_url`; the install modal renders a "Setup guide ↗" link inline with the credentials/env-var prompt.
 
 BYO and DCR installs both build a `transport: "http"` config with an `oauth` block (same shape as custom targets) and call `manager.add_target`. The existing `oauth/handler.py:create_oauth_provider` already handles both modes — BYO uses its manual branch (pre-seeds `client_info` from the config), DCR uses its discovery + DCR branch. Either way the local `OAuthCallbackServer` on port 3131 (`config.oauth_port`) receives the callback. **No new code paths in `oauth/handler.py` are needed for marketplace BYO/DCR — the install handler just shapes the config dict and the existing OAuth provider does the rest.**
 
@@ -221,6 +221,7 @@ Marketplace routes:
 - `POST /api/marketplace/install` — install a server from catalog
 - `POST /api/marketplace/activate` — reactivate a previously installed server
 - `POST /api/marketplace/deactivate` — disconnect and deactivate
+- `POST /api/marketplace/{target_id}/reauthorize` — kick off a fresh OAuth flow for an installed server (BYO/DCR clears tokens and runs the flow inline; hosted-broker returns a fresh `oauth_url`)
 
 Custom target routes:
 

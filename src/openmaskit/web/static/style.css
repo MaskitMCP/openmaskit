@@ -1835,6 +1835,49 @@ code {
     border: 1px solid var(--blue-border);
 }
 
+.marketplace-card-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.badge-install-type {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 0.2rem 0.5rem;
+    border-radius: 20px;
+    border: 1px solid transparent;
+    cursor: help;
+}
+
+.badge-install-type-env {
+    background: rgba(88, 166, 255, 0.10);
+    color: #79b8ff;
+    border-color: rgba(88, 166, 255, 0.28);
+}
+.badge-install-type-byo {
+    background: rgba(45, 212, 191, 0.10);
+    color: #2dd4bf;
+    border-color: rgba(45, 212, 191, 0.28);
+}
+.badge-install-type-dcr {
+    background: rgba(167, 139, 250, 0.10);
+    color: #a78bfa;
+    border-color: rgba(167, 139, 250, 0.30);
+}
+.badge-install-type-broker {
+    background: rgba(245, 158, 11, 0.08);
+    color: rgba(245, 158, 11, 0.85);
+    border-color: rgba(245, 158, 11, 0.24);
+    opacity: 0.85;
+}
+
 .marketplace-card h3 {
     font-family: var(--font-mono);
     color: var(--text-primary);

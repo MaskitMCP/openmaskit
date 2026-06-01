@@ -49,10 +49,18 @@
                          :style="(server.active && server.connected) ? 'cursor: pointer' : ''">
                         <div class="marketplace-card-header">
                             <img x-show="server.icon_url" :src="server.icon_url" :alt="server.name + ' icon'" width="36" height="36" class="marketplace-card-icon">
-                            <span x-show="server.official" class="badge-official" title="Official MCP Server">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                Official
-                            </span>
+                            <div class="marketplace-card-badges">
+                                <span x-show="server.official" class="badge-official" title="Official MCP Server">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                    Official
+                                </span>
+                                <template x-if="installType(server)">
+                                    <span class="badge-install-type"
+                                          :class="'badge-install-type-' + installType(server).slug"
+                                          :title="installType(server).title"
+                                          x-text="installType(server).label"></span>
+                                </template>
+                            </div>
                         </div>
 
                         <h3 x-text="server.name"></h3>
@@ -421,6 +429,15 @@ function marketplacePage() {
         loading: true,
         toasts: [],
         updateRequired: false,
+
+        installType(server) {
+            const mode = server.oauth_mode;
+            if (mode === 'byo') return { label: 'BYO', slug: 'byo', title: 'Bring-your-own OAuth: paste your own client_id and secret' };
+            if (mode === 'dcr') return { label: 'DCR', slug: 'dcr', title: 'Dynamic Client Registration: OpenMaskit registers an OAuth client automatically' };
+            if (!mode && server.requires_oauth) return { label: 'BROKER', slug: 'broker', title: 'Hosted OAuth broker (currently disabled)' };
+            if (server.env_vars && server.env_vars.length > 0) return { label: 'ENV', slug: 'env', title: 'Needs environment variables (e.g. a token or API key)' };
+            return null;
+        },
 
         // Pagination state
         currentPage: 1,
