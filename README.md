@@ -84,11 +84,6 @@ targets:
     guardrails:
       - pattern: "DROP TABLE"
         message: "Destructive SQL blocked"
-    injections:
-      - tool_name: execute_sql
-        argument_name: read_only
-        value: "true"
-        mode: set
 
 # Optional overrides (defaults shown)
 web_port: 9473
