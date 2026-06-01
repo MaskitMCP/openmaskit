@@ -20,6 +20,30 @@ AI coding assistants see everything your MCP tools return — production hostnam
 
 It also lets you block dangerous tool calls (guardrails), force safe defaults (injections), hide tools from agents, and install pre-configured servers from a marketplace.
 
+<p align="center">
+  <video src="https://www.openmaskit.com/static/demos/hero-web.mp4"
+         autoplay loop muted playsinline
+         width="720">
+    Your browser doesn't support inline video.
+    <a href="https://www.openmaskit.com/static/demos/hero-web.mp4">Watch the masking demo</a>.
+  </video>
+</p>
+<p align="center">
+  <sub><em>Mask sensitive fields before they reach the model.</em></sub>
+</p>
+
+<p align="center">
+  <video src="https://www.openmaskit.com/static/demos/guardrail-web.mp4"
+         autoplay loop muted playsinline
+         width="720">
+    Your browser doesn't support inline video.
+    <a href="https://www.openmaskit.com/static/demos/guardrail-web.mp4">Watch the guardrail demo</a>.
+  </video>
+</p>
+<p align="center">
+  <sub><em>Block dangerous tool calls with guardrails.</em></sub>
+</p>
+
 ```
 AI Agent (Claude, Cursor, …)
     │  HTTP :9474/{server}/mcp
