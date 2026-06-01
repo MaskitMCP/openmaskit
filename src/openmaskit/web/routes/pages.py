@@ -34,6 +34,7 @@ async def api_config(request: Request):
     vs = state.version_status or {}
     return JSONResponse({
         "mcp_port": state.mcp_port,
+        "oauth_port": state.oauth_port,
         "current_version": __version__,
         "version_status": {
             "supported": vs.get("supported", True),

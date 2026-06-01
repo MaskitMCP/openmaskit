@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -10,7 +11,7 @@ from uuid import uuid4
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 
-from openmaskit.security import validate_server_id
+from openmaskit.security import TokenEncryption, validate_server_id
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def _build_config_from_server_info(
         config = {
             "transport": "http",
             "url": server_info["mcp_host"],
+            "backend_id": server_info.get("id"),  # Preserve for reauthorize/reconfigure
         }
         # Add OAuth config if the server requires OAuth
         # Token is already stored by oauth_callback, upstream will load it from file
@@ -146,8 +148,10 @@ async def marketplace_list(request: Request):
             "official": entry.get("official", False),
             "tags": entry.get("tags", []),
             "requires_oauth": entry.get("requires_oauth", False),
+            "oauth_mode": entry.get("oauth_mode"),  # "byo" | "dcr" | None
+            "mcp_host": entry.get("mcp_host"),  # Upstream URL — needed for BYO/DCR install
             "env_vars": env_vars,  # Array of env var names to prompt for
-            "meta": entry.get("meta", {}),  # Include meta for configurable_args
+            "meta": entry.get("meta", {}),  # Includes configurable_args, available_scopes, setup_guide_url
             "installed": record is not None,
             "active": record["active"] if record else False,
             "connected": target is not None and target.initialized if record and record["active"] else False,
@@ -202,7 +206,62 @@ async def marketplace_install(request: Request):
     if not server_info:
         return JSONResponse({"error": "Server not found"}, status_code=404)
 
-    # If OAuth required, initiate OAuth flow
+    oauth_mode = server_info.get("oauth_mode")
+
+    # BYO: user supplies their own OAuth client credentials. OpenMaskit runs the
+    # OAuth flow directly against the provider via the local :3131 callback.
+    if oauth_mode == "byo":
+        client_id = (body.get("client_id") or "").strip()
+        client_secret = (body.get("client_secret") or "").strip()
+        selected_scopes = body.get("selected_scopes") or []
+
+        if not client_id or not client_secret:
+            return JSONResponse(
+                {"error": "client_id and client_secret are required"},
+                status_code=400,
+            )
+
+        mcp_host = server_info.get("mcp_host")
+        if not mcp_host:
+            return JSONResponse(
+                {"error": "Catalog entry is missing mcp_host"}, status_code=500
+            )
+
+        config = {
+            "transport": "http",
+            "url": mcp_host,
+            "oauth": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scope": " ".join(selected_scopes),
+            },
+        }
+        return await _install_and_connect(store, manager, server_id, server_info, config)
+
+    # DCR: OpenMaskit dynamically registers a client at install time, then runs
+    # the OAuth flow directly against the provider via the local :3131 callback.
+    if oauth_mode == "dcr":
+        issuer = (body.get("issuer") or "").strip()
+        selected_scopes = body.get("selected_scopes") or []
+        registration_token = (body.get("registration_token") or "").strip()
+
+        if not issuer:
+            return JSONResponse({"error": "issuer is required for DCR setup"}, status_code=400)
+
+        mcp_host = server_info.get("mcp_host")
+        if not mcp_host:
+            return JSONResponse(
+                {"error": "Catalog entry is missing mcp_host"}, status_code=500
+            )
+
+        oauth_cfg: dict = {"issuer": issuer, "scopes": selected_scopes}
+        if registration_token:
+            oauth_cfg["registration_token"] = registration_token
+
+        config = {"transport": "http", "url": mcp_host, "oauth": oauth_cfg}
+        return await _install_and_connect(store, manager, server_id, server_info, config)
+
+    # Hosted-broker OAuth: redirect through auth.maskitmcp.com.
     if server_info.get("requires_oauth"):
         csrf_state = str(uuid4())
         oauth_states[csrf_state] = {
@@ -225,6 +284,13 @@ async def marketplace_install(request: Request):
     user_env_vars = body.get("env_vars", {})
     user_args = body.get("user_args", {})
     config = _build_config_from_server_info(server_info, user_env_vars, user_args)
+    return await _install_and_connect(store, manager, server_id, server_info, config)
+
+
+async def _install_and_connect(store, manager, server_id, server_info, config) -> JSONResponse:
+    """Persist a marketplace server and attempt to connect it. On connect failure,
+    the server is left installed but deactivated so the user can retry from the UI.
+    """
     icon_url = server_info.get("icon_url")
     await store.install_server(server_id, server_info["name"], config, icon_url)
 
@@ -234,11 +300,10 @@ async def marketplace_install(request: Request):
         try:
             await manager.add_target(server_id, config)
             connected = True
-            logger.info(f"Successfully connected non-OAuth server: {server_id}")
+            logger.info(f"Successfully connected marketplace server: {server_id}")
         except Exception as exc:
             logger.exception(f"Failed to connect {server_id}")
-            # Unwrap ExceptionGroup to get the real error
-            if hasattr(exc, 'exceptions') and exc.exceptions:
+            if hasattr(exc, "exceptions") and exc.exceptions:
                 error_msg = str(exc.exceptions[0])
             else:
                 error_msg = str(exc)
@@ -248,6 +313,115 @@ async def marketplace_install(request: Request):
     if error_msg:
         result["error"] = error_msg
     return JSONResponse(result, status_code=201)
+
+
+async def marketplace_reauthorize(request: Request):
+    """Trigger a fresh OAuth flow for an installed server.
+
+    BYO/DCR servers run the OAuth flow locally via the :3131 callback — we wipe the
+    cached tokens (preserving client_info so we don't re-prompt or re-register),
+    then bounce the target so its next connection attempt triggers the browser flow.
+
+    Hosted-broker servers return a fresh authorize URL the UI redirects to.
+    """
+    state = request.app.state.proxy_state
+    store = state.store
+    manager = state.target_manager
+    backend_client = getattr(request.app.state, "backend_client", None)
+    oauth_states = getattr(request.app.state, "oauth_states", {})
+
+    target_id = request.path_params.get("target_id")
+    if not target_id:
+        return JSONResponse({"error": "target_id required"}, status_code=400)
+
+    existing = await store.get_server(target_id)
+    if not existing:
+        return JSONResponse({"error": "Server not installed"}, status_code=404)
+
+    config = existing["config"]
+    oauth_cfg = config.get("oauth") or {}
+    if not oauth_cfg:
+        return JSONResponse(
+            {"error": "Server does not use OAuth"}, status_code=400
+        )
+
+    # Hosted-broker installs are tagged with the "managed-by-backend" placeholder.
+    is_hosted_broker = oauth_cfg.get("client_id") == "managed-by-backend"
+
+    if is_hosted_broker:
+        if not backend_client:
+            return JSONResponse({"error": "Backend not available"}, status_code=503)
+        backend_id = config.get("backend_id")
+        if not backend_id:
+            return JSONResponse(
+                {"error": "Server missing backend_id; cannot reauthorize"},
+                status_code=500,
+            )
+
+        csrf_state = str(uuid4())
+        oauth_states[csrf_state] = {
+            "server_id": backend_id,
+            "handle": target_id,
+            "timestamp": time.time(),
+        }
+        base_url = f"{request.url.scheme}://{request.url.netloc}"
+        redirect_uri = f"{base_url}/oauth/callback/{target_id}"
+        oauth_url = backend_client.get_oauth_authorize_url(
+            server_id=backend_id, state=csrf_state, redirect_uri=redirect_uri
+        )
+        return JSONResponse({"ok": True, "oauth_url": oauth_url})
+
+    # BYO / DCR: clear tokens locally, then bounce the target.
+    if not manager:
+        return JSONResponse({"error": "Target manager not available"}, status_code=503)
+
+    token_path = (
+        Path(manager._store_path).expanduser().parent / "oauth" / f"{target_id}.json"
+    )
+    _clear_oauth_tokens(token_path)
+
+    try:
+        if target_id in state.targets:
+            await manager.remove_target(target_id)
+        await manager.add_target(target_id, config)
+        await store.activate_server(target_id)
+        return JSONResponse({"ok": True, "connected": True})
+    except Exception as exc:
+        logger.exception(f"Re-authorization failed for {target_id}")
+        if hasattr(exc, "exceptions") and exc.exceptions:
+            error_msg = str(exc.exceptions[0])
+        else:
+            error_msg = str(exc)
+        return JSONResponse({"ok": False, "error": error_msg}, status_code=500)
+
+
+def _clear_oauth_tokens(token_path: Path) -> None:
+    """Drop the tokens key from the encrypted token file, preserving client_info.
+
+    If the file is missing or unreadable, ensure it doesn't exist so the next OAuth
+    flow re-seeds it from scratch.
+    """
+    if not token_path.exists():
+        return
+
+    encryption = TokenEncryption()
+    try:
+        ciphertext = token_path.read_text()
+        plaintext = encryption.decrypt(ciphertext)
+        data = json.loads(plaintext)
+    except Exception as e:
+        logger.warning(f"Could not parse token file {token_path}: {e}; deleting.")
+        token_path.unlink(missing_ok=True)
+        return
+
+    data.pop("tokens", None)
+    if not data:
+        token_path.unlink(missing_ok=True)
+        return
+
+    new_plaintext = json.dumps(data, indent=2, default=str)
+    token_path.write_text(encryption.encrypt(new_plaintext))
+    token_path.chmod(0o600)
 
 
 async def marketplace_deactivate(request: Request):

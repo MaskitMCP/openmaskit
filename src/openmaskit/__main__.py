@@ -231,6 +231,7 @@ async def async_main():
     state.traffic_store = traffic_store
     state.traffic_buffer = traffic_buffer
     state.mcp_port = config.mcp_port
+    state.oauth_port = config.oauth_port
 
     # Create per-target state
     for name, target_config in config.targets.items():

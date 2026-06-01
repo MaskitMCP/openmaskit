@@ -129,6 +129,19 @@
                                     </button>
                                 </template>
 
+                                <!-- Re-authorize button for OAuth-using servers -->
+                                <template x-if="target.config && target.config.oauth">
+                                    <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :aria-label="'Re-authorize ' + target.display_name" :disabled="target.reauthorizing">
+                                        <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                                        </svg>
+                                        <svg x-show="target.reauthorizing" width="14" height="14" class="spinner spinner-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                                            <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
+                                        </svg>
+                                    </button>
+                                </template>
+
                                 <!-- Deactivate button for ALL servers -->
                                 <button class="tgt-action-btn" @click="deactivateTarget(target)" title="Deactivate" :aria-label="'Deactivate ' + target.display_name" :disabled="target.deactivating">
                                     <svg x-show="!target.deactivating" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -206,6 +219,19 @@
                                             <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
                                         </svg>
                                     </button>
+
+                                    <!-- Re-authorize button for OAuth-using servers -->
+                                    <template x-if="target.config && target.config.oauth">
+                                        <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :disabled="target.reauthorizing" aria-label="Re-authorize this server">
+                                            <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                                            </svg>
+                                            <svg x-show="target.reauthorizing" width="14" height="14" class="spinner spinner-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+                                                <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
+                                            </svg>
+                                        </button>
+                                    </template>
 
                                     <!-- View details button -->
                                     <button class="tgt-action-btn tgt-action-view"
@@ -789,6 +815,7 @@ function targetsPage() {
                 deleting: false,
                 deactivating: false,
                 activating: false,
+                reauthorizing: false,
             }));
 
             // Split into active and inactive
@@ -1080,6 +1107,37 @@ function targetsPage() {
                 this.showToast('Failed to activate: ' + error.message, 'error');
             } finally {
                 target.activating = false;
+            }
+        },
+
+        async reauthorizeTarget(target) {
+            if (!confirm(`Re-authorize "${target.display_name}"? You'll be sent back through the OAuth flow.`)) return;
+            target.reauthorizing = true;
+            try {
+                const res = await fetch(`/api/marketplace/${encodeURIComponent(target.name)}/reauthorize`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const data = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    throw new Error(data.error || data.detail || 'Re-authorization failed');
+                }
+
+                if (data.oauth_url) {
+                    // Hosted-broker path: redirect the browser through the broker.
+                    this.showToast('Redirecting to authorization...', 'info');
+                    window.location.href = data.oauth_url;
+                    return;  // Don't clear spinner — redirecting.
+                }
+
+                // BYO / DCR path: the browser-popup flow already completed inline.
+                this.showToast(`${target.display_name} re-authorized`);
+                await this.loadTargets();
+            } catch (e) {
+                this.showToast('Re-authorization failed: ' + e.message, 'error');
+            } finally {
+                target.reauthorizing = false;
             }
         },
 

@@ -134,12 +134,36 @@ Two SQLite databases:
 
 ### Marketplace
 
-The marketplace allows users to install pre-configured MCP servers from a catalog (`marketplace.json` at repo root). Installed servers are persisted in the `mcp_servers` SQLite table and connected at runtime via `TargetManager`.
+The marketplace catalog is **fetched from a remote backend**, not a local file. There is **no `marketplace.json`** in the repo — entries live on `api.maskitmcp.com` and are paged in over HTTP. Installed servers are persisted in the `mcp_servers` SQLite table and connected at runtime via `TargetManager`.
 
-- Catalog entries define transport, command/URL, required env vars, and optional OAuth vars
-- On install, the user provides credentials via a modal; the config is saved and the server is hot-connected
-- Servers can be deactivated (disconnected but config retained) and reactivated without re-entering credentials
-- Active marketplace servers are automatically reconnected on startup (`__main__.py` loads them from DB)
+- `backend_client.py` is the HTTP client. It targets `OPENMASKIT_MARKETPLACE_API_URL` (default `https://api.maskitmcp.com`) for catalog reads and `OPENMASKIT_AUTH_BACKEND_URL` (default `https://auth.maskitmcp.com`) for OAuth brokering.
+- Catalog endpoint: `GET {marketplace_url}/api/marketplace/catalog?page=&size=&q=`. Returns `{data: [...], meta: {...}}`. Fail-open: failures return an empty page so the UI still renders.
+- On install, the user provides any required env vars / credentials via a modal; config is saved to `mcp_servers` and the server is hot-connected via `TargetManager`.
+- Servers can be deactivated (disconnected but config retained) and reactivated without re-entering credentials.
+- Active marketplace servers are automatically reconnected on startup (`__main__.py` loads them from DB).
+
+#### OAuth install modes
+
+Catalog entries carry an `oauth_mode` field that determines the install flow. Three modes:
+
+| `oauth_mode`  | Flow                                                                                                                                                              | Redirect URI                              |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `null` (hosted) | Hosted broker via `auth.maskitmcp.com`. `BackendClient.get_oauth_authorize_url` builds the URL; the broker handles code exchange; tokens land back over HTTPS.    | `http://localhost:9473/oauth/callback/{handle}` |
+| `"byo"`         | Bring-your-own OAuth client. User pastes `client_id` / `client_secret` in the install modal; OpenMaskit runs the OAuth flow directly against the provider.        | `http://localhost:3131/callback`          |
+| `"dcr"`         | Dynamic Client Registration. OpenMaskit fetches the provider's well-known doc, registers a client at install time, then runs the OAuth flow against the provider. | `http://localhost:3131/callback`          |
+
+For BYO entries the catalog provides `meta.available_scopes` (`[{scope, label, required, default}]`) which the modal renders as a checklist; required scopes are locked-checked. For DCR entries scopes are discovered live from the well-known doc via `/api/oauth/discover` — catalog doesn't need to ship them. Optionally, either mode can ship `meta.setup_guide_url` and the modal renders a link.
+
+BYO and DCR installs both build a `transport: "http"` config with an `oauth` block (same shape as custom targets) and call `manager.add_target`. The existing `oauth/handler.py:create_oauth_provider` already handles both modes — BYO uses its manual branch (pre-seeds `client_info` from the config), DCR uses its discovery + DCR branch. Either way the local `OAuthCallbackServer` on port 3131 (`config.oauth_port`) receives the callback. **No new code paths in `oauth/handler.py` are needed for marketplace BYO/DCR — the install handler just shapes the config dict and the existing OAuth provider does the rest.**
+
+Hosted-broker installs are tagged in storage with the placeholder `config.oauth.client_id == "managed-by-backend"`; this is how `marketplace_reauthorize` distinguishes them from BYO/DCR. Hosted entries also preserve `config.backend_id` so reauthorize can ask the broker for a fresh authorize URL.
+
+#### Re-authorize
+
+`POST /api/marketplace/{target_id}/reauthorize` triggers a fresh OAuth flow for an installed server. The Re-authorize button on each server card (`targets.html`) calls it.
+
+- **BYO / DCR**: drops the `tokens` key from the encrypted `{store_dir}/oauth/{handle}.json` (preserves `client_info` so we don't re-prompt for creds or re-run DCR), `remove_target` + `add_target`, the browser-popup OAuth flow runs, returns `{connected: true}` once tokens are written. The token file is updated by `FileTokenStorage` from `oauth/handler.py`.
+- **Hosted broker**: re-runs `BackendClient.get_oauth_authorize_url` and returns `{oauth_url}` for the UI to redirect to. The callback then re-exchanges via `oauth_callback.py` as on first install.
 
 ### Custom targets (runtime)
 
@@ -151,7 +175,14 @@ Handles hot-adding and removing MCP server targets at runtime. Holds references 
 
 ### OAuth handler (`oauth/handler.py`)
 
-Shared OAuth 2.1 callback server running on port 3131. Used by HTTP upstream targets that require OAuth (e.g., Slack). The callback server is started once in `__main__.py` and shared across all targets. OAuth tokens are stored per-server at `{store_dir}/oauth/{server_id}.json`.
+Shared OAuth 2.1 callback server running on port 3131. Started once in `__main__.py` and shared across all targets. OAuth tokens are stored per-server at `{store_dir}/oauth/{server_id}.json`, Fernet-encrypted.
+
+Two OAuth flow shapes go through this callback:
+
+- **Marketplace servers (hosted broker).** OpenMaskit redirects the browser to `auth.maskitmcp.com`, which redirects to the provider, handles the code exchange server-side, and bounces back to the local callback with tokens. The local code never sees the provider's client_secret. See `BackendClient.get_oauth_authorize_url` / `exchange_code` / `refresh_oauth_token`.
+- **Custom HTTP targets (DCR or direct).** The local handler runs the flow against the upstream provider directly using either Dynamic Client Registration or user-supplied credentials.
+
+When adding BYO-credential or new DCR paths, the catalog entry signals the flow via an `oauth_mode` field (`"byo" | "dcr" | null`); the absence of the field implies the hosted-broker default.
 
 ### Bind host
 

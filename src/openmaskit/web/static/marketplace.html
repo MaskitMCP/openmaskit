@@ -147,7 +147,161 @@
     <!-- Config Modal (inline within same x-data scope) -->
     <div x-show="modal.visible" class="modal-backdrop" @keydown.escape.window="modalCancel()" style="display: none;">
         <div class="modal" @click.outside="modalCancel()">
-            <h3>Configuration Required</h3>
+            <h3 x-text="modalTitle()">Configuration Required</h3>
+
+            <!-- BYO: bring-your-own OAuth client credentials -->
+            <template x-if="modal.oauthMode === 'byo'">
+                <div>
+                    <div class="modal-byo-banner" role="status">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                        </svg>
+                        <span><strong>Local only.</strong> Your credentials are stored on this machine and never sent to OpenMaskit servers.</span>
+                    </div>
+
+                    <p class="modal-desc">
+                        Register an OAuth app on the provider's developer portal, paste the credentials below, and grant the scopes you want this server to use.
+                        <template x-if="modal.setupGuideUrl">
+                            <a :href="modal.setupGuideUrl" target="_blank" rel="noopener" class="modal-guide-link">
+                                Setup guide
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 17 17 7M7 7h10v10"/></svg>
+                            </a>
+                        </template>
+                    </p>
+
+                    <div class="modal-field">
+                        <span class="modal-label">Authorized redirect URI</span>
+                        <p class="modal-hint">Paste this into your OAuth app's authorized redirect URIs list before completing setup.</p>
+                        <div class="modal-copy-row">
+                            <code class="modal-copy-value" x-text="modal.redirectUri"></code>
+                            <button type="button" class="modal-copy-btn"
+                                    :class="{ copied: modal.byo.redirectCopied }"
+                                    @click="copyRedirectUri()"
+                                    x-text="modal.byo.redirectCopied ? 'Copied' : 'Copy'"></button>
+                        </div>
+                    </div>
+
+                    <label class="modal-field">
+                        <span class="modal-label">Client ID</span>
+                        <input type="text" class="modal-input" placeholder="OAuth client_id"
+                               x-model="modal.byo.clientId" autocomplete="off" required>
+                    </label>
+                    <label class="modal-field">
+                        <span class="modal-label">Client Secret</span>
+                        <input type="password" class="modal-input" placeholder="OAuth client_secret"
+                               x-model="modal.byo.clientSecret" autocomplete="off" required>
+                    </label>
+
+                    <template x-if="modal.availableScopes.length > 0">
+                        <div class="modal-field">
+                            <span class="modal-label">Scopes</span>
+                            <p class="modal-hint">The provider will show these on its consent screen. Required scopes can't be unchecked.</p>
+                            <div class="modal-scope-list">
+                                <template x-for="s in modal.availableScopes" :key="s.scope">
+                                    <label class="modal-scope-item" :class="{ disabled: s.required }">
+                                        <input type="checkbox"
+                                               :value="s.scope"
+                                               :checked="modal.selectedScopes.includes(s.scope)"
+                                               :disabled="s.required"
+                                               @change="toggleScope(s.scope, $event.target.checked)">
+                                        <span class="modal-scope-text">
+                                            <span class="modal-scope-label" x-text="s.label || s.scope"></span>
+                                            <code class="modal-scope-raw" x-text="s.scope"></code>
+                                        </span>
+                                        <span x-show="s.required" class="modal-scope-required">required</span>
+                                    </label>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- DCR: dynamic client registration -->
+            <template x-if="modal.oauthMode === 'dcr'">
+                <div>
+                    <p class="modal-desc">
+                        OpenMaskit will register an OAuth client with this server automatically and run the authorization flow in your browser.
+                        <template x-if="modal.setupGuideUrl">
+                            <a :href="modal.setupGuideUrl" target="_blank" rel="noopener" class="modal-guide-link">
+                                Setup guide
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 17 17 7M7 7h10v10"/></svg>
+                            </a>
+                        </template>
+                    </p>
+
+                    <div class="modal-field">
+                        <span class="modal-label">Server URL</span>
+                        <code class="modal-readonly-value" x-text="modal.mcpHost"></code>
+                    </div>
+
+                    <div class="modal-field">
+                        <span class="modal-label">OAuth endpoints</span>
+                        <div class="modal-dcr-status">
+                            <template x-if="modal.dcr.discovering">
+                                <div class="modal-dcr-loading">
+                                    <span class="spinner spinner-sm"></span>
+                                    <span>Discovering OAuth endpoints…</span>
+                                </div>
+                            </template>
+                            <template x-if="modal.dcr.discoveryResult && !modal.dcr.discovering">
+                                <div class="modal-dcr-success">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                    </svg>
+                                    <span>Discovery complete · <code x-text="modal.dcr.discoveryResult.issuer"></code></span>
+                                    <span x-show="!modal.dcr.discoveryResult.registration_endpoint" class="modal-dcr-warning">DCR not advertised — registration may still work</span>
+                                </div>
+                            </template>
+                            <template x-if="modal.dcr.discoveryError">
+                                <div class="modal-dcr-error">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="15" y1="9" x2="9" y2="15"></line>
+                                        <line x1="9" y1="9" x2="15" y2="15"></line>
+                                    </svg>
+                                    <span x-text="modal.dcr.discoveryError"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <template x-if="modal.dcr.discoveredScopes.length > 0">
+                        <div class="modal-field">
+                            <span class="modal-label">Scopes</span>
+                            <p class="modal-hint">Discovered from the server. Select the ones you want to grant.</p>
+                            <div class="modal-scope-list modal-scope-list-grid">
+                                <template x-for="scope in modal.dcr.discoveredScopes" :key="scope">
+                                    <label class="modal-scope-item">
+                                        <input type="checkbox"
+                                               :value="scope"
+                                               :checked="modal.selectedScopes.includes(scope)"
+                                               @change="toggleScope(scope, $event.target.checked)">
+                                        <span class="modal-scope-text">
+                                            <code class="modal-scope-raw" x-text="scope"></code>
+                                        </span>
+                                    </label>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div class="modal-field" x-data="{ showToken: false }">
+                        <button type="button" class="modal-advanced-toggle" @click="showToken = !showToken">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                                 :style="showToken ? 'transform: rotate(90deg)' : ''">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                            <span>Advanced: registration token (Okta, Auth0)</span>
+                        </button>
+                        <div x-show="showToken" x-transition.opacity style="margin-top: 0.5rem;">
+                            <input type="password" class="modal-input" placeholder="Registration access token (optional)"
+                                   x-model="modal.dcr.registrationToken" autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+            </template>
+
             <template x-if="modal.oauthVars.length > 0">
                 <div>
                     <p class="modal-desc">OAuth credentials (register an app on the provider's developer portal):</p>
@@ -163,7 +317,15 @@
             </template>
             <template x-if="modal.envVars.length > 0">
                 <div>
-                    <p class="modal-desc">Environment variables:</p>
+                    <p class="modal-desc">
+                        Environment variables:
+                        <template x-if="modal.setupGuideUrl">
+                            <a :href="modal.setupGuideUrl" target="_blank" rel="noopener" class="modal-guide-link">
+                                Setup guide
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 17 17 7M7 7h10v10"/></svg>
+                            </a>
+                        </template>
+                    </p>
                     <template x-for="varName in modal.envVars" :key="'env_' + varName">
                         <label class="modal-field">
                             <span x-text="varName" class="modal-var-name"></span>
@@ -269,12 +431,30 @@ function marketplacePage() {
         modal: {
             visible: false,
             server: null,
+            // Legacy / generic config-required modes:
             envVars: [],
             oauthVars: [],
             configurableArgs: [],
             envValues: {},
             oauthValues: {},
             userArgs: {},
+            // OAuth setup variants:
+            oauthMode: null,           // null | 'byo' | 'dcr'
+            availableScopes: [],        // [{scope, label, required, default}]
+            selectedScopes: [],         // selected scope strings
+            setupGuideUrl: null,
+            redirectUri: 'http://localhost:3131/callback',
+            mcpHost: null,
+            // BYO state
+            byo: { clientId: '', clientSecret: '', redirectCopied: false },
+            // DCR state
+            dcr: {
+                registrationToken: '',
+                discovering: false,
+                discoveryResult: null,
+                discoveryError: null,
+                discoveredScopes: [],
+            },
         },
 
         showToast(msg, type = 'success') {
@@ -292,6 +472,21 @@ function marketplacePage() {
             this.modal.envVars.forEach(v => this.modal.envValues[v] = '');
             this.modal.oauthVars.forEach(v => this.modal.oauthValues[v] = '');
 
+            // Reset OAuth-setup branches by default; install flow flips these on as needed.
+            this.modal.oauthMode = null;
+            this.modal.availableScopes = [];
+            this.modal.selectedScopes = [];
+            this.modal.setupGuideUrl = server?.meta?.setup_guide_url || null;
+            this.modal.mcpHost = server?.mcp_host || null;
+            this.modal.byo = { clientId: '', clientSecret: '', redirectCopied: false };
+            this.modal.dcr = {
+                registrationToken: '',
+                discovering: false,
+                discoveryResult: null,
+                discoveryError: null,
+                discoveredScopes: [],
+            };
+
             // Initialize userArgs with empty arrays for multiple args
             for (const arg of this.modal.configurableArgs) {
                 if (arg.multiple) {
@@ -305,7 +500,108 @@ function marketplacePage() {
             return new Promise((resolve) => { _modalResolve = resolve; });
         },
 
+        openByoModal(server) {
+            const available = (server?.meta?.available_scopes || []).map(s => ({
+                scope: s.scope,
+                label: s.label || s.scope,
+                required: !!s.required,
+                default: s.default !== false,
+            }));
+            const initialSelected = available
+                .filter(s => s.required || s.default)
+                .map(s => s.scope);
+
+            const promise = this.openModal(server, [], []);
+            this.modal.oauthMode = 'byo';
+            this.modal.availableScopes = available;
+            this.modal.selectedScopes = initialSelected;
+            return promise;
+        },
+
+        openDcrModal(server) {
+            const promise = this.openModal(server, [], []);
+            this.modal.oauthMode = 'dcr';
+            this.modal.selectedScopes = [];
+            // Kick off discovery so the scope list populates.
+            this.runDcrDiscovery();
+            return promise;
+        },
+
+        modalTitle() {
+            if (this.modal.oauthMode === 'byo') return `Connect ${this.modal.server?.name || 'server'}`;
+            if (this.modal.oauthMode === 'dcr') return `Connect ${this.modal.server?.name || 'server'}`;
+            return 'Configuration Required';
+        },
+
+        toggleScope(scope, checked) {
+            const set = new Set(this.modal.selectedScopes);
+            if (checked) set.add(scope); else set.delete(scope);
+            this.modal.selectedScopes = Array.from(set);
+        },
+
+        async copyRedirectUri() {
+            try {
+                await navigator.clipboard.writeText(this.modal.redirectUri);
+                this.modal.byo.redirectCopied = true;
+                setTimeout(() => { this.modal.byo.redirectCopied = false; }, 1500);
+            } catch (e) {
+                this.showToast('Copy failed — select and copy manually', 'error');
+            }
+        },
+
+        async runDcrDiscovery() {
+            if (!this.modal.mcpHost) {
+                this.modal.dcr.discoveryError = 'Catalog entry missing server URL';
+                return;
+            }
+            this.modal.dcr.discovering = true;
+            this.modal.dcr.discoveryError = null;
+            try {
+                const res = await fetch('/api/oauth/discover', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: this.modal.mcpHost }),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || err.error || 'Discovery failed');
+                }
+                const data = await res.json();
+                this.modal.dcr.discoveryResult = data;
+                this.modal.dcr.discoveredScopes = data.scopes_supported || [];
+                // Keep prior selections that are still valid; otherwise none selected.
+                this.modal.selectedScopes = this.modal.selectedScopes.filter(s =>
+                    this.modal.dcr.discoveredScopes.includes(s)
+                );
+            } catch (e) {
+                this.modal.dcr.discoveryError = e.message || 'Discovery failed';
+                this.modal.dcr.discoveryResult = null;
+                this.modal.dcr.discoveredScopes = [];
+            } finally {
+                this.modal.dcr.discovering = false;
+            }
+        },
+
         modalSubmit() {
+            // BYO-specific validation
+            if (this.modal.oauthMode === 'byo') {
+                if (!this.modal.byo.clientId.trim() || !this.modal.byo.clientSecret.trim()) {
+                    this.showToast('Client ID and Client Secret are required', 'error');
+                    return;
+                }
+            }
+            // DCR-specific validation
+            if (this.modal.oauthMode === 'dcr') {
+                if (this.modal.dcr.discovering) {
+                    this.showToast('Wait for OAuth discovery to finish', 'error');
+                    return;
+                }
+                if (!this.modal.dcr.discoveryResult) {
+                    this.showToast('OAuth discovery failed — cannot continue', 'error');
+                    return;
+                }
+            }
+
             // Clean up empty values from userArgs
             const cleanedUserArgs = {};
             for (const [key, value] of Object.entries(this.modal.userArgs)) {
@@ -319,12 +615,28 @@ function marketplacePage() {
                 }
             }
 
-            this.modal.visible = false;
-            if (_modalResolve) _modalResolve({
+            const result = {
                 envValues: this.modal.envValues,
                 oauthValues: this.modal.oauthValues,
-                userArgs: cleanedUserArgs
-            });
+                userArgs: cleanedUserArgs,
+                oauthMode: this.modal.oauthMode,
+            };
+            if (this.modal.oauthMode === 'byo') {
+                result.byo = {
+                    clientId: this.modal.byo.clientId.trim(),
+                    clientSecret: this.modal.byo.clientSecret.trim(),
+                    selectedScopes: [...this.modal.selectedScopes],
+                };
+            } else if (this.modal.oauthMode === 'dcr') {
+                result.dcr = {
+                    issuer: this.modal.dcr.discoveryResult?.issuer,
+                    selectedScopes: [...this.modal.selectedScopes],
+                    registrationToken: this.modal.dcr.registrationToken.trim() || null,
+                };
+            }
+
+            this.modal.visible = false;
+            if (_modalResolve) _modalResolve(result);
             _modalResolve = null;
         },
 
@@ -436,58 +748,72 @@ function marketplacePage() {
         },
 
         async installServer(server) {
-            console.log('Installing server:', server);
-            console.log('env_vars:', server.env_vars);
-
             let envVars = {};
-            let oauthVars = {};
             let userArgs = {};
+            let byoPayload = null;
+            let dcrPayload = null;
+
             const needsEnv = server.env_vars && server.env_vars.length > 0;
-            const needsOauth = server.oauth_vars && server.oauth_vars.length > 0;
             const hasConfigurableArgs = server.meta?.configurable_args && server.meta.configurable_args.length > 0;
-            const hasBackendOauth = server.backend_id && needsOauth;
+            const oauthMode = server.oauth_mode;  // 'byo' | 'dcr' | null
+            const isHostedBroker = !oauthMode && server.requires_oauth;
 
-            console.log('needsEnv:', needsEnv, 'needsOauth:', needsOauth, 'hasBackendOauth:', hasBackendOauth, 'hasConfigurableArgs:', hasConfigurableArgs);
-
-            // For backend OAuth, only collect env vars if needed (OAuth handled by backend)
-            // Note: configurable_args not supported for OAuth servers (design decision)
-            if (hasBackendOauth) {
+            if (oauthMode === 'byo') {
+                const result = await this.openByoModal(server);
+                if (!result) return;
+                byoPayload = result.byo;
+            } else if (oauthMode === 'dcr') {
+                const result = await this.openDcrModal(server);
+                if (!result) return;
+                dcrPayload = result.dcr;
+            } else if (isHostedBroker) {
+                // Hosted-broker: only collect env vars (OAuth handled by backend)
                 if (needsEnv) {
                     const result = await this.openModal(server, server.env_vars, []);
                     if (!result) return;
                     envVars = result.envValues;
                 }
-                // Skip OAuth credentials prompt - backend handles it
-            } else if (needsEnv || needsOauth || hasConfigurableArgs) {
-                // Local OAuth or non-OAuth: collect env, oauth vars, and configurable args
-                const result = await this.openModal(
-                    server,
-                    needsEnv ? server.env_vars : [],
-                    needsOauth ? server.oauth_vars : []
-                );
+            } else if (needsEnv || hasConfigurableArgs) {
+                // Non-OAuth with env/args to fill in
+                const result = await this.openModal(server, needsEnv ? server.env_vars : [], []);
                 if (!result) return;
                 envVars = result.envValues;
-                oauthVars = result.oauthValues;
                 userArgs = result.userArgs || {};
             }
 
             server.installing = true;
             try {
+                const payload = {
+                    server_id: server.id,
+                    backend_id: server.backend_id,
+                    env_vars: envVars,
+                    user_args: userArgs,
+                };
+                if (byoPayload) {
+                    payload.client_id = byoPayload.clientId;
+                    payload.client_secret = byoPayload.clientSecret;
+                    payload.selected_scopes = byoPayload.selectedScopes;
+                } else if (dcrPayload) {
+                    payload.issuer = dcrPayload.issuer;
+                    payload.selected_scopes = dcrPayload.selectedScopes;
+                    if (dcrPayload.registrationToken) payload.registration_token = dcrPayload.registrationToken;
+                }
+
                 const res = await fetch('/api/marketplace/install', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ server_id: server.id, backend_id: server.backend_id, env_vars: envVars, oauth_vars: oauthVars, user_args: userArgs }),
+                    body: JSON.stringify(payload),
                 });
                 const data = await res.json();
                 if (!res.ok) {
                     this.showToast(data.error || 'Install failed', 'error');
                     server.installing = false;
                 } else if (data.requires_oauth && data.oauth_url) {
-                    // Backend OAuth flow - redirect in same tab
+                    // Hosted-broker OAuth - redirect in same tab
                     this.showToast('Redirecting to authorization...', 'info');
                     window.location.href = data.oauth_url;
                 } else {
-                    // Non-OAuth or local OAuth completed
+                    // BYO / DCR / non-OAuth: install completed (browser flow already finished)
                     server.installed = true;
                     server.active = true;
                     server.connected = data.connected;

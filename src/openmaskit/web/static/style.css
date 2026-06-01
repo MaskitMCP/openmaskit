@@ -4725,3 +4725,218 @@ code {
 .version-banner-dismiss:hover {
     opacity: 1;
 }
+
+/* ------------ Marketplace install modal: BYO / DCR ------------ */
+
+/* Widen the modal when we're collecting OAuth setup */
+.modal:has(.modal-byo-banner),
+.modal:has(.modal-dcr-status) {
+    max-width: 520px;
+}
+
+.modal-byo-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.7rem 0.875rem;
+    margin-bottom: 1.25rem;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+.modal-byo-banner svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: var(--accent);
+}
+
+.modal-guide-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: 0.4rem;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+}
+.modal-guide-link:hover {
+    text-decoration: underline;
+}
+
+.modal-hint {
+    color: var(--text-muted, var(--text-secondary));
+    font-size: 0.75rem;
+    margin: 0.25rem 0 0.5rem;
+    line-height: 1.45;
+}
+
+.modal-copy-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.625rem;
+}
+.modal-copy-value {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-primary);
+    word-break: break-all;
+    background: transparent;
+    padding: 0;
+}
+.modal-copy-btn {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    padding: 0.35rem 0.7rem;
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.modal-copy-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.modal-copy-btn.copied {
+    color: var(--success, #3fb950);
+    border-color: var(--success, #3fb950);
+}
+
+.modal-readonly-value {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.625rem;
+    word-break: break-all;
+}
+
+.modal-scope-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 0.6rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.modal-scope-list-grid {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+.modal-scope-list-grid .modal-scope-item {
+    flex: 1 1 calc(50% - 0.5rem);
+}
+.modal-scope-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+.modal-scope-item:hover {
+    background: var(--bg-surface);
+}
+.modal-scope-item.disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+.modal-scope-item input[type="checkbox"] {
+    margin-top: 2px;
+    accent-color: var(--accent);
+}
+.modal-scope-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    min-width: 0;
+}
+.modal-scope-label {
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+.modal-scope-raw {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    background: transparent;
+    padding: 0;
+    word-break: break-all;
+}
+.modal-scope-required {
+    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    align-self: center;
+}
+
+.modal-dcr-status {
+    background: var(--bg-input);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 0.75rem;
+    font-size: 0.78rem;
+}
+.modal-dcr-loading,
+.modal-dcr-success,
+.modal-dcr-error {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.modal-dcr-success { color: var(--success, #3fb950); }
+.modal-dcr-success code {
+    color: var(--text-primary);
+    background: transparent;
+    padding: 0;
+    font-size: 0.75rem;
+}
+.modal-dcr-warning {
+    font-size: 0.7rem;
+    color: var(--warning, #d29922);
+    padding: 0.1rem 0.4rem;
+    border: 1px solid var(--warning, #d29922);
+    border-radius: 999px;
+    margin-left: 0.5rem;
+}
+.modal-dcr-error { color: var(--danger, #f85149); }
+
+.modal-advanced-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-family: inherit;
+    cursor: pointer;
+}
+.modal-advanced-toggle svg {
+    transition: transform var(--transition-fast);
+}
+.modal-advanced-toggle:hover {
+    color: var(--text-primary);
+}
