@@ -1877,6 +1877,11 @@ code {
     border-color: rgba(245, 158, 11, 0.24);
     opacity: 0.85;
 }
+.badge-install-type-header {
+    background: rgba(244, 114, 182, 0.10);
+    color: #f472b6;
+    border-color: rgba(244, 114, 182, 0.30);
+}
 
 .marketplace-card h3 {
     font-family: var(--font-mono);
