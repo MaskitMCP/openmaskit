@@ -80,6 +80,71 @@ class TestBackendClientInit:
         assert client.required_headers["X-OpenMaskit-Installation-Id"] == "test-abc"
         await client.close()
 
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("value", ["1", "true", "True", "yes"])
+    async def test_disable_marketplace_env_var(self, monkeypatch, value):
+        """OPENMASKIT_DISABLE_MARKETPLACE truthy values disable backend calls."""
+        monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", value)
+        client = BackendClient(installation_id="x", openmaskit_version="0.2.0")
+        assert client.enabled is False
+        await client.close()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("value", ["", "0", "false", "no", "off"])
+    async def test_marketplace_enabled_by_default(self, monkeypatch, value):
+        """Falsy/empty values keep marketplace enabled."""
+        if value == "":
+            monkeypatch.delenv("OPENMASKIT_DISABLE_MARKETPLACE", raising=False)
+        else:
+            monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", value)
+        client = BackendClient(installation_id="x", openmaskit_version="0.2.0")
+        assert client.enabled is True
+        await client.close()
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_get_catalog_short_circuits_when_disabled(self, monkeypatch):
+        """get_catalog returns empty result without making a request when disabled."""
+        monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", "1")
+        client = BackendClient(
+            installation_id="x",
+            openmaskit_version="0.2.0",
+            marketplace_url="https://test-api.example.com",
+        )
+        # Intentionally do NOT register any respx route — if the client tries
+        # to send a request, respx will raise.
+        result = await client.get_catalog()
+        assert result == {"data": [], "meta": {"total": 0, "page": 1, "size": 12, "total_pages": 0}}
+        await client.close()
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_get_server_info_short_circuits_when_disabled(self, monkeypatch):
+        """get_server_info returns None without making a request when disabled."""
+        monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", "1")
+        client = BackendClient(
+            installation_id="x",
+            openmaskit_version="0.2.0",
+            marketplace_url="https://test-api.example.com",
+        )
+        result = await client.get_server_info("any-id")
+        assert result is None
+        await client.close()
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_check_version_short_circuits_when_disabled(self, monkeypatch):
+        """check_version returns None without making a request when disabled."""
+        monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", "1")
+        client = BackendClient(
+            installation_id="x",
+            openmaskit_version="0.2.0",
+            marketplace_url="https://test-api.example.com",
+        )
+        result = await client.check_version()
+        assert result is None
+        await client.close()
+
 
 class TestMarketplaceCatalog:
     """Test marketplace catalog fetching."""

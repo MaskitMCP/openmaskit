@@ -162,6 +162,28 @@
     color: var(--text-primary);
 }
 
+.onboarding-fineprint {
+    padding: 0.875rem 2rem 1.25rem;
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.onboarding-fineprint a {
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-decoration-color: var(--border-subtle);
+    text-underline-offset: 2px;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.onboarding-fineprint a:hover {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+}
+
 /* ===== Enhanced Empty State ===== */
 .empty-state-cards {
     display: grid;

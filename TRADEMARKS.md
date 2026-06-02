@@ -26,7 +26,7 @@ additional uses we permit.
   OpenMaskit," "works with OpenMaskit," "an OpenMaskit plugin," or
   "originally forked from OpenMaskit."
 - **Use the unmodified logo** to link to the official project pages
-  (this repository, [maskitmcp.com](https://maskitmcp.com)).
+  (this repository, [openmaskit.com](https://www.openmaskit.com)).
 
 ## What requires a different approach
 

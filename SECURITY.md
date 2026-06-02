@@ -22,6 +22,15 @@ The following are **out of scope** for this project's threat model:
 - An attacker who already has shell access as the OpenMaskit-running user
 - Loss or theft of the encryption key file (treat it like any other secret)
 
+## Telemetry
+
+The only data OpenMaskit sends to its backend (`api.maskitmcp.com`) is:
+
+- A random 25-character anonymous installation ID generated on first run (`~/.openmaskit/.installation_id`)
+- The running OpenMaskit version (in the `User-Agent` header)
+
+These are sent only on marketplace catalog, server-detail, and version-check requests — and only when the marketplace is used. No tool calls, masking rules, server responses, OAuth tokens, or usage events are transmitted. Set `OPENMASKIT_DISABLE_MARKETPLACE=1` to opt out entirely; custom (non-marketplace) servers continue to work.
+
 ## Reporting a Vulnerability
 
 **Please do not open a public GitHub issue for security vulnerabilities.**

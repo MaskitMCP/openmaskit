@@ -29,8 +29,13 @@ class BackendClient:
             "OPENMASKIT_MARKETPLACE_API_URL", "https://api.maskitmcp.com"
         )
         self.client = httpx.AsyncClient(timeout=timeout)
-        # Always enabled (we have defaults for localhost)
-        self.enabled = True
+        # OPENMASKIT_DISABLE_MARKETPLACE=1 opts out of all calls to
+        # api.maskitmcp.com (catalog browse, server detail, version check).
+        # Auth-side calls (exchange_code, refresh_oauth_token) keep working
+        # so previously-installed hosted-broker servers can still refresh.
+        self.enabled = os.getenv("OPENMASKIT_DISABLE_MARKETPLACE", "").strip() not in (
+            "1", "true", "True", "yes",
+        )
         self.installation_id = installation_id
         self.openmaskit_version = openmaskit_version
         self.required_headers = {
@@ -58,7 +63,7 @@ class BackendClient:
             Dict with 'data' (list of servers) and 'meta' (pagination info).
             Returns empty result on error: {"data": [], "meta": {"total": 0, "page": 1, "size": size, "total_pages": 0}}
         """
-        if not self.marketplace_url:
+        if not self.marketplace_url or not self.enabled:
             return {"data": [], "meta": {"total": 0, "page": 1, "size": size, "total_pages": 0}}
 
         try:
@@ -91,7 +96,7 @@ class BackendClient:
         The current version travels in the User-Agent header (set in required_headers).
         Returns the parsed response body, or None on any failure (fail-open).
         """
-        if not self.marketplace_url:
+        if not self.marketplace_url or not self.enabled:
             return None
         try:
             resp = await self.client.get(
@@ -109,7 +114,7 @@ class BackendClient:
 
         Returns None on error.
         """
-        if not self.marketplace_url:
+        if not self.marketplace_url or not self.enabled:
             return None
 
         try:

@@ -146,6 +146,7 @@ openmaskit --version
 | `OPENMASKIT_TRAFFIC_DB_PATH` | Path to the traffic audit database (default `~/.openmaskit/traffic.db`) |
 | `OPENMASKIT_TRAFFIC_MAX_ROWS` | Cap on stored audit rows (default 10000, oldest evicted first) |
 | `OPENMASKIT_ALLOWED_ORIGINS` | Comma-separated extra origins allowed to call `/api/*` |
+| `OPENMASKIT_DISABLE_MARKETPLACE` | Set to `1` to opt out of all calls to `api.maskitmcp.com` (catalog, server detail, version check). Custom servers continue to work. |
 
 ## Dashboard
 
@@ -168,10 +169,10 @@ A few things worth knowing about:
 - **Container lifecycle management** — When you deactivate, delete, or stop OpenMaskit, any containers it spawned are stopped with it. No orphaned containers sitting around using ports.
 - **Stable aliases across restarts** — `prod-db.internal.net` always becomes `host_1`, the same alias your agent saw last week. Aliases are persisted, so multi-turn conversations stay coherent.
 - **Encrypted traffic audit log** — Every tool call is recorded with its unmasked args and response, Fernet-encrypted at rest. Lazy-loaded from the UI on demand and capped at 10k rows by default.
-- **Three OAuth install paths** — Marketplace servers can ship as **BYO** (paste your own `client_id`/`client_secret`, OpenMaskit runs the flow locally), **DCR** (OpenMaskit registers a client with the provider automatically), or **hosted-broker** (zero setup — fully implemented but disabled by default until we're confident it's the safest option). The "Re-authorize" button on each server card runs a fresh flow when tokens expire. Setup guides for the BYO ones live at [maskitmcp.com/connect](https://maskitmcp.com/connect/).
+- **Two OAuth install paths today** — Marketplace servers can ship as **BYO** (paste your own `client_id`/`client_secret`, OpenMaskit runs the flow locally) or **DCR** (OpenMaskit registers a client with the provider automatically). The "Re-authorize" button on each server card runs a fresh flow when tokens expire. Setup guides for the BYO ones live at [openmaskit.com/connect](https://www.openmaskit.com/connect/). A third **hosted-broker** path (zero-setup, with the OAuth code exchange handled by `auth.maskitmcp.com`) is fully implemented but **currently disabled** while we work through every security aspect of it — we'd rather ship it later and right than early and questionable.
 - **API-key auth for non-OAuth HTTP servers** — Marketplace and custom HTTP servers can authenticate with static headers (Datadog `DD-API-KEY`, Stripe `Authorization: Bearer`, etc.). Header values are stored Fernet-encrypted alongside everything else.
 - **Hot add/remove servers** — Marketplace installs, custom server adds, deactivations, and deletes all happen live. No restart needed.
-- **Argument guardrails and injections** — Block `DROP TABLE` before it leaves your machine; silently inject `read_only: true` on every database call.
+- **Argument guardrails and injections** — Block `DROP TABLE` before it leaves your machine; silently inject `read_only: true` on every database call (if supported by the underlying MCP server).
 - **Field stripping** — Some fields shouldn't be aliased, they should just be gone. SSNs, credit cards — strip them from responses entirely.
 - **Localhost-safe by default** — `Origin` allow-listing, CSRF protection, and OAuth `state` validation are on out of the box, so a malicious webpage can't reach into your local OpenMaskit.
 
@@ -194,6 +195,14 @@ Two files matter:
 `~/.openmaskit/traffic.db` is the audit log; safe to drop.
 
 For production-style setups, hold the key in `OPENMASKIT_ENCRYPTION_KEY` instead of on disk.
+
+## Telemetry
+
+OpenMaskit generates a random 25-character anonymous installation ID on first run, stored at `~/.openmaskit/.installation_id`. The ID, along with the running version (in `User-Agent`), is sent to `api.maskitmcp.com` on three endpoints: catalog browse, server detail, and version check. The backend uses it to validate that requests come from a real OpenMaskit install and to count active installations.
+
+**That's it.** No tool calls, masking rules, MCP server contents, response bodies, OAuth tokens, or usage events are sent. There's no account, no email, no IP-based linking. The backend is only contacted when the marketplace is used.
+
+**To opt out**, set `OPENMASKIT_DISABLE_MARKETPLACE=1`. Catalog browse and server detail return empty; custom HTTP/stdio servers continue to work normally.
 
 See [CHANGELOG.md](CHANGELOG.md) for upgrade notes between versions.
 
