@@ -3784,6 +3784,25 @@ code {
     color: var(--orange);
 }
 
+.dcr-cross-domain-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.5rem 0.625rem;
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    border-radius: var(--radius-sm);
+    color: var(--orange);
+    font-size: 0.7rem;
+    line-height: 1.4;
+}
+
+.dcr-cross-domain-warning svg {
+    color: var(--orange);
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+}
+
 .dcr-supported-badge {
     font-size: 0.65rem;
     font-weight: 500;
