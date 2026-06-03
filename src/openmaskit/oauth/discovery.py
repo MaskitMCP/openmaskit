@@ -36,6 +36,44 @@ _RESOURCE_METADATA_RE = re.compile(
 )
 
 
+def issuer_matches(requested: str, claimed: str | None) -> bool:
+    """RFC 8414 §3.3 issuer-identity check.
+
+    The AS metadata's `issuer` MUST be identical to the issuer URL into
+    which the well-known segment was inserted to retrieve the metadata.
+    Comparison is exact after stripping a single trailing slash. When the
+    server omits the `issuer` field there is nothing to validate against,
+    and we let the caller decide what to do — returning True here keeps
+    the legacy lenient behaviour for servers that don't advertise it at
+    all (Pinging metadata without an issuer line is rare but not a spec
+    violation worth rejecting on its own).
+    """
+    if not claimed:
+        return True
+    return requested.rstrip("/") == claimed.rstrip("/")
+
+
+def wellknown_metadata_urls(issuer: str, kind: str) -> list[str]:
+    """Return well-known metadata URLs for `issuer` in priority order.
+
+    Per RFC 8414 §3.1, when the issuer has a non-empty path the well-known
+    URI string MUST be inserted between the host and the path — e.g. for
+    issuer ``https://access.stripe.com/mcp`` the spec form is
+    ``https://access.stripe.com/.well-known/oauth-authorization-server/mcp``,
+    not ``…/mcp/.well-known/…``. Some non-compliant servers serve the
+    appended form instead, so we return the spec form first and the
+    appended form as a fallback. For root-path issuers the two forms are
+    identical and we return a single URL.
+    """
+    issuer = issuer.rstrip("/")
+    suffix = f"/.well-known/{kind}"
+    parsed = urlparse(issuer)
+    if not parsed.path:
+        return [f"{issuer}{suffix}"]
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    return [f"{base}{suffix}{parsed.path}", f"{issuer}{suffix}"]
+
+
 def extract_resource_metadata_url(www_authenticate: str) -> str | None:
     """Return the `resource_metadata` URL from a WWW-Authenticate header, or None."""
     if not www_authenticate:
@@ -133,23 +171,43 @@ async def fetch_oauth_server_metadata(
     oidc_meta: dict | None = None
 
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        oauth_url = f"{issuer}/.well-known/oauth-authorization-server"
-        try:
-            logger.info(f"Fetching OAuth 2.0 AS metadata at {oauth_url}")
-            resp = await client.get(oauth_url)
-            resp.raise_for_status()
-            oauth_meta = resp.json()
-        except Exception as e:
-            logger.debug(f"OAuth 2.0 AS metadata fetch failed at {oauth_url}: {e}")
+        for oauth_url in wellknown_metadata_urls(issuer, "oauth-authorization-server"):
+            try:
+                logger.info(f"Fetching OAuth 2.0 AS metadata at {oauth_url}")
+                resp = await client.get(oauth_url)
+                resp.raise_for_status()
+                candidate = resp.json()
+            except Exception as e:
+                logger.debug(f"OAuth 2.0 AS metadata fetch failed at {oauth_url}: {e}")
+                continue
+            if not issuer_matches(issuer, candidate.get("issuer")):
+                logger.warning(
+                    f"AS metadata at {oauth_url} claims issuer "
+                    f"{candidate.get('issuer')!r}, expected {issuer!r} (RFC 8414 §3.3); "
+                    "skipping this candidate"
+                )
+                continue
+            oauth_meta = candidate
+            break
 
-        oidc_url = f"{issuer}/.well-known/openid-configuration"
-        try:
-            logger.info(f"Fetching OIDC metadata at {oidc_url}")
-            resp = await client.get(oidc_url)
-            resp.raise_for_status()
-            oidc_meta = resp.json()
-        except Exception as e:
-            logger.debug(f"OIDC metadata fetch failed at {oidc_url}: {e}")
+        for oidc_url in wellknown_metadata_urls(issuer, "openid-configuration"):
+            try:
+                logger.info(f"Fetching OIDC metadata at {oidc_url}")
+                resp = await client.get(oidc_url)
+                resp.raise_for_status()
+                candidate = resp.json()
+            except Exception as e:
+                logger.debug(f"OIDC metadata fetch failed at {oidc_url}: {e}")
+                continue
+            if not issuer_matches(issuer, candidate.get("issuer")):
+                logger.warning(
+                    f"OIDC metadata at {oidc_url} claims issuer "
+                    f"{candidate.get('issuer')!r}, expected {issuer!r} (RFC 8414 §3.3); "
+                    "skipping this candidate"
+                )
+                continue
+            oidc_meta = candidate
+            break
 
     if not oauth_meta and not oidc_meta:
         return None
@@ -233,11 +291,22 @@ async def discover_legacy(mcp_url: str) -> dict | None:
     if not server_meta:
         return None
 
-    # Best-effort PRM lookup at the legacy path (no query string).
+    # Best-effort PRM lookup. SEP-985 / RFC 9728: try the path-based
+    # well-known first (if the MCP URL has a path), then fall back to the
+    # root-based well-known. Both are spec-compliant locations; we tried
+    # neither historically when there was no path.
     prm: dict | None = None
+    prm_url: str | None = None
     if parsed.path:
-        prm_url = f"{issuer}/.well-known/oauth-protected-resource/{parsed.path.lstrip('/')}"
-        prm = await fetch_protected_resource_metadata(prm_url)
+        candidate = f"{issuer}/.well-known/oauth-protected-resource/{parsed.path.lstrip('/')}"
+        prm = await fetch_protected_resource_metadata(candidate)
+        if prm:
+            prm_url = candidate
+    if not prm:
+        candidate = f"{issuer}/.well-known/oauth-protected-resource"
+        prm = await fetch_protected_resource_metadata(candidate)
+        if prm:
+            prm_url = candidate
 
     scopes = (
         (prm.get("scopes_supported") if prm else None)
@@ -253,7 +322,7 @@ async def discover_legacy(mcp_url: str) -> dict | None:
         "registration_endpoint": server_meta.get("registration_endpoint"),
         "scopes_supported": scopes,
         "resource": prm.get("resource") if prm else None,
-        "resource_metadata_url": None,
+        "resource_metadata_url": prm_url,
         "discovery_method": "legacy_host" + ("+resource" if prm else ""),
     }
 

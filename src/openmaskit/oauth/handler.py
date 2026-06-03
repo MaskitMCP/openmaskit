@@ -22,13 +22,41 @@ from starlette.routing import Route
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
+from openmaskit import __version__ as openmaskit_version
 from openmaskit.models import HttpOAuthConfig
+from openmaskit.oauth.discovery import issuer_matches, wellknown_metadata_urls
 from openmaskit.oauth.sdk_patches import register_scope_override
 from openmaskit.security import TokenEncryption
 
 logger = logging.getLogger(__name__)
 
 OAUTH_CALLBACK_PORT = 3131
+
+# RFC 7591 §2 software_id — stable identifier for OpenMaskit as a product,
+# the same across all installs and versions. AS admins can use it to
+# identify (and, if necessary, throttle or block) OpenMaskit's DCR traffic.
+OPENMASKIT_SOFTWARE_ID = "494c9118-2bf0-4897-aa6b-29d818ebf201"
+
+
+def pick_dcr_token_endpoint_auth_method(supported: list[str] | None) -> str:
+    """Pick the token_endpoint_auth_method to request in a DCR registration.
+
+    Preserves byte-identical behaviour for every server that currently works:
+    when the AS advertises `client_secret_post` (or doesn't advertise the
+    field at all), we still send `client_secret_post`. Only when the AS
+    explicitly excludes it do we negotiate down — preferring `none` (PKCE
+    public client, the MCP authorization spec's recommended default) over
+    `client_secret_basic` over whatever else the AS lists.
+    """
+    if not supported:
+        return "client_secret_post"
+    if "client_secret_post" in supported:
+        return "client_secret_post"
+    if "none" in supported:
+        return "none"
+    if "client_secret_basic" in supported:
+        return "client_secret_basic"
+    return supported[0]
 
 
 class FileTokenStorage:
@@ -88,6 +116,34 @@ class FileTokenStorage:
         data["client_info"] = client_info.model_dump(exclude_none=True)
         self._write(data)
 
+    async def get_registration_management(self) -> dict | None:
+        """RFC 7592 management metadata stored at DCR time, or None.
+
+        Returns a dict with optional `registration_access_token` and
+        `registration_client_uri` keys. A future de-register-on-uninstall
+        flow uses these to call DELETE on the client configuration URI.
+        """
+        data = self._read()
+        raw = data.get("registration_management")
+        return raw if raw else None
+
+    async def set_registration_management(
+        self,
+        registration_access_token: str | None,
+        registration_client_uri: str | None,
+    ) -> None:
+        """Persist RFC 7592 management metadata returned in the DCR response."""
+        if not registration_access_token and not registration_client_uri:
+            return
+        data = self._read()
+        entry: dict = {}
+        if registration_access_token:
+            entry["registration_access_token"] = registration_access_token
+        if registration_client_uri:
+            entry["registration_client_uri"] = registration_client_uri
+        data["registration_management"] = entry
+        self._write(data)
+
     async def discover_oauth_metadata(self, issuer: str) -> dict | None:
         """Discover OAuth/OIDC authorization-server metadata for `issuer`.
 
@@ -99,33 +155,50 @@ class FileTokenStorage:
         issuer = issuer.rstrip("/")
         oidc_metadata = None
 
-        oidc_url = f"{issuer}/.well-known/openid-configuration"
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                logger.info(f"Attempting OIDC discovery at {oidc_url}")
-                resp = await client.get(oidc_url)
-                resp.raise_for_status()
-                oidc_metadata = resp.json()
-                if oidc_metadata.get("registration_endpoint"):
-                    return oidc_metadata
-            except Exception as e:
-                logger.debug(f"OIDC discovery failed: {e}")
+            for oidc_url in wellknown_metadata_urls(issuer, "openid-configuration"):
+                try:
+                    logger.info(f"Attempting OIDC discovery at {oidc_url}")
+                    resp = await client.get(oidc_url)
+                    resp.raise_for_status()
+                    candidate = resp.json()
+                except Exception as e:
+                    logger.debug(f"OIDC discovery failed at {oidc_url}: {e}")
+                    continue
+                if not issuer_matches(issuer, candidate.get("issuer")):
+                    logger.warning(
+                        f"OIDC metadata at {oidc_url} claims issuer "
+                        f"{candidate.get('issuer')!r}, expected {issuer!r} "
+                        "(RFC 8414 §3.3); skipping this candidate"
+                    )
+                    continue
+                oidc_metadata = candidate
+                break
+            if oidc_metadata and oidc_metadata.get("registration_endpoint"):
+                return oidc_metadata
 
-        oauth_url = f"{issuer}/.well-known/oauth-authorization-server"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                logger.info(f"Attempting OAuth 2.0 discovery at {oauth_url}")
-                resp = await client.get(oauth_url)
-                resp.raise_for_status()
-                oauth_metadata = resp.json()
+            for oauth_url in wellknown_metadata_urls(issuer, "oauth-authorization-server"):
+                try:
+                    logger.info(f"Attempting OAuth 2.0 discovery at {oauth_url}")
+                    resp = await client.get(oauth_url)
+                    resp.raise_for_status()
+                    oauth_metadata = resp.json()
+                except Exception as e:
+                    logger.debug(f"OAuth 2.0 discovery failed at {oauth_url}: {e}")
+                    continue
+                if not issuer_matches(issuer, oauth_metadata.get("issuer")):
+                    logger.warning(
+                        f"OAuth metadata at {oauth_url} claims issuer "
+                        f"{oauth_metadata.get('issuer')!r}, expected {issuer!r} "
+                        "(RFC 8414 §3.3); skipping this candidate"
+                    )
+                    continue
                 if oidc_metadata:
                     merged = oidc_metadata.copy()
                     if oauth_metadata.get("registration_endpoint"):
                         merged["registration_endpoint"] = oauth_metadata["registration_endpoint"]
                     return merged
                 return oauth_metadata
-            except Exception as e:
-                logger.debug(f"OAuth 2.0 discovery failed: {e}")
 
         if oidc_metadata:
             logger.info("Returning OIDC metadata (OAuth 2.0 discovery failed)")
@@ -138,38 +211,68 @@ class FileTokenStorage:
         self,
         registration_endpoint: str,
         client_metadata: dict,
-        registration_token: str | None = None
-    ) -> dict | None:
+        registration_token: str | None = None,
+    ) -> dict:
         """Register OAuth client via DCR (RFC 7591).
 
-        Args:
-            registration_endpoint: URL for client registration
-            client_metadata: Client metadata (name, redirect_uris, etc.)
-            registration_token: Optional bearer token for authenticated DCR
-
-        Returns:
-            dict with client_id, client_secret, etc.
-            None if registration fails
+        Returns the parsed client info on success. Raises RuntimeError on any
+        failure, with the RFC 7591 §3.2.2 error / error_description fields
+        included in the message when the server provided them, so callers
+        (and the install UI) see a real diagnostic instead of a generic
+        "DCR failed".
         """
         headers = {"Content-Type": "application/json"}
         if registration_token:
             headers["Authorization"] = f"Bearer {registration_token}"
 
         async with httpx.AsyncClient(timeout=10.0) as client:
+            logger.info(f"Attempting DCR at {registration_endpoint}")
             try:
-                logger.info(f"Attempting DCR at {registration_endpoint}")
                 resp = await client.post(
                     registration_endpoint,
                     json=client_metadata,
-                    headers=headers
+                    headers=headers,
                 )
-                resp.raise_for_status()
-                result = resp.json()
+            except httpx.HTTPError as e:
+                msg = f"DCR network error at {registration_endpoint}: {e}"
+                logger.error(msg)
+                raise RuntimeError(msg) from e
+
+            if 200 <= resp.status_code < 300:
+                try:
+                    result = resp.json()
+                except ValueError as e:
+                    raise RuntimeError(
+                        f"DCR succeeded ({resp.status_code}) but response was not JSON: {e}"
+                    ) from e
                 logger.info(f"DCR successful, client_id: {result.get('client_id')}")
                 return result
-            except Exception as e:
-                logger.error(f"DCR failed: {e}")
-                return None
+
+            # Non-2xx — try to surface the RFC 7591 §3.2.2 error fields.
+            error_code: str | None = None
+            error_description: str | None = None
+            body_snippet = ""
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    error_code = body.get("error")
+                    error_description = body.get("error_description")
+            except ValueError:
+                body_snippet = resp.text[:200].strip()
+
+            parts = [f"DCR rejected by {registration_endpoint} ({resp.status_code}"]
+            if error_code:
+                parts[0] += f" {error_code})"
+            else:
+                parts[0] += ")"
+            if error_description:
+                parts.append(f": {error_description}")
+            elif body_snippet:
+                parts.append(f": {body_snippet}")
+
+            msg = "".join(parts)
+            logger.error(msg)
+            raise RuntimeError(msg)
 
 
 class OAuthCallbackServer:
@@ -183,7 +286,30 @@ class OAuthCallbackServer:
 
     @property
     def redirect_uri(self) -> str:
+        """Canonical loopback redirect URI per RFC 8252 §7.3 (`127.0.0.1`)."""
+        return f"http://127.0.0.1:{self._port}/callback"
+
+    @property
+    def legacy_redirect_uri(self) -> str:
+        """`localhost`-form. Used for BYO installs whose setup guides
+        instruct registering this exact string at the provider, and for
+        pre-RFC-8252-fix DCR clients whose existing AS registration only
+        lists the localhost form."""
         return f"http://localhost:{self._port}/callback"
+
+    @property
+    def loopback_redirect_uris(self) -> list[str]:
+        """Both forms, canonical first.
+
+        For fresh DCRs we register both so the AS accepts either at auth
+        time. Keeping the `localhost` form registered matches the story
+        every BYO setup guide on the marketing site already tells users
+        (GitHub, Slack, Jira, …): a consistent "OpenMaskit registers
+        http://localhost:3131/callback" narrative across both flows. Both
+        forms resolve to the same loopback socket on every supported
+        platform.
+        """
+        return [self.redirect_uri, self.legacy_redirect_uri]
 
     async def _callback_route(self, request: Request):
         self._auth_code = request.query_params.get("code")
@@ -248,7 +374,6 @@ async def create_oauth_provider(
     """
 
     storage = FileTokenStorage(store_path)
-    redirect_uri = callback_server.redirect_uri
 
     # DCR mode: issuer provided
     if oauth_config.issuer:
@@ -270,9 +395,19 @@ async def create_oauth_provider(
             if existing_client_info.client_secret:
                 auth_method = "client_secret_post"
 
+            # Reuse whatever redirect_uris the AS originally registered for
+            # this client. Pre-RFC-8252-fix installs have [localhost]; new
+            # installs have [127.0.0.1, localhost]. Either way the AS will
+            # accept the chosen primary, which is what matters.
+            stored_uris = (
+                [str(u) for u in existing_client_info.redirect_uris]
+                if existing_client_info.redirect_uris
+                else [callback_server.redirect_uri]
+            )
+
             client_metadata = OAuthClientMetadata(
                 client_name="OpenMaskit",
-                redirect_uris=[redirect_uri],
+                redirect_uris=stored_uris,
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
                 token_endpoint_auth_method=auth_method,
@@ -284,45 +419,83 @@ async def create_oauth_provider(
             if not registration_endpoint:
                 raise RuntimeError(f"DCR requested but issuer {oauth_config.issuer} does not support DCR (no registration_endpoint)")
 
+            requested_auth_method = pick_dcr_token_endpoint_auth_method(
+                metadata.get("token_endpoint_auth_methods_supported")
+            )
+            # RFC 8252 §7.3: prefer the 127.0.0.1 form. Register both
+            # `127.0.0.1` and `localhost` so the AS accepts either at
+            # auth time; the SDK uses redirect_uris[0] (the canonical
+            # form) in its actual authorization request. Registering
+            # both also keeps the story consistent with the BYO setup
+            # guides on the marketing site, which all tell users to add
+            # `http://localhost:3131/callback`.
+            registered_redirect_uris = callback_server.loopback_redirect_uris
             dcr_metadata = {
                 "client_name": "OpenMaskit",
-                "redirect_uris": [redirect_uri],
+                "redirect_uris": registered_redirect_uris,
                 "grant_types": ["authorization_code", "refresh_token"],
                 "response_types": ["code"],
-                "token_endpoint_auth_method": "client_secret_post",
+                "token_endpoint_auth_method": requested_auth_method,
+                "software_id": OPENMASKIT_SOFTWARE_ID,
+                "software_version": openmaskit_version,
             }
             if scope:
                 dcr_metadata["scope"] = scope
 
+            # register_dynamic_client raises with the AS's
+            # error_description on any failure, so we don't need a generic
+            # "DCR failed" wrapper here.
             client_info_dict = await storage.register_dynamic_client(
                 registration_endpoint,
                 dcr_metadata,
-                oauth_config.registration_token
+                oauth_config.registration_token,
             )
 
-            if not client_info_dict:
-                raise RuntimeError(f"Failed to register client via DCR at {registration_endpoint}")
+            # RFC 7591 §3.2.1: the AS MAY override what we requested in
+            # `token_endpoint_auth_method` (Stripe registers as `none` even
+            # if we asked for `client_secret_post`). Trust the AS's response
+            # field; fall back to inferring from secret presence for ASes
+            # that omit it.
+            assigned_auth_method = client_info_dict.get("token_endpoint_auth_method")
+            if not assigned_auth_method:
+                assigned_auth_method = (
+                    "client_secret_post"
+                    if client_info_dict.get("client_secret")
+                    else "none"
+                )
 
-            # Store the DCR result
+            # Store the DCR result. Use the same redirect_uris pair we
+            # registered so a future reconnect sees the canonical form
+            # first and the AS accepts either.
             client_info = OAuthClientInformationFull(
                 client_id=client_info_dict["client_id"],
                 client_secret=client_info_dict.get("client_secret"),
                 client_name="OpenMaskit",
-                redirect_uris=[redirect_uri],
+                redirect_uris=registered_redirect_uris,
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
-                token_endpoint_auth_method="client_secret_post",
+                token_endpoint_auth_method=assigned_auth_method,
             )
             await storage.set_client_info(client_info)
-            logger.info(f"Stored DCR client info: {client_info.client_id}")
+            logger.info(
+                f"Stored DCR client info: {client_info.client_id} "
+                f"(auth_method={assigned_auth_method})"
+            )
 
-            auth_method = "none"
-            if client_info.client_secret:
-                auth_method = "client_secret_post"
+            # RFC 7592: capture client management fields if the AS returned
+            # them. We don't act on these yet, but storing them lets a future
+            # uninstall flow DELETE the client configuration cleanly instead
+            # of orphaning a DCR client on the AS forever.
+            await storage.set_registration_management(
+                registration_access_token=client_info_dict.get("registration_access_token"),
+                registration_client_uri=client_info_dict.get("registration_client_uri"),
+            )
+
+            auth_method = assigned_auth_method
 
             client_metadata = OAuthClientMetadata(
                 client_name="OpenMaskit",
-                redirect_uris=[redirect_uri],
+                redirect_uris=registered_redirect_uris,
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
                 token_endpoint_auth_method=auth_method,
@@ -340,9 +513,15 @@ async def create_oauth_provider(
         # Prepare scope
         scope = oauth_config.scope or ""
 
+        # BYO setup guides instruct users to register `http://localhost:3131/callback`
+        # at the provider, so for manual mode we keep using the legacy form to
+        # match what's already on the provider's side. Switching to 127.0.0.1
+        # here would silently fail every existing BYO install.
+        byo_redirect_uri = callback_server.legacy_redirect_uri
+
         client_metadata = OAuthClientMetadata(
             client_name="OpenMaskit",
-            redirect_uris=[redirect_uri],
+            redirect_uris=[byo_redirect_uri],
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
             token_endpoint_auth_method=auth_method,
@@ -357,7 +536,7 @@ async def create_oauth_provider(
                     client_id=oauth_config.client_id,
                     client_secret=oauth_config.client_secret,
                     client_name="OpenMaskit",
-                    redirect_uris=[redirect_uri],
+                    redirect_uris=[byo_redirect_uri],
                     grant_types=["authorization_code", "refresh_token"],
                     response_types=["code"],
                     token_endpoint_auth_method=auth_method,
