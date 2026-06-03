@@ -1,0 +1,269 @@
+"""Spec-compliant MCP / OAuth discovery primitives.
+
+Implements the MCP authorization spec's discovery flow:
+
+  1. Probe the MCP URL.
+  2. On 401, parse the `WWW-Authenticate` header for a `resource_metadata`
+     parameter (RFC 9728 / OAuth 2.0 Protected Resource Metadata).
+  3. Fetch the protected resource metadata, read `authorization_servers`.
+  4. Fetch the authorization server's metadata at
+     `<issuer>/.well-known/oauth-authorization-server` (with OIDC fallback).
+
+A legacy "guess the issuer from the MCP host" fallback is kept for servers
+that don't advertise `WWW-Authenticate` (e.g. early MCP implementations
+where the OAuth server and the MCP endpoint share a host).
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from urllib.parse import urlparse
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_TIMEOUT = 10.0
+
+
+# RFC 6750 §3 lets `resource_metadata` appear as either a quoted-string or
+# an unquoted token. We only need to extract the value, not validate the
+# whole challenge grammar — a focused regex is enough and robust.
+_RESOURCE_METADATA_RE = re.compile(
+    r'resource_metadata\s*=\s*(?:"([^"]+)"|([^\s,]+))',
+    re.IGNORECASE,
+)
+
+
+def extract_resource_metadata_url(www_authenticate: str) -> str | None:
+    """Return the `resource_metadata` URL from a WWW-Authenticate header, or None."""
+    if not www_authenticate:
+        return None
+    m = _RESOURCE_METADATA_RE.search(www_authenticate)
+    if not m:
+        return None
+    return m.group(1) or m.group(2)
+
+
+async def probe_mcp_for_resource_metadata(
+    mcp_url: str, timeout: float = DEFAULT_TIMEOUT
+) -> str | None:
+    """Probe the MCP URL and return its advertised resource_metadata URL.
+
+    Tries GET first (cheap, no body), then falls back to a POST initialize
+    JSON-RPC request, since some MCP servers only run the auth filter on
+    POSTs that look like protocol traffic.
+
+    Returns the URL exactly as the server emitted it — preserving any query
+    string (Supabase encodes its `project_ref` here, and the query is part
+    of the resource identifier).
+    """
+    headers = {"Accept": "application/json, text/event-stream"}
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        # 1) GET probe
+        try:
+            resp = await client.get(mcp_url, headers=headers)
+            if resp.status_code == 401:
+                url = extract_resource_metadata_url(
+                    resp.headers.get("WWW-Authenticate", "")
+                )
+                if url:
+                    return url
+        except httpx.HTTPError as e:
+            logger.debug(f"GET probe of {mcp_url} failed: {e}")
+
+        # 2) POST initialize probe
+        init_body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "openmaskit-discovery", "version": "1.0"},
+            },
+        }
+        try:
+            resp = await client.post(
+                mcp_url,
+                json=init_body,
+                headers={**headers, "Content-Type": "application/json"},
+            )
+            if resp.status_code == 401:
+                url = extract_resource_metadata_url(
+                    resp.headers.get("WWW-Authenticate", "")
+                )
+                if url:
+                    return url
+        except httpx.HTTPError as e:
+            logger.debug(f"POST probe of {mcp_url} failed: {e}")
+
+    return None
+
+
+async def fetch_protected_resource_metadata(
+    url: str, timeout: float = DEFAULT_TIMEOUT
+) -> dict | None:
+    """Fetch RFC 9728 Protected Resource Metadata."""
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        try:
+            logger.info(f"Fetching protected resource metadata at {url}")
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.warning(f"Failed to fetch protected resource metadata at {url}: {e}")
+            return None
+
+
+async def fetch_oauth_server_metadata(
+    issuer: str, timeout: float = DEFAULT_TIMEOUT
+) -> dict | None:
+    """Fetch OAuth 2.0 authorization server metadata for `issuer`.
+
+    Tries `.well-known/oauth-authorization-server` first (the spec for OAuth
+    2.0 AS metadata, RFC 8414), then falls back to OIDC discovery at
+    `.well-known/openid-configuration`. Merges results when both succeed,
+    preferring OAuth 2.0 endpoints for OAuth fields and OIDC for OIDC fields.
+    """
+    issuer = issuer.rstrip("/")
+    oauth_meta: dict | None = None
+    oidc_meta: dict | None = None
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        oauth_url = f"{issuer}/.well-known/oauth-authorization-server"
+        try:
+            logger.info(f"Fetching OAuth 2.0 AS metadata at {oauth_url}")
+            resp = await client.get(oauth_url)
+            resp.raise_for_status()
+            oauth_meta = resp.json()
+        except Exception as e:
+            logger.debug(f"OAuth 2.0 AS metadata fetch failed at {oauth_url}: {e}")
+
+        oidc_url = f"{issuer}/.well-known/openid-configuration"
+        try:
+            logger.info(f"Fetching OIDC metadata at {oidc_url}")
+            resp = await client.get(oidc_url)
+            resp.raise_for_status()
+            oidc_meta = resp.json()
+        except Exception as e:
+            logger.debug(f"OIDC metadata fetch failed at {oidc_url}: {e}")
+
+    if not oauth_meta and not oidc_meta:
+        return None
+
+    merged: dict = {}
+    if oidc_meta:
+        merged.update(oidc_meta)
+    if oauth_meta:
+        # OAuth 2.0 fields take precedence for OAuth concerns
+        merged.update(oauth_meta)
+        # Specifically prefer OIDC's authorization/token endpoints only when
+        # OAuth 2.0 metadata omits them (rare; usually both list them).
+        for key in ("authorization_endpoint", "token_endpoint"):
+            if not merged.get(key) and oidc_meta and oidc_meta.get(key):
+                merged[key] = oidc_meta[key]
+    return merged
+
+
+async def discover_via_mcp_probe(mcp_url: str) -> dict | None:
+    """Spec-compliant discovery: probe MCP → PRM → AS metadata.
+
+    Returns None if any step fails — caller can then fall back to
+    `discover_legacy`.
+    """
+    prm_url = await probe_mcp_for_resource_metadata(mcp_url)
+    if not prm_url:
+        return None
+
+    prm = await fetch_protected_resource_metadata(prm_url)
+    if not prm:
+        return None
+
+    auth_servers = prm.get("authorization_servers") or []
+    if not auth_servers:
+        logger.warning(
+            f"Protected resource metadata at {prm_url} has no authorization_servers"
+        )
+        return None
+    if len(auth_servers) > 1:
+        logger.info(
+            f"Protected resource metadata lists {len(auth_servers)} authorization servers; "
+            f"using first: {auth_servers[0]}"
+        )
+
+    issuer = auth_servers[0].rstrip("/")
+    server_meta = await fetch_oauth_server_metadata(issuer)
+    if not server_meta:
+        return None
+
+    # PRM is the source of truth for scopes (resource-specific). Fall back to
+    # AS metadata only if PRM didn't list any.
+    scopes = prm.get("scopes_supported") or server_meta.get("scopes_supported") or []
+
+    return {
+        "issuer": server_meta.get("issuer", issuer),
+        "mcp_url": mcp_url,
+        "authorization_endpoint": server_meta.get("authorization_endpoint"),
+        "token_endpoint": server_meta.get("token_endpoint"),
+        "registration_endpoint": server_meta.get("registration_endpoint"),
+        "scopes_supported": scopes,
+        "resource": prm.get("resource"),
+        "resource_metadata_url": prm_url,
+        "discovery_method": "mcp_probe",
+    }
+
+
+async def discover_legacy(mcp_url: str) -> dict | None:
+    """Host-derived discovery for servers that don't advertise WWW-Authenticate.
+
+    Treats `<scheme>://<host>` of the MCP URL as the OAuth issuer, then runs
+    the same AS metadata fetch + (optional) protected resource lookup as the
+    original implementation. Kept for backwards compatibility with servers
+    like GitLab that predate the WWW-Authenticate flow.
+    """
+    parsed = urlparse(mcp_url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    issuer = f"{parsed.scheme}://{parsed.netloc}"
+
+    server_meta = await fetch_oauth_server_metadata(issuer)
+    if not server_meta:
+        return None
+
+    # Best-effort PRM lookup at the legacy path (no query string).
+    prm: dict | None = None
+    if parsed.path:
+        prm_url = f"{issuer}/.well-known/oauth-protected-resource/{parsed.path.lstrip('/')}"
+        prm = await fetch_protected_resource_metadata(prm_url)
+
+    scopes = (
+        (prm.get("scopes_supported") if prm else None)
+        or server_meta.get("scopes_supported")
+        or []
+    )
+
+    return {
+        "issuer": server_meta.get("issuer", issuer),
+        "mcp_url": mcp_url,
+        "authorization_endpoint": server_meta.get("authorization_endpoint"),
+        "token_endpoint": server_meta.get("token_endpoint"),
+        "registration_endpoint": server_meta.get("registration_endpoint"),
+        "scopes_supported": scopes,
+        "resource": prm.get("resource") if prm else None,
+        "resource_metadata_url": None,
+        "discovery_method": "legacy_host" + ("+resource" if prm else ""),
+    }
+
+
+async def discover(mcp_url: str) -> dict | None:
+    """Top-level discovery: try the MCP probe flow first, fall back to legacy."""
+    result = await discover_via_mcp_probe(mcp_url)
+    if result:
+        return result
+    logger.info(
+        f"MCP probe discovery did not succeed for {mcp_url}; falling back to legacy host discovery"
+    )
+    return await discover_legacy(mcp_url)
