@@ -301,10 +301,13 @@ class OAuthCallbackServer:
     def loopback_redirect_uris(self) -> list[str]:
         """Both forms, canonical first.
 
-        For fresh DCRs we register both so the AS accepts either — that
-        way the spec-canonical 127.0.0.1 form is used at runtime without
-        breaking older callers/configs that still send `localhost`. Both
-        resolve to the same loopback socket on every supported platform.
+        For fresh DCRs we register both so the AS accepts either at auth
+        time. Keeping the `localhost` form registered matches the story
+        every BYO setup guide on the marketing site already tells users
+        (GitHub, Slack, Jira, …): a consistent "OpenMaskit registers
+        http://localhost:3131/callback" narrative across both flows. Both
+        forms resolve to the same loopback socket on every supported
+        platform.
         """
         return [self.redirect_uri, self.legacy_redirect_uri]
 
@@ -422,7 +425,10 @@ async def create_oauth_provider(
             # RFC 8252 §7.3: prefer the 127.0.0.1 form. Register both
             # `127.0.0.1` and `localhost` so the AS accepts either at
             # auth time; the SDK uses redirect_uris[0] (the canonical
-            # form) in its actual authorization request.
+            # form) in its actual authorization request. Registering
+            # both also keeps the story consistent with the BYO setup
+            # guides on the marketing site, which all tell users to add
+            # `http://localhost:3131/callback`.
             registered_redirect_uris = callback_server.loopback_redirect_uris
             dcr_metadata = {
                 "client_name": "OpenMaskit",
