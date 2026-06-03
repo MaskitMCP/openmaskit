@@ -23,13 +23,34 @@ from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
 from openmaskit.models import HttpOAuthConfig
-from openmaskit.oauth.discovery import wellknown_metadata_urls
+from openmaskit.oauth.discovery import issuer_matches, wellknown_metadata_urls
 from openmaskit.oauth.sdk_patches import register_scope_override
 from openmaskit.security import TokenEncryption
 
 logger = logging.getLogger(__name__)
 
 OAUTH_CALLBACK_PORT = 3131
+
+
+def pick_dcr_token_endpoint_auth_method(supported: list[str] | None) -> str:
+    """Pick the token_endpoint_auth_method to request in a DCR registration.
+
+    Preserves byte-identical behaviour for every server that currently works:
+    when the AS advertises `client_secret_post` (or doesn't advertise the
+    field at all), we still send `client_secret_post`. Only when the AS
+    explicitly excludes it do we negotiate down — preferring `none` (PKCE
+    public client, the MCP authorization spec's recommended default) over
+    `client_secret_basic` over whatever else the AS lists.
+    """
+    if not supported:
+        return "client_secret_post"
+    if "client_secret_post" in supported:
+        return "client_secret_post"
+    if "none" in supported:
+        return "none"
+    if "client_secret_basic" in supported:
+        return "client_secret_basic"
+    return supported[0]
 
 
 class FileTokenStorage:
@@ -106,10 +127,19 @@ class FileTokenStorage:
                     logger.info(f"Attempting OIDC discovery at {oidc_url}")
                     resp = await client.get(oidc_url)
                     resp.raise_for_status()
-                    oidc_metadata = resp.json()
-                    break
+                    candidate = resp.json()
                 except Exception as e:
                     logger.debug(f"OIDC discovery failed at {oidc_url}: {e}")
+                    continue
+                if not issuer_matches(issuer, candidate.get("issuer")):
+                    logger.warning(
+                        f"OIDC metadata at {oidc_url} claims issuer "
+                        f"{candidate.get('issuer')!r}, expected {issuer!r} "
+                        "(RFC 8414 §3.3); skipping this candidate"
+                    )
+                    continue
+                oidc_metadata = candidate
+                break
             if oidc_metadata and oidc_metadata.get("registration_endpoint"):
                 return oidc_metadata
 
@@ -119,14 +149,22 @@ class FileTokenStorage:
                     resp = await client.get(oauth_url)
                     resp.raise_for_status()
                     oauth_metadata = resp.json()
-                    if oidc_metadata:
-                        merged = oidc_metadata.copy()
-                        if oauth_metadata.get("registration_endpoint"):
-                            merged["registration_endpoint"] = oauth_metadata["registration_endpoint"]
-                        return merged
-                    return oauth_metadata
                 except Exception as e:
                     logger.debug(f"OAuth 2.0 discovery failed at {oauth_url}: {e}")
+                    continue
+                if not issuer_matches(issuer, oauth_metadata.get("issuer")):
+                    logger.warning(
+                        f"OAuth metadata at {oauth_url} claims issuer "
+                        f"{oauth_metadata.get('issuer')!r}, expected {issuer!r} "
+                        "(RFC 8414 §3.3); skipping this candidate"
+                    )
+                    continue
+                if oidc_metadata:
+                    merged = oidc_metadata.copy()
+                    if oauth_metadata.get("registration_endpoint"):
+                        merged["registration_endpoint"] = oauth_metadata["registration_endpoint"]
+                    return merged
+                return oauth_metadata
 
         if oidc_metadata:
             logger.info("Returning OIDC metadata (OAuth 2.0 discovery failed)")
@@ -139,38 +177,68 @@ class FileTokenStorage:
         self,
         registration_endpoint: str,
         client_metadata: dict,
-        registration_token: str | None = None
-    ) -> dict | None:
+        registration_token: str | None = None,
+    ) -> dict:
         """Register OAuth client via DCR (RFC 7591).
 
-        Args:
-            registration_endpoint: URL for client registration
-            client_metadata: Client metadata (name, redirect_uris, etc.)
-            registration_token: Optional bearer token for authenticated DCR
-
-        Returns:
-            dict with client_id, client_secret, etc.
-            None if registration fails
+        Returns the parsed client info on success. Raises RuntimeError on any
+        failure, with the RFC 7591 §3.2.2 error / error_description fields
+        included in the message when the server provided them, so callers
+        (and the install UI) see a real diagnostic instead of a generic
+        "DCR failed".
         """
         headers = {"Content-Type": "application/json"}
         if registration_token:
             headers["Authorization"] = f"Bearer {registration_token}"
 
         async with httpx.AsyncClient(timeout=10.0) as client:
+            logger.info(f"Attempting DCR at {registration_endpoint}")
             try:
-                logger.info(f"Attempting DCR at {registration_endpoint}")
                 resp = await client.post(
                     registration_endpoint,
                     json=client_metadata,
-                    headers=headers
+                    headers=headers,
                 )
-                resp.raise_for_status()
-                result = resp.json()
+            except httpx.HTTPError as e:
+                msg = f"DCR network error at {registration_endpoint}: {e}"
+                logger.error(msg)
+                raise RuntimeError(msg) from e
+
+            if 200 <= resp.status_code < 300:
+                try:
+                    result = resp.json()
+                except ValueError as e:
+                    raise RuntimeError(
+                        f"DCR succeeded ({resp.status_code}) but response was not JSON: {e}"
+                    ) from e
                 logger.info(f"DCR successful, client_id: {result.get('client_id')}")
                 return result
-            except Exception as e:
-                logger.error(f"DCR failed: {e}")
-                return None
+
+            # Non-2xx — try to surface the RFC 7591 §3.2.2 error fields.
+            error_code: str | None = None
+            error_description: str | None = None
+            body_snippet = ""
+            try:
+                body = resp.json()
+                if isinstance(body, dict):
+                    error_code = body.get("error")
+                    error_description = body.get("error_description")
+            except ValueError:
+                body_snippet = resp.text[:200].strip()
+
+            parts = [f"DCR rejected by {registration_endpoint} ({resp.status_code}"]
+            if error_code:
+                parts[0] += f" {error_code})"
+            else:
+                parts[0] += ")"
+            if error_description:
+                parts.append(f": {error_description}")
+            elif body_snippet:
+                parts.append(f": {body_snippet}")
+
+            msg = "".join(parts)
+            logger.error(msg)
+            raise RuntimeError(msg)
 
 
 class OAuthCallbackServer:
@@ -285,24 +353,40 @@ async def create_oauth_provider(
             if not registration_endpoint:
                 raise RuntimeError(f"DCR requested but issuer {oauth_config.issuer} does not support DCR (no registration_endpoint)")
 
+            requested_auth_method = pick_dcr_token_endpoint_auth_method(
+                metadata.get("token_endpoint_auth_methods_supported")
+            )
             dcr_metadata = {
                 "client_name": "OpenMaskit",
                 "redirect_uris": [redirect_uri],
                 "grant_types": ["authorization_code", "refresh_token"],
                 "response_types": ["code"],
-                "token_endpoint_auth_method": "client_secret_post",
+                "token_endpoint_auth_method": requested_auth_method,
             }
             if scope:
                 dcr_metadata["scope"] = scope
 
+            # register_dynamic_client raises with the AS's
+            # error_description on any failure, so we don't need a generic
+            # "DCR failed" wrapper here.
             client_info_dict = await storage.register_dynamic_client(
                 registration_endpoint,
                 dcr_metadata,
-                oauth_config.registration_token
+                oauth_config.registration_token,
             )
 
-            if not client_info_dict:
-                raise RuntimeError(f"Failed to register client via DCR at {registration_endpoint}")
+            # RFC 7591 §3.2.1: the AS MAY override what we requested in
+            # `token_endpoint_auth_method` (Stripe registers as `none` even
+            # if we asked for `client_secret_post`). Trust the AS's response
+            # field; fall back to inferring from secret presence for ASes
+            # that omit it.
+            assigned_auth_method = client_info_dict.get("token_endpoint_auth_method")
+            if not assigned_auth_method:
+                assigned_auth_method = (
+                    "client_secret_post"
+                    if client_info_dict.get("client_secret")
+                    else "none"
+                )
 
             # Store the DCR result
             client_info = OAuthClientInformationFull(
@@ -312,14 +396,15 @@ async def create_oauth_provider(
                 redirect_uris=[redirect_uri],
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
-                token_endpoint_auth_method="client_secret_post",
+                token_endpoint_auth_method=assigned_auth_method,
             )
             await storage.set_client_info(client_info)
-            logger.info(f"Stored DCR client info: {client_info.client_id}")
+            logger.info(
+                f"Stored DCR client info: {client_info.client_id} "
+                f"(auth_method={assigned_auth_method})"
+            )
 
-            auth_method = "none"
-            if client_info.client_secret:
-                auth_method = "client_secret_post"
+            auth_method = assigned_auth_method
 
             client_metadata = OAuthClientMetadata(
                 client_name="OpenMaskit",

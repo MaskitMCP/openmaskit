@@ -104,6 +104,37 @@ class TestProbeMcpForResourceMetadata:
         assert url is None
 
 
+class TestIssuerMatches:
+    def test_exact_match(self):
+        assert discovery.issuer_matches(
+            "https://access.stripe.com/mcp", "https://access.stripe.com/mcp"
+        )
+
+    def test_trailing_slash_normalised(self):
+        assert discovery.issuer_matches(
+            "https://access.stripe.com/mcp/", "https://access.stripe.com/mcp"
+        )
+        assert discovery.issuer_matches(
+            "https://access.stripe.com/mcp", "https://access.stripe.com/mcp/"
+        )
+
+    def test_mismatch_rejected(self):
+        assert not discovery.issuer_matches(
+            "https://access.stripe.com/mcp", "https://evil.example.com/mcp"
+        )
+
+    def test_path_difference_rejected(self):
+        assert not discovery.issuer_matches(
+            "https://access.stripe.com/mcp", "https://access.stripe.com/other"
+        )
+
+    def test_missing_claimed_issuer_passes(self):
+        # AS without issuer field — RFC 8414 §3.3 has nothing to compare;
+        # we don't reject on absence alone.
+        assert discovery.issuer_matches("https://access.stripe.com/mcp", None)
+        assert discovery.issuer_matches("https://access.stripe.com/mcp", "")
+
+
 class TestWellknownMetadataUrls:
     def test_root_issuer_returns_single_url(self):
         urls = discovery.wellknown_metadata_urls(
@@ -222,6 +253,74 @@ class TestFetchOauthServerMetadata:
         assert result["registration_endpoint"] == (
             "https://access.stripe.com/mcp/oauth2/register"
         )
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_rejects_metadata_with_mismatched_issuer(self):
+        """RFC 8414 §3.3: skip a response whose `issuer` doesn't match."""
+        bad = {
+            "issuer": "https://impostor.example.com",
+            "authorization_endpoint": "https://impostor.example.com/authorize",
+            "token_endpoint": "https://impostor.example.com/token",
+        }
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(200, json=bad)
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+        result = await discovery.fetch_oauth_server_metadata("https://api.example.com")
+        assert result is None
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_issuer_mismatch_on_spec_form_continues_to_append_form(self):
+        """If spec-form has wrong issuer, the append-form fallback still works."""
+        bad = {"issuer": "https://impostor.example.com/tenant1"}
+        good = {
+            "issuer": "https://legacy.example.com/tenant1",
+            "authorization_endpoint": "https://legacy.example.com/tenant1/authorize",
+            "token_endpoint": "https://legacy.example.com/tenant1/token",
+            "registration_endpoint": "https://legacy.example.com/tenant1/register",
+        }
+        respx.get(
+            "https://legacy.example.com/.well-known/oauth-authorization-server/tenant1"
+        ).mock(return_value=httpx.Response(200, json=bad))
+        respx.get(
+            "https://legacy.example.com/tenant1/.well-known/oauth-authorization-server"
+        ).mock(return_value=httpx.Response(200, json=good))
+        respx.get(
+            "https://legacy.example.com/.well-known/openid-configuration/tenant1"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://legacy.example.com/tenant1/.well-known/openid-configuration"
+        ).mock(return_value=httpx.Response(404))
+        result = await discovery.fetch_oauth_server_metadata(
+            "https://legacy.example.com/tenant1"
+        )
+        assert result is not None
+        assert result["registration_endpoint"] == (
+            "https://legacy.example.com/tenant1/register"
+        )
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_accepts_metadata_without_issuer_field(self):
+        """AS that omits issuer entirely — we don't reject on absence."""
+        meta = {
+            "authorization_endpoint": "https://api.example.com/authorize",
+            "token_endpoint": "https://api.example.com/token",
+            "registration_endpoint": "https://api.example.com/register",
+        }
+        respx.get(
+            "https://api.example.com/.well-known/oauth-authorization-server"
+        ).mock(return_value=httpx.Response(200, json=meta))
+        respx.get(
+            "https://api.example.com/.well-known/openid-configuration"
+        ).mock(return_value=httpx.Response(404))
+        result = await discovery.fetch_oauth_server_metadata("https://api.example.com")
+        assert result is not None
+        assert result["registration_endpoint"] == "https://api.example.com/register"
 
     @pytest.mark.anyio
     @respx.mock
@@ -400,12 +499,16 @@ class TestDiscoverLegacy:
         respx.get("https://gitlab.com/.well-known/oauth-protected-resource/api/v4/mcp").mock(
             return_value=httpx.Response(404)
         )
+        respx.get("https://gitlab.com/.well-known/oauth-protected-resource").mock(
+            return_value=httpx.Response(404)
+        )
 
         result = await discovery.discover_legacy("https://gitlab.com/api/v4/mcp")
         assert result is not None
         assert result["discovery_method"] == "legacy_host"
         assert result["issuer"] == "https://gitlab.com"
         assert result["registration_endpoint"] == "https://gitlab.com/oauth/applications"
+        assert result["resource_metadata_url"] is None
 
     @pytest.mark.anyio
     @respx.mock
@@ -418,6 +521,128 @@ class TestDiscoverLegacy:
         )
         result = await discovery.discover_legacy("https://example.com/mcp")
         assert result is None
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_falls_back_to_root_prm_when_path_prm_missing(self):
+        """Compliant PRM server with no path-form PRM still gets discovered."""
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "issuer": "https://api.example.com",
+                    "authorization_endpoint": "https://api.example.com/authorize",
+                    "token_endpoint": "https://api.example.com/token",
+                    "registration_endpoint": "https://api.example.com/register",
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+        # Path-form PRM not served by this AS.
+        respx.get(
+            "https://api.example.com/.well-known/oauth-protected-resource/v1/mcp"
+        ).mock(return_value=httpx.Response(404))
+        # Root-form PRM IS served — this is the new fallback path.
+        respx.get(
+            "https://api.example.com/.well-known/oauth-protected-resource"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://api.example.com",
+                    "scopes_supported": ["scope_a", "scope_b"],
+                },
+            )
+        )
+        result = await discovery.discover_legacy("https://api.example.com/v1/mcp")
+        assert result is not None
+        assert result["discovery_method"] == "legacy_host+resource"
+        assert result["scopes_supported"] == ["scope_a", "scope_b"]
+        assert result["resource_metadata_url"] == (
+            "https://api.example.com/.well-known/oauth-protected-resource"
+        )
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_root_prm_used_for_path_less_mcp_url(self):
+        """An MCP URL with no path now still tries the root PRM (previously skipped)."""
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "issuer": "https://api.example.com",
+                    "authorization_endpoint": "https://api.example.com/authorize",
+                    "token_endpoint": "https://api.example.com/token",
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get(
+            "https://api.example.com/.well-known/oauth-protected-resource"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://api.example.com",
+                    "scopes_supported": ["read"],
+                },
+            )
+        )
+        result = await discovery.discover_legacy("https://api.example.com")
+        assert result is not None
+        assert result["discovery_method"] == "legacy_host+resource"
+        assert result["scopes_supported"] == ["read"]
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_path_prm_preferred_over_root_when_both_exist(self):
+        """When both PRM locations exist, the more-specific path-form wins."""
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "issuer": "https://api.example.com",
+                    "authorization_endpoint": "https://api.example.com/authorize",
+                    "token_endpoint": "https://api.example.com/token",
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+        respx.get(
+            "https://api.example.com/.well-known/oauth-protected-resource/v1/mcp"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://api.example.com/v1/mcp",
+                    "scopes_supported": ["path_specific"],
+                },
+            )
+        )
+        # Root also exists but the path-form should be preferred.
+        respx.get(
+            "https://api.example.com/.well-known/oauth-protected-resource"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://api.example.com",
+                    "scopes_supported": ["generic"],
+                },
+            )
+        )
+        result = await discovery.discover_legacy("https://api.example.com/v1/mcp")
+        assert result is not None
+        assert result["scopes_supported"] == ["path_specific"]
+        assert result["resource_metadata_url"] == (
+            "https://api.example.com/.well-known/oauth-protected-resource/v1/mcp"
+        )
 
 
 class TestDiscover:

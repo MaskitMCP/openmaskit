@@ -14,7 +14,12 @@ from starlette.testclient import TestClient
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from openmaskit.models import HttpOAuthConfig
-from openmaskit.oauth.handler import FileTokenStorage, OAuthCallbackServer, create_oauth_provider
+from openmaskit.oauth.handler import (
+    FileTokenStorage,
+    OAuthCallbackServer,
+    create_oauth_provider,
+    pick_dcr_token_endpoint_auth_method,
+)
 
 
 class TestFileTokenStorage:
@@ -472,6 +477,26 @@ class TestDiscoverOauthMetadata:
 
     @pytest.mark.anyio
     @respx.mock
+    async def test_rejects_metadata_with_mismatched_issuer(self, tmp_path):
+        """Runtime DCR discovery must reject impostor metadata per RFC 8414 §3.3."""
+        bad = {
+            "issuer": "https://impostor.example.com",
+            "authorization_endpoint": "https://impostor.example.com/authorize",
+            "token_endpoint": "https://impostor.example.com/token",
+            "registration_endpoint": "https://impostor.example.com/register",
+        }
+        respx.get(
+            "https://auth.example.com/.well-known/openid-configuration"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://auth.example.com/.well-known/oauth-authorization-server"
+        ).mock(return_value=httpx.Response(200, json=bad))
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        result = await storage.discover_oauth_metadata("https://auth.example.com")
+        assert result is None
+
+    @pytest.mark.anyio
+    @respx.mock
     async def test_path_issuer_appended_fallback(self, tmp_path):
         """Non-spec-compliant server serves only the appended form."""
         meta = {
@@ -501,3 +526,278 @@ class TestDiscoverOauthMetadata:
         assert result["registration_endpoint"] == (
             "https://legacy.example.com/tenantA/oauth/register"
         )
+
+
+class TestRegisterDynamicClient:
+    """DCR error surfacing per RFC 7591 §3.2.2."""
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_returns_parsed_client_info_on_success(self, tmp_path):
+        respx.post("https://as.example.com/register").mock(
+            return_value=httpx.Response(
+                201,
+                json={"client_id": "abc", "client_secret": "shh"},
+            )
+        )
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        result = await storage.register_dynamic_client(
+            "https://as.example.com/register",
+            {"client_name": "OpenMaskit", "redirect_uris": ["http://localhost:3131/callback"]},
+        )
+        assert result == {"client_id": "abc", "client_secret": "shh"}
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_raises_with_error_description_on_400(self, tmp_path):
+        respx.post("https://as.example.com/register").mock(
+            return_value=httpx.Response(
+                400,
+                json={
+                    "error": "invalid_redirect_uri",
+                    "error_description": "localhost is not allowed for this client",
+                },
+            )
+        )
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        with pytest.raises(RuntimeError) as exc:
+            await storage.register_dynamic_client(
+                "https://as.example.com/register",
+                {"client_name": "OpenMaskit"},
+            )
+        msg = str(exc.value)
+        assert "400" in msg
+        assert "invalid_redirect_uri" in msg
+        assert "localhost is not allowed" in msg
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_raises_with_status_only_when_body_not_json(self, tmp_path):
+        respx.post("https://as.example.com/register").mock(
+            return_value=httpx.Response(500, text="<html>internal server error</html>")
+        )
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        with pytest.raises(RuntimeError) as exc:
+            await storage.register_dynamic_client(
+                "https://as.example.com/register",
+                {"client_name": "OpenMaskit"},
+            )
+        msg = str(exc.value)
+        assert "500" in msg
+        # Body snippet preserved so the user can grep
+        assert "internal server error" in msg
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_raises_on_network_error(self, tmp_path):
+        respx.post("https://as.example.com/register").mock(
+            side_effect=httpx.ConnectError("connection refused")
+        )
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        with pytest.raises(RuntimeError) as exc:
+            await storage.register_dynamic_client(
+                "https://as.example.com/register",
+                {"client_name": "OpenMaskit"},
+            )
+        assert "network error" in str(exc.value).lower()
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_passes_registration_token_when_provided(self, tmp_path):
+        captured: dict = {}
+
+        def capture(request: httpx.Request) -> httpx.Response:
+            captured["auth"] = request.headers.get("Authorization")
+            return httpx.Response(201, json={"client_id": "abc"})
+
+        respx.post("https://as.example.com/register").mock(side_effect=capture)
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        await storage.register_dynamic_client(
+            "https://as.example.com/register",
+            {"client_name": "OpenMaskit"},
+            registration_token="initial-token-xyz",
+        )
+        assert captured["auth"] == "Bearer initial-token-xyz"
+
+
+class TestPickDcrTokenEndpointAuthMethod:
+    """Backward-compat-preserving DCR auth_method negotiation."""
+
+    def test_no_supported_field_keeps_client_secret_post(self):
+        # Preserves byte-identical behaviour for ASes that don't advertise.
+        assert pick_dcr_token_endpoint_auth_method(None) == "client_secret_post"
+        assert pick_dcr_token_endpoint_auth_method([]) == "client_secret_post"
+
+    def test_client_secret_post_in_list_keeps_client_secret_post(self):
+        # Every previously-working server falls in this branch — unchanged.
+        assert pick_dcr_token_endpoint_auth_method(
+            ["client_secret_post", "client_secret_basic"]
+        ) == "client_secret_post"
+        assert pick_dcr_token_endpoint_auth_method(["client_secret_post"]) == "client_secret_post"
+
+    def test_none_only_picks_none(self):
+        # Stripe-shape: PKCE-only public client.
+        assert pick_dcr_token_endpoint_auth_method(["none"]) == "none"
+
+    def test_basic_only_picks_basic(self):
+        assert pick_dcr_token_endpoint_auth_method(
+            ["client_secret_basic"]
+        ) == "client_secret_basic"
+
+    def test_none_preferred_over_basic_when_post_absent(self):
+        # `none` is the MCP authorization spec's recommended default for
+        # native-app clients relying on PKCE; prefer it over basic.
+        assert pick_dcr_token_endpoint_auth_method(
+            ["client_secret_basic", "none"]
+        ) == "none"
+
+    def test_falls_back_to_first_when_no_known(self):
+        assert pick_dcr_token_endpoint_auth_method(
+            ["private_key_jwt", "client_secret_jwt"]
+        ) == "private_key_jwt"
+
+
+class TestCreateOauthProviderDcrAuthMethod:
+    """Integration: DCR request body's auth_method reflects AS support."""
+
+    @pytest.mark.anyio
+    async def test_request_uses_client_secret_post_when_supported(
+        self, tmp_path, monkeypatch
+    ):
+        """Backward compat: every previously-working server stays unchanged."""
+        captured: dict = {}
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+                "token_endpoint_auth_methods_supported": [
+                    "client_secret_post",
+                    "client_secret_basic",
+                ],
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            captured["metadata"] = metadata
+            return {"client_id": "abc", "client_secret": "shh"}
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=tmp_path / "oauth.json",
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        assert captured["metadata"]["token_endpoint_auth_method"] == "client_secret_post"
+
+    @pytest.mark.anyio
+    async def test_request_uses_none_when_only_none_supported(
+        self, tmp_path, monkeypatch
+    ):
+        """Stripe-shape: AS advertises only ["none"] — we negotiate down."""
+        captured: dict = {}
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+                "token_endpoint_auth_methods_supported": ["none"],
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            captured["metadata"] = metadata
+            return {
+                "client_id": "abc",
+                "token_endpoint_auth_method": "none",
+            }
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=tmp_path / "oauth.json",
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        assert captured["metadata"]["token_endpoint_auth_method"] == "none"
+
+    @pytest.mark.anyio
+    async def test_request_uses_post_when_supported_field_missing(
+        self, tmp_path, monkeypatch
+    ):
+        """Backward compat: AS metadata without the field stays on post."""
+        captured: dict = {}
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            captured["metadata"] = metadata
+            return {"client_id": "abc", "client_secret": "shh"}
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=tmp_path / "oauth.json",
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        assert captured["metadata"]["token_endpoint_auth_method"] == "client_secret_post"
+
+    @pytest.mark.anyio
+    async def test_stored_client_info_respects_as_assigned_method(
+        self, tmp_path, monkeypatch
+    ):
+        """When AS overrides our request (returns "none"), we store "none"."""
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+                "token_endpoint_auth_methods_supported": ["client_secret_post"],
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            # We asked for client_secret_post; AS downgraded us (this happens
+            # on lenient ASes that ignore the request and issue public clients).
+            return {
+                "client_id": "abc",
+                "token_endpoint_auth_method": "none",
+            }
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        store = tmp_path / "oauth.json"
+        provider = await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=store,
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        # The OAuthClientMetadata handed to the SDK uses the AS-assigned method.
+        assert (
+            provider.context.client_metadata.token_endpoint_auth_method == "none"
+        )
+
+        # And the persisted client_info has it too — re-reading honours the AS.
+        storage = FileTokenStorage(store)
+        stored = await storage.get_client_info()
+        assert stored is not None
+        assert stored.token_endpoint_auth_method == "none"
