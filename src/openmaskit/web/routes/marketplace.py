@@ -6,11 +6,13 @@ import json
 import logging
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 
+from openmaskit.oauth import discovery
 from openmaskit.security import TokenEncryption, validate_server_id
 from openmaskit.web.routes._http_config import clean_http_headers
 
@@ -62,6 +64,40 @@ def _normalize_header_var(name: str, value) -> dict:
     """Normalize a catalog meta.headers entry. The key is the literal HTTP
     header name (sent verbatim — no case normalization)."""
     return _normalize_credential_var(name, value, target="header")
+
+
+def _resolve_mcp_url(
+    mcp_host: str, user_params: dict, declared_params: list | None
+) -> tuple[str | None, str | None]:
+    """Validate user-supplied URL params and append them as a query string.
+
+    Catalog entries that need user-supplied identifiers in the URL (e.g.
+    Supabase's `project_ref`) ship a `meta.params` list. The install request
+    carries `params: {name: value}`. We require every declared `required`
+    param to be present, reject any name not in the declared list (so
+    callers can't sneak extra query params onto the upstream URL), and
+    URL-encode the values.
+
+    Returns (resolved_url, None) or (None, error_message).
+    """
+    declared_by_name = {p.get("name"): p for p in (declared_params or []) if p.get("name")}
+
+    for name, decl in declared_by_name.items():
+        if decl.get("required", True):
+            v = user_params.get(name)
+            if not isinstance(v, str) or not v.strip():
+                return None, f"param '{name}' is required"
+
+    filled: dict[str, str] = {}
+    for name, value in (user_params or {}).items():
+        if name not in declared_by_name:
+            return None, f"unknown param '{name}'"
+        if isinstance(value, str) and value.strip():
+            filled[name] = value.strip()
+
+    if not filled:
+        return mcp_host, None
+    return f"{mcp_host}?{urlencode(filled)}", None
 
 
 def _require_supported(state) -> JSONResponse | None:
@@ -272,6 +308,9 @@ async def marketplace_install(request: Request):
 
     oauth_mode = server_info.get("oauth_mode")
 
+    declared_params = (server_info.get("meta") or {}).get("params") or []
+    user_params = body.get("params") or {}
+
     # BYO: user supplies their own OAuth client credentials. OpenMaskit runs the
     # OAuth flow directly against the provider via the local :3131 callback.
     if oauth_mode == "byo":
@@ -291,9 +330,13 @@ async def marketplace_install(request: Request):
                 {"error": "Catalog entry is missing mcp_host"}, status_code=500
             )
 
+        resolved_url, err = _resolve_mcp_url(mcp_host, user_params, declared_params)
+        if err:
+            return JSONResponse({"error": err}, status_code=400)
+
         config = {
             "transport": "http",
-            "url": mcp_host,
+            "url": resolved_url,
             "oauth": {
                 "client_id": client_id,
                 "client_secret": client_secret,
@@ -309,20 +352,41 @@ async def marketplace_install(request: Request):
         selected_scopes = body.get("selected_scopes") or []
         registration_token = (body.get("registration_token") or "").strip()
 
-        if not issuer:
-            return JSONResponse({"error": "issuer is required for DCR setup"}, status_code=400)
-
         mcp_host = server_info.get("mcp_host")
         if not mcp_host:
             return JSONResponse(
                 {"error": "Catalog entry is missing mcp_host"}, status_code=500
             )
 
+        resolved_url, err = _resolve_mcp_url(mcp_host, user_params, declared_params)
+        if err:
+            return JSONResponse({"error": err}, status_code=400)
+
+        # Catalog entries can omit `oauth.issuer` and rely on install-time
+        # discovery (WWW-Authenticate probe → protected-resource metadata →
+        # authorization-server metadata). Falls back to host-derived discovery
+        # for servers that don't advertise WWW-Authenticate.
+        if not issuer:
+            discovered = await discovery.discover(resolved_url)
+            if not discovered or not discovered.get("issuer"):
+                return JSONResponse(
+                    {
+                        "error": (
+                            "OAuth discovery failed; cannot determine authorization server. "
+                            "The MCP URL may be unreachable or the server may not advertise OAuth metadata."
+                        )
+                    },
+                    status_code=400,
+                )
+            issuer = discovered["issuer"]
+            if not selected_scopes and discovered.get("scopes_supported"):
+                selected_scopes = list(discovered["scopes_supported"])
+
         oauth_cfg: dict = {"issuer": issuer, "scopes": selected_scopes}
         if registration_token:
             oauth_cfg["registration_token"] = registration_token
 
-        config = {"transport": "http", "url": mcp_host, "oauth": oauth_cfg}
+        config = {"transport": "http", "url": resolved_url, "oauth": oauth_cfg}
         return await _install_and_connect(store, manager, server_id, server_info, config)
 
     # Hosted-broker OAuth: redirect through auth.maskitmcp.com.
@@ -353,6 +417,9 @@ async def marketplace_install(request: Request):
             return JSONResponse(
                 {"error": "Catalog entry is missing mcp_host"}, status_code=500
             )
+        resolved_url, err = _resolve_mcp_url(mcp_host, user_params, declared_params)
+        if err:
+            return JSONResponse({"error": err}, status_code=400)
         user_headers, header_err = clean_http_headers(body.get("headers"))
         if header_err:
             return JSONResponse({"error": header_err}, status_code=400)
@@ -368,7 +435,7 @@ async def marketplace_install(request: Request):
                 )
         config = {
             "transport": "http",
-            "url": mcp_host,
+            "url": resolved_url,
             "headers": user_headers,
             "backend_id": server_info.get("id"),
         }
