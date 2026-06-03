@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-03
+
+### Added
+- Spec-compliant MCP / OAuth discovery (`openmaskit.oauth.discovery`). The new flow probes the MCP URL, parses the `WWW-Authenticate` challenge for a `resource_metadata` link (RFC 9728), follows it to the protected resource metadata, and reads `authorization_servers[0]` to find the OAuth authorization server. The query string of the protected-resource URL is preserved verbatim, which is required for servers (e.g. Supabase) that scope the resource by a query parameter.
+- Host-derived discovery is kept as a fallback for servers that don't advertise `WWW-Authenticate` (GitLab and other early MCP implementations).
+- Templated `mcp_host` for marketplace install: catalog entries can declare `meta.params: [{name, label, required, placeholder, description}]`; the install handler validates user-supplied values, URL-encodes them, and appends them as a query string to `mcp_host`. Undeclared param names are rejected so callers can't sneak extra query keys onto the upstream URL.
+- DCR catalog entries can now omit `oauth.issuer` — when absent, the install handler runs `discovery.discover(resolved_url)` to find it, with discovered scopes used as defaults when none are selected.
+- Install modal: cross-domain trust warning surfaces when the discovered authorization-server apex differs from the MCP URL apex (e.g. a malicious server delegating to an attacker-controlled host).
+- Install modal: install-time `Resource:` line shows the canonical resource identifier from protected resource metadata, so users can confirm what they're authorizing.
+
+### Changed
+- `oauth/handler.py:FileTokenStorage.discover_oauth_metadata` simplified: its dead protected-resource-metadata path (which was built at the wrong host for cross-host servers and only ever populated unused `scopes_supported`) is removed. Install-time discovery is handled by the new `oauth.discovery` module; runtime discovery only resolves `registration_endpoint` for first-time DCR.
+- "Experimental: Dynamic Client Registration may not work with all OAuth providers" banner removed from the custom-server install modal — DCR now works against real spec-compliant servers (Supabase verified end-to-end) and the legacy host-derived fallback covers older ones.
+
 ## [0.2.0] - 2026-06-01
 
 ### Added
@@ -41,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Env-var modal polish.
 
-[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/MaskitMCP/openmaskit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/MaskitMCP/openmaskit/releases/tag/v0.1.1
