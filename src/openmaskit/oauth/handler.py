@@ -23,6 +23,7 @@ from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
 from openmaskit.models import HttpOAuthConfig
+from openmaskit.oauth.discovery import wellknown_metadata_urls
 from openmaskit.oauth.sdk_patches import register_scope_override
 from openmaskit.security import TokenEncryption
 
@@ -99,33 +100,33 @@ class FileTokenStorage:
         issuer = issuer.rstrip("/")
         oidc_metadata = None
 
-        oidc_url = f"{issuer}/.well-known/openid-configuration"
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                logger.info(f"Attempting OIDC discovery at {oidc_url}")
-                resp = await client.get(oidc_url)
-                resp.raise_for_status()
-                oidc_metadata = resp.json()
-                if oidc_metadata.get("registration_endpoint"):
-                    return oidc_metadata
-            except Exception as e:
-                logger.debug(f"OIDC discovery failed: {e}")
+            for oidc_url in wellknown_metadata_urls(issuer, "openid-configuration"):
+                try:
+                    logger.info(f"Attempting OIDC discovery at {oidc_url}")
+                    resp = await client.get(oidc_url)
+                    resp.raise_for_status()
+                    oidc_metadata = resp.json()
+                    break
+                except Exception as e:
+                    logger.debug(f"OIDC discovery failed at {oidc_url}: {e}")
+            if oidc_metadata and oidc_metadata.get("registration_endpoint"):
+                return oidc_metadata
 
-        oauth_url = f"{issuer}/.well-known/oauth-authorization-server"
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                logger.info(f"Attempting OAuth 2.0 discovery at {oauth_url}")
-                resp = await client.get(oauth_url)
-                resp.raise_for_status()
-                oauth_metadata = resp.json()
-                if oidc_metadata:
-                    merged = oidc_metadata.copy()
-                    if oauth_metadata.get("registration_endpoint"):
-                        merged["registration_endpoint"] = oauth_metadata["registration_endpoint"]
-                    return merged
-                return oauth_metadata
-            except Exception as e:
-                logger.debug(f"OAuth 2.0 discovery failed: {e}")
+            for oauth_url in wellknown_metadata_urls(issuer, "oauth-authorization-server"):
+                try:
+                    logger.info(f"Attempting OAuth 2.0 discovery at {oauth_url}")
+                    resp = await client.get(oauth_url)
+                    resp.raise_for_status()
+                    oauth_metadata = resp.json()
+                    if oidc_metadata:
+                        merged = oidc_metadata.copy()
+                        if oauth_metadata.get("registration_endpoint"):
+                            merged["registration_endpoint"] = oauth_metadata["registration_endpoint"]
+                        return merged
+                    return oauth_metadata
+                except Exception as e:
+                    logger.debug(f"OAuth 2.0 discovery failed at {oauth_url}: {e}")
 
         if oidc_metadata:
             logger.info("Returning OIDC metadata (OAuth 2.0 discovery failed)")

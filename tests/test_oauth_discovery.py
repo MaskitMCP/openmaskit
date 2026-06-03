@@ -104,6 +104,50 @@ class TestProbeMcpForResourceMetadata:
         assert url is None
 
 
+class TestWellknownMetadataUrls:
+    def test_root_issuer_returns_single_url(self):
+        urls = discovery.wellknown_metadata_urls(
+            "https://auth.example.com", "oauth-authorization-server"
+        )
+        assert urls == [
+            "https://auth.example.com/.well-known/oauth-authorization-server"
+        ]
+
+    def test_root_issuer_with_trailing_slash(self):
+        urls = discovery.wellknown_metadata_urls(
+            "https://auth.example.com/", "oauth-authorization-server"
+        )
+        assert urls == [
+            "https://auth.example.com/.well-known/oauth-authorization-server"
+        ]
+
+    def test_path_issuer_prefers_rfc8414_path_insertion(self):
+        urls = discovery.wellknown_metadata_urls(
+            "https://access.stripe.com/mcp", "oauth-authorization-server"
+        )
+        assert urls == [
+            "https://access.stripe.com/.well-known/oauth-authorization-server/mcp",
+            "https://access.stripe.com/mcp/.well-known/oauth-authorization-server",
+        ]
+
+    def test_path_issuer_openid_configuration(self):
+        urls = discovery.wellknown_metadata_urls(
+            "https://idp.example.com/tenant1", "openid-configuration"
+        )
+        assert urls == [
+            "https://idp.example.com/.well-known/openid-configuration/tenant1",
+            "https://idp.example.com/tenant1/.well-known/openid-configuration",
+        ]
+
+    def test_multi_segment_path(self):
+        urls = discovery.wellknown_metadata_urls(
+            "https://example.com/a/b/c", "oauth-authorization-server"
+        )
+        assert urls[0] == (
+            "https://example.com/.well-known/oauth-authorization-server/a/b/c"
+        )
+
+
 class TestFetchOauthServerMetadata:
     @pytest.mark.anyio
     @respx.mock
@@ -154,6 +198,60 @@ class TestFetchOauthServerMetadata:
         )
         result = await discovery.fetch_oauth_server_metadata("https://nope.example.com")
         assert result is None
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_path_issuer_uses_rfc8414_path_insertion(self):
+        """Stripe-shape: issuer has path; AS metadata lives at /.well-known/.../mcp."""
+        meta = {
+            "issuer": "https://access.stripe.com/mcp",
+            "authorization_endpoint": "https://access.stripe.com/mcp/oauth2/authorize",
+            "token_endpoint": "https://access.stripe.com/mcp/oauth2/token",
+            "registration_endpoint": "https://access.stripe.com/mcp/oauth2/register",
+        }
+        respx.get(
+            "https://access.stripe.com/.well-known/oauth-authorization-server/mcp"
+        ).mock(return_value=httpx.Response(200, json=meta))
+        respx.get(
+            "https://access.stripe.com/.well-known/openid-configuration/mcp"
+        ).mock(return_value=httpx.Response(404))
+        result = await discovery.fetch_oauth_server_metadata(
+            "https://access.stripe.com/mcp"
+        )
+        assert result is not None
+        assert result["registration_endpoint"] == (
+            "https://access.stripe.com/mcp/oauth2/register"
+        )
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_path_issuer_falls_back_to_appended_form(self):
+        """Non-spec-compliant server serves only the appended form — still works."""
+        meta = {
+            "issuer": "https://legacy.example.com/tenant1",
+            "authorization_endpoint": "https://legacy.example.com/tenant1/oauth/authorize",
+            "token_endpoint": "https://legacy.example.com/tenant1/oauth/token",
+            "registration_endpoint": "https://legacy.example.com/tenant1/oauth/register",
+        }
+        respx.get(
+            "https://legacy.example.com/.well-known/oauth-authorization-server/tenant1"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://legacy.example.com/tenant1/.well-known/oauth-authorization-server"
+        ).mock(return_value=httpx.Response(200, json=meta))
+        respx.get(
+            "https://legacy.example.com/.well-known/openid-configuration/tenant1"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://legacy.example.com/tenant1/.well-known/openid-configuration"
+        ).mock(return_value=httpx.Response(404))
+        result = await discovery.fetch_oauth_server_metadata(
+            "https://legacy.example.com/tenant1"
+        )
+        assert result is not None
+        assert result["registration_endpoint"] == (
+            "https://legacy.example.com/tenant1/oauth/register"
+        )
 
 
 class TestDiscoverViaMcpProbe:

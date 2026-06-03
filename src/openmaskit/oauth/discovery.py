@@ -36,6 +36,27 @@ _RESOURCE_METADATA_RE = re.compile(
 )
 
 
+def wellknown_metadata_urls(issuer: str, kind: str) -> list[str]:
+    """Return well-known metadata URLs for `issuer` in priority order.
+
+    Per RFC 8414 §3.1, when the issuer has a non-empty path the well-known
+    URI string MUST be inserted between the host and the path — e.g. for
+    issuer ``https://access.stripe.com/mcp`` the spec form is
+    ``https://access.stripe.com/.well-known/oauth-authorization-server/mcp``,
+    not ``…/mcp/.well-known/…``. Some non-compliant servers serve the
+    appended form instead, so we return the spec form first and the
+    appended form as a fallback. For root-path issuers the two forms are
+    identical and we return a single URL.
+    """
+    issuer = issuer.rstrip("/")
+    suffix = f"/.well-known/{kind}"
+    parsed = urlparse(issuer)
+    if not parsed.path:
+        return [f"{issuer}{suffix}"]
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    return [f"{base}{suffix}{parsed.path}", f"{issuer}{suffix}"]
+
+
 def extract_resource_metadata_url(www_authenticate: str) -> str | None:
     """Return the `resource_metadata` URL from a WWW-Authenticate header, or None."""
     if not www_authenticate:
@@ -133,23 +154,25 @@ async def fetch_oauth_server_metadata(
     oidc_meta: dict | None = None
 
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        oauth_url = f"{issuer}/.well-known/oauth-authorization-server"
-        try:
-            logger.info(f"Fetching OAuth 2.0 AS metadata at {oauth_url}")
-            resp = await client.get(oauth_url)
-            resp.raise_for_status()
-            oauth_meta = resp.json()
-        except Exception as e:
-            logger.debug(f"OAuth 2.0 AS metadata fetch failed at {oauth_url}: {e}")
+        for oauth_url in wellknown_metadata_urls(issuer, "oauth-authorization-server"):
+            try:
+                logger.info(f"Fetching OAuth 2.0 AS metadata at {oauth_url}")
+                resp = await client.get(oauth_url)
+                resp.raise_for_status()
+                oauth_meta = resp.json()
+                break
+            except Exception as e:
+                logger.debug(f"OAuth 2.0 AS metadata fetch failed at {oauth_url}: {e}")
 
-        oidc_url = f"{issuer}/.well-known/openid-configuration"
-        try:
-            logger.info(f"Fetching OIDC metadata at {oidc_url}")
-            resp = await client.get(oidc_url)
-            resp.raise_for_status()
-            oidc_meta = resp.json()
-        except Exception as e:
-            logger.debug(f"OIDC metadata fetch failed at {oidc_url}: {e}")
+        for oidc_url in wellknown_metadata_urls(issuer, "openid-configuration"):
+            try:
+                logger.info(f"Fetching OIDC metadata at {oidc_url}")
+                resp = await client.get(oidc_url)
+                resp.raise_for_status()
+                oidc_meta = resp.json()
+                break
+            except Exception as e:
+                logger.debug(f"OIDC metadata fetch failed at {oidc_url}: {e}")
 
     if not oauth_meta and not oidc_meta:
         return None

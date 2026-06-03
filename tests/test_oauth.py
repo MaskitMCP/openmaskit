@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 
 import anyio
+import httpx
 import pytest
+import respx
 from starlette.testclient import TestClient
 
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
@@ -416,3 +418,86 @@ class TestOAuthEncryption:
         content = path.read_text()
         assert content.startswith("ENCRYPTED:")
         assert "legacy_access" not in content
+
+
+class TestDiscoverOauthMetadata:
+    """Runtime AS metadata lookup used by DCR re-registration."""
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_root_issuer(self, tmp_path):
+        meta = {
+            "issuer": "https://auth.example.com",
+            "authorization_endpoint": "https://auth.example.com/authorize",
+            "token_endpoint": "https://auth.example.com/token",
+            "registration_endpoint": "https://auth.example.com/register",
+        }
+        respx.get(
+            "https://auth.example.com/.well-known/openid-configuration"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://auth.example.com/.well-known/oauth-authorization-server"
+        ).mock(return_value=httpx.Response(200, json=meta))
+
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        result = await storage.discover_oauth_metadata("https://auth.example.com")
+        assert result is not None
+        assert result["registration_endpoint"] == "https://auth.example.com/register"
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_path_issuer_stripe_shape(self, tmp_path):
+        """Regression for the Stripe DCR failure: issuer has a non-empty path."""
+        meta = {
+            "issuer": "https://access.stripe.com/mcp",
+            "authorization_endpoint": "https://access.stripe.com/mcp/oauth2/authorize",
+            "token_endpoint": "https://access.stripe.com/mcp/oauth2/token",
+            "registration_endpoint": "https://access.stripe.com/mcp/oauth2/register",
+        }
+        respx.get(
+            "https://access.stripe.com/.well-known/openid-configuration/mcp"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://access.stripe.com/.well-known/oauth-authorization-server/mcp"
+        ).mock(return_value=httpx.Response(200, json=meta))
+
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        result = await storage.discover_oauth_metadata(
+            "https://access.stripe.com/mcp"
+        )
+        assert result is not None
+        assert result["registration_endpoint"] == (
+            "https://access.stripe.com/mcp/oauth2/register"
+        )
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_path_issuer_appended_fallback(self, tmp_path):
+        """Non-spec-compliant server serves only the appended form."""
+        meta = {
+            "issuer": "https://legacy.example.com/tenantA",
+            "authorization_endpoint": "https://legacy.example.com/tenantA/oauth/authorize",
+            "token_endpoint": "https://legacy.example.com/tenantA/oauth/token",
+            "registration_endpoint": "https://legacy.example.com/tenantA/oauth/register",
+        }
+        respx.get(
+            "https://legacy.example.com/.well-known/openid-configuration/tenantA"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://legacy.example.com/tenantA/.well-known/openid-configuration"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://legacy.example.com/.well-known/oauth-authorization-server/tenantA"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(
+            "https://legacy.example.com/tenantA/.well-known/oauth-authorization-server"
+        ).mock(return_value=httpx.Response(200, json=meta))
+
+        storage = FileTokenStorage(tmp_path / "tok.json")
+        result = await storage.discover_oauth_metadata(
+            "https://legacy.example.com/tenantA"
+        )
+        assert result is not None
+        assert result["registration_endpoint"] == (
+            "https://legacy.example.com/tenantA/oauth/register"
+        )
