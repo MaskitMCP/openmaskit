@@ -3506,26 +3506,6 @@ code {
     }
 }
 
-/* Experimental Notice */
-.dcr-experimental-notice {
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
-    padding: 0.75rem 0.875rem;
-    background: rgba(251, 191, 36, 0.08);
-    border: 1px solid rgba(251, 191, 36, 0.2);
-    border-radius: var(--radius-md);
-    color: #fbbf24;
-    font-size: 0.8125rem;
-    line-height: 1.4;
-    margin-bottom: 0.875rem;
-}
-
-.dcr-experimental-notice svg {
-    flex-shrink: 0;
-    opacity: 0.8;
-}
-
 /* OAuth Mode Selector Cards */
 .oauth-mode-selector {
     display: grid;
