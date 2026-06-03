@@ -157,6 +157,30 @@
         <div class="modal" @click.outside="modalCancel()">
             <h3 x-text="modalTitle()">Configuration Required</h3>
 
+            <!-- URL params: server-specific identifiers that go in the upstream URL
+                 (e.g. Supabase project_ref). Rendered before credentials so a DCR
+                 entry's discovery can run against the resolved URL. -->
+            <template x-if="modal.urlParams.length > 0">
+                <div>
+                    <p class="modal-desc">Server identifiers:</p>
+                    <template x-for="p in modal.urlParams" :key="'urlparam_' + p.name">
+                        <label class="modal-field">
+                            <span class="modal-var-name">
+                                <span x-text="p.label || p.name"></span>
+                                <span x-show="!p.required" class="modal-var-optional">(optional)</span>
+                            </span>
+                            <input type="text" class="modal-input"
+                                   :placeholder="p.placeholder || p.description || ('Enter ' + p.name)"
+                                   x-model="modal.urlParamValues[p.name]"
+                                   @input.debounce.500ms="onUrlParamInput()"
+                                   :required="p.required"
+                                   autocomplete="off">
+                            <p x-show="p.description" class="modal-hint" x-text="p.description"></p>
+                        </label>
+                    </template>
+                </div>
+            </template>
+
             <!-- BYO: bring-your-own OAuth client credentials -->
             <template x-if="modal.oauthMode === 'byo'">
                 <div>
@@ -239,7 +263,7 @@
 
                     <div class="modal-field">
                         <span class="modal-label">Server URL</span>
-                        <code class="modal-readonly-value" x-text="modal.mcpHost"></code>
+                        <code class="modal-readonly-value" x-text="resolvedMcpHost()"></code>
                     </div>
 
                     <div class="modal-field">
@@ -539,6 +563,8 @@ function marketplacePage() {
             headerVars: [],
             oauthVars: [],
             configurableArgs: [],
+            urlParams: [],              // [{name, label, required, placeholder, description}]
+            urlParamValues: {},         // {name: value}
             envValues: {},
             headerValues: {},
             oauthValues: {},
@@ -572,6 +598,9 @@ function marketplacePage() {
             this.modal.headerVars = headerVars || [];
             this.modal.oauthVars = oauthVars || [];
             this.modal.configurableArgs = server?.meta?.configurable_args || [];
+            this.modal.urlParams = server?.meta?.params || [];
+            this.modal.urlParamValues = {};
+            this.modal.urlParams.forEach(p => { this.modal.urlParamValues[p.name] = ''; });
             this.modal.envValues = {};
             this.modal.headerValues = {};
             this.modal.oauthValues = {};
@@ -636,9 +665,42 @@ function marketplacePage() {
             const promise = this.openModal(server, [], []);
             this.modal.oauthMode = 'dcr';
             this.modal.selectedScopes = [];
-            // Kick off discovery so the scope list populates.
-            this.runDcrDiscovery();
+            // For templated entries we must wait for the user to fill the
+            // required params before discovery — the resolved URL (with
+            // query string) is what the upstream MCP server expects to be
+            // probed at.
+            if (this.allRequiredUrlParamsFilled()) {
+                this.runDcrDiscovery();
+            }
             return promise;
+        },
+
+        allRequiredUrlParamsFilled() {
+            return this.modal.urlParams.every(p =>
+                !p.required || (this.modal.urlParamValues[p.name] || '').trim() !== ''
+            );
+        },
+
+        resolvedMcpHost() {
+            const filled = {};
+            for (const p of this.modal.urlParams) {
+                const v = (this.modal.urlParamValues[p.name] || '').trim();
+                if (v) filled[p.name] = v;
+            }
+            const keys = Object.keys(filled);
+            if (keys.length === 0) return this.modal.mcpHost;
+            const qs = keys
+                .map(k => encodeURIComponent(k) + '=' + encodeURIComponent(filled[k]))
+                .join('&');
+            return this.modal.mcpHost + '?' + qs;
+        },
+
+        onUrlParamInput() {
+            // Re-run DCR discovery once all required params are filled.
+            // Debounced via @input.debounce in the template.
+            if (this.modal.oauthMode === 'dcr' && this.allRequiredUrlParamsFilled()) {
+                this.runDcrDiscovery();
+            }
         },
 
         modalTitle() {
@@ -668,7 +730,7 @@ function marketplacePage() {
                 const res = await fetch('/api/oauth/discover', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: this.modal.mcpHost }),
+                    body: JSON.stringify({ url: this.resolvedMcpHost() }),
                 });
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
@@ -691,6 +753,14 @@ function marketplacePage() {
         },
 
         modalSubmit() {
+            // URL params validation (applies to all install modes that use mcp_host)
+            for (const p of this.modal.urlParams) {
+                if (p.required && !(this.modal.urlParamValues[p.name] || '').trim()) {
+                    this.showToast(`${p.label || p.name} is required`, 'error');
+                    return;
+                }
+            }
+
             // BYO-specific validation
             if (this.modal.oauthMode === 'byo') {
                 if (!this.modal.byo.clientId.trim() || !this.modal.byo.clientSecret.trim()) {
@@ -723,11 +793,18 @@ function marketplacePage() {
                 }
             }
 
+            const cleanedUrlParams = {};
+            for (const p of this.modal.urlParams) {
+                const v = (this.modal.urlParamValues[p.name] || '').trim();
+                if (v) cleanedUrlParams[p.name] = v;
+            }
+
             const result = {
                 envValues: this.modal.envValues,
                 headerValues: this.modal.headerValues,
                 oauthValues: this.modal.oauthValues,
                 userArgs: cleanedUserArgs,
+                urlParams: cleanedUrlParams,
                 oauthMode: this.modal.oauthMode,
             };
             if (this.modal.oauthMode === 'byo') {
@@ -860,12 +937,14 @@ function marketplacePage() {
             let envVars = {};
             let headers = {};
             let userArgs = {};
+            let urlParams = {};
             let byoPayload = null;
             let dcrPayload = null;
 
             const needsEnv = server.env_vars && server.env_vars.length > 0;
             const needsHeaders = server.header_vars && server.header_vars.length > 0;
             const hasConfigurableArgs = server.meta?.configurable_args && server.meta.configurable_args.length > 0;
+            const needsUrlParams = server.meta?.params && server.meta.params.length > 0;
             const oauthMode = server.oauth_mode;  // 'byo' | 'dcr' | null
             const isHostedBroker = !oauthMode && server.requires_oauth;
 
@@ -873,19 +952,24 @@ function marketplacePage() {
                 const result = await this.openByoModal(server);
                 if (!result) return;
                 byoPayload = result.byo;
+                urlParams = result.urlParams || {};
             } else if (oauthMode === 'dcr') {
                 const result = await this.openDcrModal(server);
                 if (!result) return;
                 dcrPayload = result.dcr;
+                urlParams = result.urlParams || {};
             } else if (isHostedBroker) {
-                // Hosted-broker: only collect env vars (OAuth handled by backend)
+                // Hosted-broker: only collect env vars (OAuth handled by backend).
+                // URL templating against hosted-broker entries isn't supported
+                // yet — would need backend coordination since the broker
+                // controls the upstream URL.
                 if (needsEnv) {
                     const result = await this.openModal(server, server.env_vars, [], []);
                     if (!result) return;
                     envVars = result.envValues;
                 }
-            } else if (needsEnv || needsHeaders || hasConfigurableArgs) {
-                // Non-OAuth with env vars, static headers, or args to fill in.
+            } else if (needsEnv || needsHeaders || hasConfigurableArgs || needsUrlParams) {
+                // Non-OAuth with env vars, static headers, args, or URL params to fill in.
                 const result = await this.openModal(
                     server,
                     needsEnv ? server.env_vars : [],
@@ -896,6 +980,7 @@ function marketplacePage() {
                 envVars = result.envValues;
                 headers = result.headerValues || {};
                 userArgs = result.userArgs || {};
+                urlParams = result.urlParams || {};
             }
 
             server.installing = true;
@@ -909,12 +994,15 @@ function marketplacePage() {
                 if (Object.keys(headers).length > 0) {
                     payload.headers = headers;
                 }
+                if (Object.keys(urlParams).length > 0) {
+                    payload.params = urlParams;
+                }
                 if (byoPayload) {
                     payload.client_id = byoPayload.clientId;
                     payload.client_secret = byoPayload.clientSecret;
                     payload.selected_scopes = byoPayload.selectedScopes;
                 } else if (dcrPayload) {
-                    payload.issuer = dcrPayload.issuer;
+                    if (dcrPayload.issuer) payload.issuer = dcrPayload.issuer;
                     payload.selected_scopes = dcrPayload.selectedScopes;
                     if (dcrPayload.registrationToken) payload.registration_token = dcrPayload.registrationToken;
                 }

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from openmaskit.masking.engine import MaskingEngine
 from openmaskit.masking.rules import MaskingRule
 from openmaskit.masking.store import MaskingStore
+from openmaskit.oauth import discovery
 from openmaskit.proxy.core import ProxyState, TargetState
 from openmaskit.web.app import create_app
 
@@ -317,6 +318,266 @@ class TestMarketplaceInstall:
         # Server should NOT be installed yet (happens after OAuth callback)
         record = await state.store.get_server("slack")
         assert record is None
+
+
+class TestUrlTemplating:
+    """Catalog entries can declare `meta.params`. The install handler appends
+    user-supplied values as a urlencoded query string to `mcp_host`, and for
+    DCR entries with no shipped `oauth.issuer` it discovers the issuer from
+    the resolved URL.
+    """
+
+    SUPABASE_ENTRY = {
+        "id": "supabase-uuid",
+        "handle": "supabase",
+        "name": "Supabase",
+        "description": "Supabase MCP",
+        "requires_oauth": True,
+        "transport_type": "http",
+        "oauth_mode": "dcr",
+        "mcp_host": "https://mcp.supabase.com/mcp",
+        "meta": {
+            "params": [
+                {
+                    "name": "project_ref",
+                    "label": "Project Reference",
+                    "required": True,
+                    "placeholder": "abc123",
+                    "description": "Found in your Supabase project settings",
+                }
+            ]
+        },
+    }
+
+    @pytest_asyncio.fixture
+    async def supabase_client(self, state, mock_backend_client):
+        """Backend client whose get_server_info returns the templated Supabase entry."""
+        mock_backend_client.get_server_info = AsyncMock(return_value=self.SUPABASE_ENTRY)
+        app = create_app(state)
+        app.state.backend_client = mock_backend_client
+        app.state.oauth_states = {}
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+
+    @pytest.mark.anyio
+    async def test_install_resolves_url_with_params(self, supabase_client, state, monkeypatch):
+        """Resolved URL is mcp_host + ?urlencoded(params)."""
+        async def fake_discover(url):
+            return {
+                "issuer": "https://api.supabase.com",
+                "scopes_supported": ["projects:read"],
+                "registration_endpoint": "https://api.supabase.com/oauth/register",
+                "authorization_endpoint": "https://api.supabase.com/oauth/authorize",
+                "token_endpoint": "https://api.supabase.com/oauth/token",
+            }
+        monkeypatch.setattr(discovery, "discover", fake_discover)
+
+        resp = await supabase_client.post(
+            "/api/marketplace/install",
+            json={
+                "server_id": "supabase",
+                "backend_id": "supabase-uuid",
+                "params": {"project_ref": "abc123"},
+                "selected_scopes": ["projects:read"],
+            },
+        )
+        assert resp.status_code == 201
+        record = await state.store.get_server("supabase")
+        assert record["config"]["url"] == "https://mcp.supabase.com/mcp?project_ref=abc123"
+        assert record["config"]["oauth"]["issuer"] == "https://api.supabase.com"
+
+    @pytest.mark.anyio
+    async def test_install_missing_required_param_fails(self, supabase_client):
+        resp = await supabase_client.post(
+            "/api/marketplace/install",
+            json={
+                "server_id": "supabase",
+                "backend_id": "supabase-uuid",
+                "params": {},
+                "selected_scopes": [],
+            },
+        )
+        assert resp.status_code == 400
+        assert "project_ref" in resp.json()["error"]
+
+    @pytest.mark.anyio
+    async def test_install_unknown_param_rejected(self, supabase_client, monkeypatch):
+        """Reject params not declared in the catalog so callers can't sneak
+        extra query keys onto the upstream URL."""
+        async def fake_discover(url):
+            return {"issuer": "https://api.supabase.com"}
+        monkeypatch.setattr(discovery, "discover", fake_discover)
+
+        resp = await supabase_client.post(
+            "/api/marketplace/install",
+            json={
+                "server_id": "supabase",
+                "backend_id": "supabase-uuid",
+                "params": {"project_ref": "abc", "bogus": "x"},
+                "selected_scopes": [],
+            },
+        )
+        assert resp.status_code == 400
+        assert "bogus" in resp.json()["error"]
+
+    @pytest.mark.anyio
+    async def test_install_runs_discovery_when_no_issuer(self, supabase_client, state, monkeypatch):
+        """DCR entry without a catalog-shipped issuer triggers install-time discovery."""
+        captured: dict = {}
+
+        async def fake_discover(url):
+            captured["url"] = url
+            return {
+                "issuer": "https://api.supabase.com",
+                "scopes_supported": ["organizations:read"],
+            }
+        monkeypatch.setattr(discovery, "discover", fake_discover)
+
+        resp = await supabase_client.post(
+            "/api/marketplace/install",
+            json={
+                "server_id": "supabase",
+                "backend_id": "supabase-uuid",
+                "params": {"project_ref": "xyz"},
+                # No issuer in body — backend must discover.
+            },
+        )
+        assert resp.status_code == 201
+        assert captured["url"] == "https://mcp.supabase.com/mcp?project_ref=xyz"
+        record = await state.store.get_server("supabase")
+        assert record["config"]["oauth"]["issuer"] == "https://api.supabase.com"
+        # Discovered scopes fall back when none selected.
+        assert record["config"]["oauth"]["scopes"] == ["organizations:read"]
+
+    @pytest.mark.anyio
+    async def test_install_discovery_failure_returns_400(self, supabase_client, monkeypatch):
+        async def fake_discover(url):
+            return None
+        monkeypatch.setattr(discovery, "discover", fake_discover)
+
+        resp = await supabase_client.post(
+            "/api/marketplace/install",
+            json={
+                "server_id": "supabase",
+                "backend_id": "supabase-uuid",
+                "params": {"project_ref": "abc"},
+            },
+        )
+        assert resp.status_code == 400
+        assert "discovery failed" in resp.json()["error"].lower()
+
+    @pytest.mark.anyio
+    async def test_url_encoded_special_chars(self, supabase_client, state, monkeypatch):
+        """Values containing '&', '=', spaces, etc. are URL-encoded."""
+        async def fake_discover(url):
+            return {"issuer": "https://api.supabase.com"}
+        monkeypatch.setattr(discovery, "discover", fake_discover)
+
+        resp = await supabase_client.post(
+            "/api/marketplace/install",
+            json={
+                "server_id": "supabase",
+                "backend_id": "supabase-uuid",
+                "params": {"project_ref": "a b&c=d"},
+                "issuer": "https://api.supabase.com",  # skip discovery
+            },
+        )
+        assert resp.status_code == 201
+        record = await state.store.get_server("supabase")
+        url = record["config"]["url"]
+        # urlencode produces space → '+', '&' → '%26', '=' → '%3D'
+        assert "a+b%26c%3Dd" in url
+        assert "&" not in url.split("?", 1)[1]  # no raw '&' in query
+
+    @pytest.mark.anyio
+    async def test_install_with_explicit_issuer_skips_discovery(
+        self, supabase_client, state, monkeypatch
+    ):
+        """If the install request supplies issuer, discovery is skipped."""
+        called = {"count": 0}
+
+        async def fake_discover(url):
+            called["count"] += 1
+            return None
+        monkeypatch.setattr(discovery, "discover", fake_discover)
+
+        resp = await supabase_client.post(
+            "/api/marketplace/install",
+            json={
+                "server_id": "supabase",
+                "backend_id": "supabase-uuid",
+                "params": {"project_ref": "abc"},
+                "issuer": "https://api.supabase.com",
+                "selected_scopes": ["projects:read"],
+            },
+        )
+        assert resp.status_code == 201
+        assert called["count"] == 0
+        record = await state.store.get_server("supabase")
+        assert record["config"]["oauth"]["issuer"] == "https://api.supabase.com"
+
+
+class TestResolveMcpUrl:
+    """Unit tests for the URL-resolution helper, isolated from the route layer."""
+
+    def test_no_params_returns_host_unchanged(self):
+        from openmaskit.web.routes.marketplace import _resolve_mcp_url
+        url, err = _resolve_mcp_url("https://mcp.example.com/mcp", {}, [])
+        assert err is None
+        assert url == "https://mcp.example.com/mcp"
+
+    def test_appends_query_string(self):
+        from openmaskit.web.routes.marketplace import _resolve_mcp_url
+        declared = [{"name": "project_ref", "required": True}]
+        url, err = _resolve_mcp_url(
+            "https://mcp.example.com/mcp", {"project_ref": "abc"}, declared
+        )
+        assert err is None
+        assert url == "https://mcp.example.com/mcp?project_ref=abc"
+
+    def test_missing_required_param(self):
+        from openmaskit.web.routes.marketplace import _resolve_mcp_url
+        declared = [{"name": "project_ref", "required": True}]
+        url, err = _resolve_mcp_url("https://mcp.example.com/mcp", {}, declared)
+        assert url is None
+        assert "project_ref" in err
+
+    def test_optional_param_can_be_omitted(self):
+        from openmaskit.web.routes.marketplace import _resolve_mcp_url
+        declared = [{"name": "region", "required": False}]
+        url, err = _resolve_mcp_url("https://mcp.example.com/mcp", {}, declared)
+        assert err is None
+        assert url == "https://mcp.example.com/mcp"
+
+    def test_optional_param_appended_when_filled(self):
+        from openmaskit.web.routes.marketplace import _resolve_mcp_url
+        declared = [{"name": "region", "required": False}]
+        url, err = _resolve_mcp_url(
+            "https://mcp.example.com/mcp", {"region": "eu"}, declared
+        )
+        assert err is None
+        assert url == "https://mcp.example.com/mcp?region=eu"
+
+    def test_undeclared_param_rejected(self):
+        from openmaskit.web.routes.marketplace import _resolve_mcp_url
+        declared = [{"name": "project_ref", "required": True}]
+        url, err = _resolve_mcp_url(
+            "https://mcp.example.com/mcp",
+            {"project_ref": "abc", "extra": "x"},
+            declared,
+        )
+        assert url is None
+        assert "extra" in err
+
+    def test_whitespace_only_value_treated_as_missing(self):
+        from openmaskit.web.routes.marketplace import _resolve_mcp_url
+        declared = [{"name": "project_ref", "required": True}]
+        url, err = _resolve_mcp_url(
+            "https://mcp.example.com/mcp", {"project_ref": "   "}, declared
+        )
+        assert url is None
+        assert "project_ref" in err
 
 
 class TestMarketplaceDeactivate:
