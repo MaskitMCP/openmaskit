@@ -3506,26 +3506,6 @@ code {
     }
 }
 
-/* Experimental Notice */
-.dcr-experimental-notice {
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
-    padding: 0.75rem 0.875rem;
-    background: rgba(251, 191, 36, 0.08);
-    border: 1px solid rgba(251, 191, 36, 0.2);
-    border-radius: var(--radius-md);
-    color: #fbbf24;
-    font-size: 0.8125rem;
-    line-height: 1.4;
-    margin-bottom: 0.875rem;
-}
-
-.dcr-experimental-notice svg {
-    flex-shrink: 0;
-    opacity: 0.8;
-}
-
 /* OAuth Mode Selector Cards */
 .oauth-mode-selector {
     display: grid;
@@ -3782,6 +3762,25 @@ code {
 
 .dcr-endpoint-item.dcr-endpoint-warning svg {
     color: var(--orange);
+}
+
+.dcr-cross-domain-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.5rem 0.625rem;
+    background: rgba(251, 191, 36, 0.08);
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    border-radius: var(--radius-sm);
+    color: var(--orange);
+    font-size: 0.7rem;
+    line-height: 1.4;
+}
+
+.dcr-cross-domain-warning svg {
+    color: var(--orange);
+    flex-shrink: 0;
+    margin-top: 0.1rem;
 }
 
 .dcr-supported-badge {

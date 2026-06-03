@@ -11,7 +11,6 @@ import logging
 import sys
 import webbrowser
 from pathlib import Path
-from urllib.parse import urlparse
 
 import anyio
 import httpx
@@ -89,90 +88,47 @@ class FileTokenStorage:
         data["client_info"] = client_info.model_dump(exclude_none=True)
         self._write(data)
 
-    async def discover_oauth_metadata(self, issuer: str, mcp_url: str | None = None) -> dict | None:
-        """Discover OAuth/OIDC metadata from issuer.
+    async def discover_oauth_metadata(self, issuer: str) -> dict | None:
+        """Discover OAuth/OIDC authorization-server metadata for `issuer`.
 
-        Args:
-            issuer: OAuth issuer URL (e.g., https://gitlab.com)
-            mcp_url: Full MCP URL (e.g., https://gitlab.com/api/v4/mcp) for RFC 8707 resource discovery
-
-        Returns:
-            dict with authorization_endpoint, token_endpoint, registration_endpoint, etc.
-            None if discovery fails
+        Used at runtime by `create_oauth_provider` solely to find the
+        `registration_endpoint` for a fresh DCR. Install-time discovery
+        (including the protected-resource step that can hop to a different
+        host) is handled by `openmaskit.oauth.discovery`.
         """
         issuer = issuer.rstrip("/")
         oidc_metadata = None
-        resource_metadata = None
 
-        # Try OIDC first
         oidc_url = f"{issuer}/.well-known/openid-configuration"
-
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 logger.info(f"Attempting OIDC discovery at {oidc_url}")
                 resp = await client.get(oidc_url)
                 resp.raise_for_status()
                 oidc_metadata = resp.json()
-                logger.info(f"OIDC discovery successful")
-
-                # If OIDC has registration_endpoint, we can return early
                 if oidc_metadata.get("registration_endpoint"):
                     return oidc_metadata
             except Exception as e:
                 logger.debug(f"OIDC discovery failed: {e}")
 
-        # Try RFC 8707 Protected Resource discovery if we have the MCP URL
-        if mcp_url:
-            parsed = urlparse(mcp_url)
-            if parsed.path:
-                resource_path = parsed.path.lstrip('/')
-                resource_url = f"{issuer}/.well-known/oauth-protected-resource/{resource_path}"
-
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    try:
-                        logger.info(f"Attempting OAuth Protected Resource discovery at {resource_url}")
-                        resp = await client.get(resource_url)
-                        resp.raise_for_status()
-                        resource_metadata = resp.json()
-                        logger.info(f"OAuth Protected Resource discovery successful")
-                    except Exception as e:
-                        logger.debug(f"OAuth Protected Resource discovery failed: {e}")
-
-        # Try OAuth 2.0 discovery
         oauth_url = f"{issuer}/.well-known/oauth-authorization-server"
-
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 logger.info(f"Attempting OAuth 2.0 discovery at {oauth_url}")
                 resp = await client.get(oauth_url)
                 resp.raise_for_status()
                 oauth_metadata = resp.json()
-                logger.info(f"OAuth 2.0 discovery successful")
-
-                # Merge metadata: prefer OIDC endpoints, but take registration_endpoint from OAuth 2.0
                 if oidc_metadata:
                     merged = oidc_metadata.copy()
                     if oauth_metadata.get("registration_endpoint"):
                         merged["registration_endpoint"] = oauth_metadata["registration_endpoint"]
-                    # Merge scopes from resource metadata if available
-                    if resource_metadata and resource_metadata.get("scopes_supported"):
-                        merged["scopes_supported"] = resource_metadata["scopes_supported"]
                     return merged
-                else:
-                    # Only OAuth 2.0 succeeded
-                    if resource_metadata and resource_metadata.get("scopes_supported"):
-                        oauth_metadata["scopes_supported"] = resource_metadata["scopes_supported"]
-                    return oauth_metadata
-
+                return oauth_metadata
             except Exception as e:
                 logger.debug(f"OAuth 2.0 discovery failed: {e}")
 
-        # If we got OIDC but no OAuth 2.0, return OIDC (even without registration_endpoint)
         if oidc_metadata:
-            logger.info(f"Returning OIDC metadata (OAuth 2.0 discovery failed)")
-            # Merge resource scopes if available
-            if resource_metadata and resource_metadata.get("scopes_supported"):
-                oidc_metadata["scopes_supported"] = resource_metadata["scopes_supported"]
+            logger.info("Returning OIDC metadata (OAuth 2.0 discovery failed)")
             return oidc_metadata
 
         logger.error(f"All OAuth discovery methods failed for {issuer}")
@@ -298,8 +254,7 @@ async def create_oauth_provider(
     if oauth_config.issuer:
         logger.info(f"DCR mode: discovering OAuth metadata for issuer {oauth_config.issuer}")
 
-        # Discover OAuth metadata (pass server_url for RFC 8707 resource discovery)
-        metadata = await storage.discover_oauth_metadata(oauth_config.issuer, server_url)
+        metadata = await storage.discover_oauth_metadata(oauth_config.issuer)
         if not metadata:
             raise RuntimeError(f"Failed to discover OAuth metadata for issuer: {oauth_config.issuer}")
 
