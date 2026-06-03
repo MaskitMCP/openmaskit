@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-03
+
+### Fixed
+- RFC 8414 OAuth authorization-server metadata: path-aware discovery (§3.1 inserts `/.well-known/...` between host and path for path-prefixed issuers, with the appended form as a secondary candidate), and `issuer` validation per §3.3. Fixes DCR against authorization servers that mount metadata under a path prefix.
+- RFC 9728 protected-resource metadata: fall back to the root-form `/.well-known/oauth-protected-resource` when the path-scoped form 404s (SEP-985).
+- RFC 7591 dynamic client registration: include `software_id` / `software_version` in the registration request, and surface the server's `error` / `error_description` fields on failure (§3.2.2) instead of a generic message.
+- RFC 7592: capture and persist `registration_access_token` and `registration_client_uri` from the DCR response so future client-management calls have what they need.
+- RFC 8252 §7.3 native-app loopback: prefer `http://127.0.0.1:3131/callback` as the canonical redirect URI; keep `http://localhost:3131/callback` registered alongside for compatibility with the existing BYO setup-guide narrative.
+- DCR `token_endpoint_auth_method`: pick what the authorization server advertises (`client_secret_post` preferred when supported, `none` for public clients) instead of always assuming `client_secret_basic`.
+
 ## [0.3.0] - 2026-06-03
 
 ### Added
@@ -55,7 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Env-var modal polish.
 
-[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/MaskitMCP/openmaskit/compare/v0.1.1...v0.1.2
