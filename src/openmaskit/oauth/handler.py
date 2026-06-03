@@ -22,6 +22,7 @@ from starlette.routing import Route
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 
+from openmaskit import __version__ as openmaskit_version
 from openmaskit.models import HttpOAuthConfig
 from openmaskit.oauth.discovery import issuer_matches, wellknown_metadata_urls
 from openmaskit.oauth.sdk_patches import register_scope_override
@@ -30,6 +31,11 @@ from openmaskit.security import TokenEncryption
 logger = logging.getLogger(__name__)
 
 OAUTH_CALLBACK_PORT = 3131
+
+# RFC 7591 §2 software_id — stable identifier for OpenMaskit as a product,
+# the same across all installs and versions. AS admins can use it to
+# identify (and, if necessary, throttle or block) OpenMaskit's DCR traffic.
+OPENMASKIT_SOFTWARE_ID = "494c9118-2bf0-4897-aa6b-29d818ebf201"
 
 
 def pick_dcr_token_endpoint_auth_method(supported: list[str] | None) -> str:
@@ -108,6 +114,34 @@ class FileTokenStorage:
     async def set_client_info(self, client_info: OAuthClientInformationFull) -> None:
         data = self._read()
         data["client_info"] = client_info.model_dump(exclude_none=True)
+        self._write(data)
+
+    async def get_registration_management(self) -> dict | None:
+        """RFC 7592 management metadata stored at DCR time, or None.
+
+        Returns a dict with optional `registration_access_token` and
+        `registration_client_uri` keys. A future de-register-on-uninstall
+        flow uses these to call DELETE on the client configuration URI.
+        """
+        data = self._read()
+        raw = data.get("registration_management")
+        return raw if raw else None
+
+    async def set_registration_management(
+        self,
+        registration_access_token: str | None,
+        registration_client_uri: str | None,
+    ) -> None:
+        """Persist RFC 7592 management metadata returned in the DCR response."""
+        if not registration_access_token and not registration_client_uri:
+            return
+        data = self._read()
+        entry: dict = {}
+        if registration_access_token:
+            entry["registration_access_token"] = registration_access_token
+        if registration_client_uri:
+            entry["registration_client_uri"] = registration_client_uri
+        data["registration_management"] = entry
         self._write(data)
 
     async def discover_oauth_metadata(self, issuer: str) -> dict | None:
@@ -252,7 +286,27 @@ class OAuthCallbackServer:
 
     @property
     def redirect_uri(self) -> str:
+        """Canonical loopback redirect URI per RFC 8252 §7.3 (`127.0.0.1`)."""
+        return f"http://127.0.0.1:{self._port}/callback"
+
+    @property
+    def legacy_redirect_uri(self) -> str:
+        """`localhost`-form. Used for BYO installs whose setup guides
+        instruct registering this exact string at the provider, and for
+        pre-RFC-8252-fix DCR clients whose existing AS registration only
+        lists the localhost form."""
         return f"http://localhost:{self._port}/callback"
+
+    @property
+    def loopback_redirect_uris(self) -> list[str]:
+        """Both forms, canonical first.
+
+        For fresh DCRs we register both so the AS accepts either — that
+        way the spec-canonical 127.0.0.1 form is used at runtime without
+        breaking older callers/configs that still send `localhost`. Both
+        resolve to the same loopback socket on every supported platform.
+        """
+        return [self.redirect_uri, self.legacy_redirect_uri]
 
     async def _callback_route(self, request: Request):
         self._auth_code = request.query_params.get("code")
@@ -317,7 +371,6 @@ async def create_oauth_provider(
     """
 
     storage = FileTokenStorage(store_path)
-    redirect_uri = callback_server.redirect_uri
 
     # DCR mode: issuer provided
     if oauth_config.issuer:
@@ -339,9 +392,19 @@ async def create_oauth_provider(
             if existing_client_info.client_secret:
                 auth_method = "client_secret_post"
 
+            # Reuse whatever redirect_uris the AS originally registered for
+            # this client. Pre-RFC-8252-fix installs have [localhost]; new
+            # installs have [127.0.0.1, localhost]. Either way the AS will
+            # accept the chosen primary, which is what matters.
+            stored_uris = (
+                [str(u) for u in existing_client_info.redirect_uris]
+                if existing_client_info.redirect_uris
+                else [callback_server.redirect_uri]
+            )
+
             client_metadata = OAuthClientMetadata(
                 client_name="OpenMaskit",
-                redirect_uris=[redirect_uri],
+                redirect_uris=stored_uris,
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
                 token_endpoint_auth_method=auth_method,
@@ -356,12 +419,19 @@ async def create_oauth_provider(
             requested_auth_method = pick_dcr_token_endpoint_auth_method(
                 metadata.get("token_endpoint_auth_methods_supported")
             )
+            # RFC 8252 §7.3: prefer the 127.0.0.1 form. Register both
+            # `127.0.0.1` and `localhost` so the AS accepts either at
+            # auth time; the SDK uses redirect_uris[0] (the canonical
+            # form) in its actual authorization request.
+            registered_redirect_uris = callback_server.loopback_redirect_uris
             dcr_metadata = {
                 "client_name": "OpenMaskit",
-                "redirect_uris": [redirect_uri],
+                "redirect_uris": registered_redirect_uris,
                 "grant_types": ["authorization_code", "refresh_token"],
                 "response_types": ["code"],
                 "token_endpoint_auth_method": requested_auth_method,
+                "software_id": OPENMASKIT_SOFTWARE_ID,
+                "software_version": openmaskit_version,
             }
             if scope:
                 dcr_metadata["scope"] = scope
@@ -388,12 +458,14 @@ async def create_oauth_provider(
                     else "none"
                 )
 
-            # Store the DCR result
+            # Store the DCR result. Use the same redirect_uris pair we
+            # registered so a future reconnect sees the canonical form
+            # first and the AS accepts either.
             client_info = OAuthClientInformationFull(
                 client_id=client_info_dict["client_id"],
                 client_secret=client_info_dict.get("client_secret"),
                 client_name="OpenMaskit",
-                redirect_uris=[redirect_uri],
+                redirect_uris=registered_redirect_uris,
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
                 token_endpoint_auth_method=assigned_auth_method,
@@ -404,11 +476,20 @@ async def create_oauth_provider(
                 f"(auth_method={assigned_auth_method})"
             )
 
+            # RFC 7592: capture client management fields if the AS returned
+            # them. We don't act on these yet, but storing them lets a future
+            # uninstall flow DELETE the client configuration cleanly instead
+            # of orphaning a DCR client on the AS forever.
+            await storage.set_registration_management(
+                registration_access_token=client_info_dict.get("registration_access_token"),
+                registration_client_uri=client_info_dict.get("registration_client_uri"),
+            )
+
             auth_method = assigned_auth_method
 
             client_metadata = OAuthClientMetadata(
                 client_name="OpenMaskit",
-                redirect_uris=[redirect_uri],
+                redirect_uris=registered_redirect_uris,
                 grant_types=["authorization_code", "refresh_token"],
                 response_types=["code"],
                 token_endpoint_auth_method=auth_method,
@@ -426,9 +507,15 @@ async def create_oauth_provider(
         # Prepare scope
         scope = oauth_config.scope or ""
 
+        # BYO setup guides instruct users to register `http://localhost:3131/callback`
+        # at the provider, so for manual mode we keep using the legacy form to
+        # match what's already on the provider's side. Switching to 127.0.0.1
+        # here would silently fail every existing BYO install.
+        byo_redirect_uri = callback_server.legacy_redirect_uri
+
         client_metadata = OAuthClientMetadata(
             client_name="OpenMaskit",
-            redirect_uris=[redirect_uri],
+            redirect_uris=[byo_redirect_uri],
             grant_types=["authorization_code", "refresh_token"],
             response_types=["code"],
             token_endpoint_auth_method=auth_method,
@@ -443,7 +530,7 @@ async def create_oauth_provider(
                     client_id=oauth_config.client_id,
                     client_secret=oauth_config.client_secret,
                     client_name="OpenMaskit",
-                    redirect_uris=[redirect_uri],
+                    redirect_uris=[byo_redirect_uri],
                     grant_types=["authorization_code", "refresh_token"],
                     response_types=["code"],
                     token_endpoint_auth_method=auth_method,

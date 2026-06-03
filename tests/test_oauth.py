@@ -15,6 +15,7 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from openmaskit.models import HttpOAuthConfig
 from openmaskit.oauth.handler import (
+    OPENMASKIT_SOFTWARE_ID,
     FileTokenStorage,
     OAuthCallbackServer,
     create_oauth_provider,
@@ -171,12 +172,25 @@ class TestOAuthCallbackServer:
         assert state is None
 
     def test_callback_server_redirect_uri(self):
-        """Redirect URI is correctly formatted."""
+        """Canonical redirect URI is the 127.0.0.1 form per RFC 8252 §7.3."""
         server = OAuthCallbackServer(port=3131)
-        assert server.redirect_uri == "http://localhost:3131/callback"
+        assert server.redirect_uri == "http://127.0.0.1:3131/callback"
 
         server2 = OAuthCallbackServer(port=9999)
-        assert server2.redirect_uri == "http://localhost:9999/callback"
+        assert server2.redirect_uri == "http://127.0.0.1:9999/callback"
+
+    def test_callback_server_legacy_redirect_uri(self):
+        """The localhost form is exposed for BYO setup guides and old DCRs."""
+        server = OAuthCallbackServer(port=3131)
+        assert server.legacy_redirect_uri == "http://localhost:3131/callback"
+
+    def test_callback_server_loopback_pair_canonical_first(self):
+        """DCR registers both forms; the canonical one comes first."""
+        server = OAuthCallbackServer(port=3131)
+        assert server.loopback_redirect_uris == [
+            "http://127.0.0.1:3131/callback",
+            "http://localhost:3131/callback",
+        ]
 
     @pytest.mark.anyio
     async def test_callback_server_resets_state_between_flows(self):
@@ -757,6 +771,219 @@ class TestCreateOauthProviderDcrAuthMethod:
         )
 
         assert captured["metadata"]["token_endpoint_auth_method"] == "client_secret_post"
+
+    @pytest.mark.anyio
+    async def test_dcr_body_includes_software_id_and_version(
+        self, tmp_path, monkeypatch
+    ):
+        """RFC 7591 §2: DCR registration body carries OpenMaskit's software identity."""
+        from openmaskit import __version__ as openmaskit_version
+
+        captured: dict = {}
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            captured["metadata"] = metadata
+            return {"client_id": "abc", "client_secret": "shh"}
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=tmp_path / "oauth.json",
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        assert captured["metadata"]["software_id"] == OPENMASKIT_SOFTWARE_ID
+        assert captured["metadata"]["software_version"] == openmaskit_version
+
+    @pytest.mark.anyio
+    async def test_dcr_captures_rfc7592_management_fields(
+        self, tmp_path, monkeypatch
+    ):
+        """RFC 7592: when the AS returns registration_access_token /
+        registration_client_uri, we persist them for a future uninstall flow."""
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            return {
+                "client_id": "abc",
+                "client_secret": "shh",
+                "registration_access_token": "rat-xyz",
+                "registration_client_uri": "https://example.com/register/abc",
+            }
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        store = tmp_path / "oauth.json"
+        await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=store,
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        storage = FileTokenStorage(store)
+        mgmt = await storage.get_registration_management()
+        assert mgmt == {
+            "registration_access_token": "rat-xyz",
+            "registration_client_uri": "https://example.com/register/abc",
+        }
+
+    @pytest.mark.anyio
+    async def test_new_dcr_registers_both_loopback_forms_with_127_first(
+        self, tmp_path, monkeypatch
+    ):
+        """RFC 8252 §7.3: register both 127.0.0.1 and localhost; canonical first."""
+        captured: dict = {}
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            captured["metadata"] = metadata
+            return {"client_id": "abc", "client_secret": "shh"}
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        store = tmp_path / "oauth.json"
+        provider = await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=store,
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        # DCR request body lists both, canonical first.
+        assert captured["metadata"]["redirect_uris"] == [
+            "http://127.0.0.1:3131/callback",
+            "http://localhost:3131/callback",
+        ]
+
+        # The SDK will use redirect_uris[0] in the auth request — must be canonical.
+        assert str(provider.context.client_metadata.redirect_uris[0]) == (
+            "http://127.0.0.1:3131/callback"
+        )
+
+        # Stored client_info carries both forms so a future reconnect keeps the pair.
+        storage = FileTokenStorage(store)
+        stored = await storage.get_client_info()
+        assert [str(u) for u in stored.redirect_uris] == [
+            "http://127.0.0.1:3131/callback",
+            "http://localhost:3131/callback",
+        ]
+
+    @pytest.mark.anyio
+    async def test_existing_dcr_with_legacy_localhost_uri_keeps_using_it(
+        self, tmp_path, monkeypatch
+    ):
+        """Pre-RFC-8252-fix DCR install: AS only registered localhost. We must
+        keep sending localhost, or the AS will reject the auth request."""
+        from mcp.shared.auth import OAuthClientInformationFull
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+            }
+
+        # Seed storage with a "pre-fix" DCR client that only has localhost.
+        store = tmp_path / "oauth.json"
+        storage = FileTokenStorage(store)
+        legacy_client = OAuthClientInformationFull(
+            client_id="legacy-abc",
+            client_secret="legacy-secret",
+            redirect_uris=["http://localhost:3131/callback"],
+            grant_types=["authorization_code", "refresh_token"],
+            response_types=["code"],
+            token_endpoint_auth_method="client_secret_post",
+        )
+        await storage.set_client_info(legacy_client)
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+
+        provider = await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=store,
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        # Must NOT have switched to 127.0.0.1 — AS would reject.
+        assert str(provider.context.client_metadata.redirect_uris[0]) == (
+            "http://localhost:3131/callback"
+        )
+
+    @pytest.mark.anyio
+    async def test_byo_manual_mode_uses_localhost(self, tmp_path):
+        """BYO setup guides instruct registering localhost at the provider; we
+        must match that, not the canonical 127.0.0.1 form."""
+        provider = await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(
+                client_id="user-supplied-id",
+                client_secret="user-supplied-secret",
+                scope="read write",
+            ),
+            store_path=tmp_path / "oauth.json",
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        assert str(provider.context.client_metadata.redirect_uris[0]) == (
+            "http://localhost:3131/callback"
+        )
+
+    @pytest.mark.anyio
+    async def test_dcr_skips_registration_management_when_absent(
+        self, tmp_path, monkeypatch
+    ):
+        """RFC 7592 fields are optional — absence is not an error."""
+
+        async def fake_discover(self, issuer):
+            return {
+                "registration_endpoint": "https://example.com/register",
+                "authorization_endpoint": "https://example.com/authorize",
+                "token_endpoint": "https://example.com/token",
+            }
+
+        async def fake_register(self, endpoint, metadata, token=None):
+            # No registration_access_token / registration_client_uri.
+            return {"client_id": "abc", "client_secret": "shh"}
+
+        monkeypatch.setattr(FileTokenStorage, "discover_oauth_metadata", fake_discover)
+        monkeypatch.setattr(FileTokenStorage, "register_dynamic_client", fake_register)
+
+        store = tmp_path / "oauth.json"
+        await create_oauth_provider(
+            server_url="https://example.com/mcp",
+            oauth_config=HttpOAuthConfig(issuer="https://issuer.example.com"),
+            store_path=store,
+            callback_server=OAuthCallbackServer(port=3131),
+        )
+
+        storage = FileTokenStorage(store)
+        assert await storage.get_registration_management() is None
 
     @pytest.mark.anyio
     async def test_stored_client_info_respects_as_assigned_method(
