@@ -544,3 +544,119 @@ class TestMappersAPI:
         # Delete
         resp = await client.post("/api/targets/nonexistent/mappers/1/delete")
         assert resp.status_code == 404
+
+
+class TestMappersPreviewWithResult:
+    """The preview endpoint must mirror the live engine's scope: text blocks
+    and structuredContent string leaves. Patterns that only match the
+    pretty-printed JSON wrapper (e.g. `"id": ([0-9]+)`) should NOT report
+    matches, even though they would have matched the old `text`-style preview
+    that scanned the JSON.stringify'd response. This is the bug class the
+    Tackt-style catalog hit."""
+
+    @pytest.mark.anyio
+    async def test_regex_on_string_value_in_structured_content_matches(self, client):
+        """A regex that targets a string leaf inside structuredContent should
+        match — same surface live will scan."""
+        resp = await client.post(
+            "/api/targets/test/mappers/preview",
+            json={
+                "pattern": r"[\w.+-]+@[\w.-]+",
+                "alias_prefix": "email",
+                "result": {
+                    "structuredContent": {
+                        "items": [
+                            {"name": "Alice", "value": "hi, my email is alice@example.com"},
+                            {"name": "Bob", "value": "no email here"},
+                        ]
+                    }
+                },
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        originals = [m["original"] for m in data["matches"]]
+        assert originals == ["alice@example.com"]
+
+    @pytest.mark.anyio
+    async def test_regex_targeting_json_key_value_pair_shows_zero(self, client):
+        """The exact case from the Tackt bug report: pattern `"id": ([0-9]+)`
+        against a response where `id` is an int field in structuredContent.
+        Preview MUST show zero matches because live will mask zero — there is
+        no string leaf containing the literal characters `"id": `."""
+        resp = await client.post(
+            "/api/targets/test/mappers/preview",
+            json={
+                "pattern": r'"id": ([0-9]+)',
+                "alias_prefix": "cat_id",
+                "result": {
+                    "content": [
+                        {"type": "text", "text": "Categories: Dressuurpaard (id:1), Springpaard (id:2)"}
+                    ],
+                    "structuredContent": {
+                        "categories": [
+                            {"id": 1, "name": "Dressuurpaard"},
+                            {"id": 2, "name": "Springpaard"},
+                        ]
+                    },
+                },
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["matches"] == []
+
+    @pytest.mark.anyio
+    async def test_regex_on_text_block_matches(self, client):
+        resp = await client.post(
+            "/api/targets/test/mappers/preview",
+            json={
+                "pattern": r"\bsk-[a-z0-9]+\b",
+                "alias_prefix": "api_key",
+                "result": {
+                    "content": [
+                        {"type": "text", "text": "Using token sk-abc123 for the call."}
+                    ]
+                },
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        originals = [m["original"] for m in data["matches"]]
+        assert originals == ["sk-abc123"]
+
+    @pytest.mark.anyio
+    async def test_dedups_same_value_across_surfaces(self, client):
+        """A single real value appearing in both a text block and structuredContent
+        should produce ONE alias, not two."""
+        resp = await client.post(
+            "/api/targets/test/mappers/preview",
+            json={
+                "pattern": r"\bsecret_\d+\b",
+                "alias_prefix": "leak",
+                "result": {
+                    "content": [{"type": "text", "text": "Found secret_42 in log."}],
+                    "structuredContent": {"hit": "secret_42"},
+                },
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        aliases = {m["alias"] for m in data["matches"]}
+        assert aliases == {"leak_1"}
+
+    @pytest.mark.anyio
+    async def test_legacy_text_path_still_works(self, client):
+        """External callers that POST `text` (not `result`) keep working."""
+        resp = await client.post(
+            "/api/targets/test/mappers/preview",
+            json={
+                "pattern": r"\d+",
+                "alias_prefix": "n",
+                "text": "abc 123 def 456",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        originals = [m["original"] for m in data["matches"]]
+        assert originals == ["123", "456"]

@@ -440,3 +440,192 @@ class TestStripAction:
         assert "password" not in masked["structuredContent"]
         assert masked["structuredContent"]["host"] == "host_1"
         assert masked["structuredContent"]["port"] == 5432
+
+
+class TestRulePathsFanOutOverLists:
+    """A rule's field_path must traverse implicitly through list-typed
+    intermediate values, so `categories.id` reaches every `id` inside
+    `{"categories": [...]}`."""
+
+    @pytest.mark.anyio
+    async def test_rule_path_through_nested_list(self, store):
+        rules = [
+            MaskingRule(tool_name="*", field_path="categories.id", alias_prefix="cat_id"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {
+                "categories": [
+                    {"id": "alpha", "name": "Dressuurpaard"},
+                    {"id": "beta", "name": "Springpaard"},
+                ]
+            }
+        }
+        masked = engine.mask_response("list_categories", result)
+        masked_ids = [c["id"] for c in masked["structuredContent"]["categories"]]
+        assert masked_ids == ["cat_id_1", "cat_id_2"]
+        # Sibling fields are untouched.
+        assert masked["structuredContent"]["categories"][0]["name"] == "Dressuurpaard"
+
+    @pytest.mark.anyio
+    async def test_rule_path_through_two_list_levels(self, store):
+        rules = [
+            MaskingRule(tool_name="*", field_path="a.b.c", alias_prefix="leaf"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {
+                "a": {"b": [{"c": "x"}, {"c": "y"}, {"c": "z"}]},
+            }
+        }
+        masked = engine.mask_response("any_tool", result)
+        cs = [item["c"] for item in masked["structuredContent"]["a"]["b"]]
+        assert cs == ["leaf_1", "leaf_2", "leaf_3"]
+
+    @pytest.mark.anyio
+    async def test_rule_path_plain_dict_still_works(self, store):
+        """Regression: paths that don't pass through any list must keep working."""
+        rules = [
+            MaskingRule(tool_name="*", field_path="connection.password", alias_prefix="secret"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {"connection": {"password": "hunter2", "port": 5432}}
+        }
+        masked = engine.mask_response("get_conn", result)
+        assert masked["structuredContent"]["connection"]["password"] == "secret_1"
+        assert masked["structuredContent"]["connection"]["port"] == 5432
+
+    @pytest.mark.anyio
+    async def test_rule_path_leaves_non_string_scalars_untouched(self, store):
+        """Non-string leaves (int/float/bool) are intentionally NOT masked by
+        rules: stringifying them would change the field's type on the unmask
+        round-trip, breaking strictly-typed upstream tools. This is the
+        current contract; revisit when the cache carries original-type info."""
+        rules = [
+            MaskingRule(tool_name="*", field_path="categories.id", alias_prefix="cat_id"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {
+                "categories": [
+                    {"id": 1, "name": "Dressuurpaard"},
+                    {"id": 2, "name": "Springpaard"},
+                ]
+            }
+        }
+        masked = engine.mask_response("list_categories", result)
+        ids = [c["id"] for c in masked["structuredContent"]["categories"]]
+        assert ids == [1, 2]  # unchanged
+
+    @pytest.mark.anyio
+    async def test_rule_strip_fans_out_over_lists(self, store):
+        rules = [
+            MaskingRule(tool_name="*", field_path="users.password", action="strip"),
+        ]
+        engine = MaskingEngine(rules, store)
+        await engine.load_aliases()
+
+        result = {
+            "structuredContent": {
+                "users": [
+                    {"name": "amin", "password": "p1"},
+                    {"name": "claude", "password": "p2"},
+                ]
+            }
+        }
+        masked = engine.mask_response("list_users", result)
+        for u in masked["structuredContent"]["users"]:
+            assert "password" not in u
+
+
+class TestRegexMapperOnStructuredContent:
+    """Regex mappers must scan structuredContent, not just text blocks."""
+
+    @pytest.mark.anyio
+    async def test_regex_mapper_masks_string_leaves_in_structured(self, store):
+        engine = MaskingEngine([], store)
+        await engine.load_aliases()
+
+        mapper = ResponseMapper(
+            id=1,
+            tool_name="*",
+            mapper_type="regex_replace",
+            pattern=r"\bsk-[a-z0-9]+\b",
+            alias_prefix="api_key",
+            order=0,
+        )
+        engine.add_mapper(mapper)
+
+        result = {
+            "structuredContent": {
+                "items": [
+                    {"name": "openai", "token": "sk-abc123"},
+                    {"name": "anthropic", "token": "sk-xyz789"},
+                ]
+            }
+        }
+        masked = engine.mask_response("list_keys", result)
+        tokens = [item["token"] for item in masked["structuredContent"]["items"]]
+        assert tokens == ["api_key_1", "api_key_2"]
+
+    @pytest.mark.anyio
+    async def test_regex_mapper_skips_structured_when_pattern_does_not_match(self, store):
+        engine = MaskingEngine([], store)
+        await engine.load_aliases()
+
+        mapper = ResponseMapper(
+            id=1,
+            tool_name="*",
+            mapper_type="regex_replace",
+            pattern=r"NEVER_MATCHES",
+            alias_prefix="x",
+            order=0,
+        )
+        engine.add_mapper(mapper)
+
+        result = {"structuredContent": {"items": [{"token": "sk-abc"}]}}
+        masked = engine.mask_response("list_keys", result)
+        assert masked["structuredContent"]["items"][0]["token"] == "sk-abc"
+
+    @pytest.mark.anyio
+    async def test_regex_mapper_runs_on_both_text_block_and_structured(self, store):
+        """Regression for the preview/live divergence: when the response has
+        BOTH a text block and structuredContent, the regex must apply to both
+        surfaces (same as the preview's flattened view implied)."""
+        engine = MaskingEngine([], store)
+        await engine.load_aliases()
+
+        mapper = ResponseMapper(
+            id=1,
+            tool_name="*",
+            mapper_type="regex_replace",
+            pattern=r"\bsecret_\d+\b",
+            alias_prefix="leak",
+            order=0,
+        )
+        engine.add_mapper(mapper)
+
+        result = {
+            "content": [
+                {"type": "text", "text": "Found secret_111 in the log."},
+            ],
+            "structuredContent": {"hit": "secret_222"},
+        }
+        masked = engine.mask_response("scan", result)
+        text = masked["content"][0]["text"]
+        structured_hit = masked["structuredContent"]["hit"]
+        # Both surfaces must be masked, and the same real value must dedupe
+        # to the same alias (single counter, single cache).
+        assert "secret_111" not in text
+        assert "secret_222" not in structured_hit
+        assert structured_hit.startswith("leak_")
+        assert "leak_" in text

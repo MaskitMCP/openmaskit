@@ -444,6 +444,7 @@ function toolDetail() {
         tryArgs: {},
         tryLoading: false,
         tryResult: null,
+        tryRawResult: null,
         tryError: null,
         jsonTree: null,
         treeExpanded: {},
@@ -574,6 +575,7 @@ function toolDetail() {
         async callTool() {
             this.tryLoading = true;
             this.tryResult = null;
+            this.tryRawResult = null;
             this.tryError = null;
             this.jsonTree = null;
             this.treeExpanded = {};
@@ -594,6 +596,7 @@ function toolDetail() {
                     this.tryError = typeof data.error === 'string' ? data.error : JSON.stringify(data.error, null, 2);
                 } else {
                     this.tryResult = JSON.stringify(data.result, null, 2);
+                    this.tryRawResult = data.result || null;
                     this.aliasMap = data.aliases || {};
                     this.jsonTree = null;
                     const textBlock = data.result?.content?.find(b => b.type === 'text');
@@ -781,7 +784,10 @@ function toolDetail() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        text: this.tryResult || '',
+                        // Send the raw result object so the backend can mirror
+                        // the live engine's scope (text blocks + structuredContent
+                        // string leaves), not the pretty-printed wrapper.
+                        result: this.tryRawResult,
                         pattern: this.newMapper.pattern,
                         alias_prefix: this.newMapper.alias_prefix,
                     }),
