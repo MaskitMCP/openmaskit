@@ -147,17 +147,27 @@ async def api_tools_call(request: Request):
     )
     session_msg = SessionMessage(message=JSONRPCMessage(root=rpc_request))
 
+    # try/finally guarantees collect() runs even if send() raises or the
+    # task is cancelled — otherwise the waiter sits in _waiters until the
+    # background eviction loop catches it.
     event = await target.response_dispatcher.register(request_id)
-    await target.ds_read_send.send(session_msg)
-
+    response_msg = None
+    timed_out = False
     try:
-        with anyio.fail_after(60):
-            await event.wait()
-    except TimeoutError:
-        await target.response_dispatcher.collect(request_id)
-        return JSONResponse({"error": "Timeout waiting for response"}, status_code=504)
+        await target.ds_read_send.send(session_msg)
+        try:
+            with anyio.fail_after(60):
+                await event.wait()
+        except TimeoutError:
+            timed_out = True
+    finally:
+        # Shield the cleanup so parent-scope cancellation can't interrupt
+        # collect() and leave the waiter dangling.
+        with anyio.CancelScope(shield=True):
+            response_msg = await target.response_dispatcher.collect(request_id)
 
-    response_msg = await target.response_dispatcher.collect(request_id)
+    if timed_out:
+        return JSONResponse({"error": "Timeout waiting for response"}, status_code=504)
     if response_msg is None:
         return JSONResponse({"error": "No response received"}, status_code=500)
 

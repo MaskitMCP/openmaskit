@@ -77,19 +77,31 @@ async def _handle_mcp_post(request: Request) -> Response:
     if not isinstance(root, JSONRPCRequest) or root.id is None:
         return Response(status_code=202)
 
-    # For requests that expect a response, register a waiter and forward
+    # For requests that expect a response, register a waiter and forward.
+    # The try/finally guarantees we always collect() (= pop the dict entry),
+    # even if send() raises or the task is cancelled between register and
+    # wait. Without it, the entry sits in _waiters until the 120s eviction
+    # loop catches it.
     request_id = root.id
     event = await target.response_dispatcher.register(request_id)
-
-    session_msg = SessionMessage(message=message)
-    await target.ds_read_send.send(session_msg)
-
-    # Wait for the response from the proxy relay
+    response_msg = None
+    timed_out = False
     try:
-        with anyio.fail_after(60):
-            await event.wait()
-    except TimeoutError:
-        await target.response_dispatcher.collect(request_id)
+        session_msg = SessionMessage(message=message)
+        await target.ds_read_send.send(session_msg)
+
+        try:
+            with anyio.fail_after(60):
+                await event.wait()
+        except TimeoutError:
+            timed_out = True
+    finally:
+        # Shield the cleanup so a parent-scope cancellation can't interrupt
+        # collect() mid-pop and leave the waiter in the dict until eviction.
+        with anyio.CancelScope(shield=True):
+            response_msg = await target.response_dispatcher.collect(request_id)
+
+    if timed_out:
         return JSONResponse(
             {
                 "jsonrpc": "2.0",
@@ -102,7 +114,6 @@ async def _handle_mcp_post(request: Request) -> Response:
             status_code=504,
         )
 
-    response_msg = await target.response_dispatcher.collect(request_id)
     if response_msg is None:
         return JSONResponse(
             {"jsonrpc": "2.0", "error": {"code": -32603, "message": "No response"}, "id": request_id},
