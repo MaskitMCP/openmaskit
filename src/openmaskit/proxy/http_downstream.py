@@ -17,6 +17,10 @@ from starlette.routing import Route
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage, JSONRPCRequest, JSONRPCResponse
 
+from openmaskit.web.body_limit import (
+    BodySizeLimitMiddleware,
+    get_max_request_bytes,
+)
 from openmaskit.web.origin import OriginMiddleware, default_localhost_origins
 
 if TYPE_CHECKING:
@@ -139,6 +143,7 @@ async def _handle_mcp_delete(request: Request) -> Response:
 def create_mcp_app(
     state: ProxyState,
     allowed_origins: Iterable[str] | None = None,
+    max_request_bytes: int | None = None,
 ) -> Starlette:
     """Create the MCP HTTP endpoint app with path-based target routing.
 
@@ -157,7 +162,11 @@ def create_mcp_app(
         web_port = getattr(state, "web_port", 9473)
         allowed_origins = default_localhost_origins(web_port)
 
+    if max_request_bytes is None:
+        max_request_bytes = get_max_request_bytes()
+
     middleware = [
+        Middleware(BodySizeLimitMiddleware, max_bytes=max_request_bytes),
         Middleware(
             OriginMiddleware,
             allowed_origins=list(allowed_origins),

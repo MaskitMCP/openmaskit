@@ -11,6 +11,10 @@ from starlette.middleware import Middleware
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from openmaskit.web.body_limit import (
+    BodySizeLimitMiddleware,
+    get_max_request_bytes,
+)
 from openmaskit.web.csrf import CsrfMiddleware, generate_csrf_token
 from openmaskit.web.origin import OriginMiddleware, default_localhost_origins
 
@@ -26,6 +30,7 @@ def create_app(
     state: ProxyState,
     allowed_origins: Iterable[str] | None = None,
     csrf_token: str | None = None,
+    max_request_bytes: int | None = None,
 ) -> Starlette:
     from openmaskit.web.routes.custom_targets import (
         custom_target_activate,
@@ -142,7 +147,13 @@ def create_app(
     if csrf_token is None:
         csrf_token = generate_csrf_token()
 
+    if max_request_bytes is None:
+        max_request_bytes = get_max_request_bytes()
+
+    # Order matters: body cap is the outermost layer so a hostile caller can't
+    # force memory allocation before Origin/CSRF have a chance to reject.
     middleware = [
+        Middleware(BodySizeLimitMiddleware, max_bytes=max_request_bytes),
         Middleware(
             OriginMiddleware,
             allowed_origins=list(allowed_origins),
