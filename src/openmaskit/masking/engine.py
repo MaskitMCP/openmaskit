@@ -284,12 +284,21 @@ class MaskingEngine:
                     logger.warning("Invalid regex in mapper %d: %s", m.id, exc)
 
     async def flush_pending(self):
-        """Write pending alias mappings to the database."""
+        """Write pending alias mappings to the database.
+
+        Uses ``store.persist_alias`` so the engine's per-target counter — the
+        only counter that observes every mint — is the source of truth. The
+        previous implementation called ``store.get_or_create_alias`` and threw
+        away the alias the store returned, which silently diverged the
+        in-memory cache from the DB row whenever the store's counter and the
+        engine's counter disagreed.
+        """
         writes = self._pending_writes[:]
         self._pending_writes.clear()
         for alias, real_value, tool_name, field_path in writes:
-            prefix = alias.rsplit("_", 1)[0]
-            await self._store.get_or_create_alias(real_value, tool_name, field_path, prefix, self._target_name)
+            await self._store.persist_alias(
+                self._target_name, alias, real_value, tool_name, field_path,
+            )
 
     def mask_response(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
         """Mask sensitive fields in a tool call response (synchronous, uses cache)."""
