@@ -401,6 +401,24 @@ class TestAtomicAliasGeneration:
         # The important guarantee is uniqueness and correct value mapping
 
 
+class TestStorePragmas:
+    @pytest.mark.anyio
+    async def test_wal_mode_enabled(self, store):
+        """store.db should run in WAL mode to match traffic.db; the alias flush
+        loop and dashboard CRUD writes overlap, and rollback-journal mode
+        serializes them."""
+        cursor = await store._db.execute("PRAGMA journal_mode")
+        row = await cursor.fetchone()
+        assert row[0].lower() == "wal"
+
+    @pytest.mark.anyio
+    async def test_synchronous_normal(self, store):
+        cursor = await store._db.execute("PRAGMA synchronous")
+        row = await cursor.fetchone()
+        # SQLite reports synchronous as int: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
+        assert row[0] == 1
+
+
 class TestPerTargetAliasNamespace:
     """Aliases are unique per (target_name, alias), not globally.
 

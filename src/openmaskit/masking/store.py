@@ -138,6 +138,12 @@ class MaskingStore:
         path = Path(path).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         db = await aiosqlite.connect(str(path))
+        # WAL + synchronous=NORMAL match traffic.db: the alias flush loop and
+        # rule/mapper CRUD from the dashboard are concurrent writers, and
+        # reads from the engine startup load happen alongside. Without WAL,
+        # SQLite's default rollback journal serializes everything.
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
         await db.executescript(_SCHEMA)
         await db.commit()
         store = cls(db)
