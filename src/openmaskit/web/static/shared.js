@@ -3,6 +3,84 @@
  * Eliminates duplication across targets.html, tools.html, marketplace.html
  */
 
+// ---------------------------------------------------------------------------
+// CSRF: monkey-patch window.fetch to attach X-CSRF-Token on same-origin
+// mutating requests. The token is fetched lazily from /api/csrf and cached
+// for the lifetime of the page. On a 403 with `error: "csrf_invalid"` we
+// refetch the token once and retry — covers a server restart while the tab
+// is still open.
+// ---------------------------------------------------------------------------
+(function installCsrfFetch() {
+    if (typeof window === 'undefined' || !window.fetch) return;
+    if (window.__openmaskitCsrfInstalled) return;
+    window.__openmaskitCsrfInstalled = true;
+
+    const MUTATING = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+    const originalFetch = window.fetch.bind(window);
+    let tokenPromise = null;
+
+    function fetchToken() {
+        if (tokenPromise === null) {
+            tokenPromise = originalFetch('/api/csrf', { credentials: 'same-origin' })
+                .then(r => (r.ok ? r.json() : { token: '' }))
+                .then(d => d.token || '')
+                .catch(() => '');
+        }
+        return tokenPromise;
+    }
+
+    function resetToken() {
+        tokenPromise = null;
+    }
+    window.__openmaskitResetCsrf = resetToken;
+
+    function isSameOrigin(url) {
+        try {
+            if (typeof url !== 'string') url = url.url || String(url);
+            if (url.startsWith('/')) return true;
+            const u = new URL(url, window.location.href);
+            return u.origin === window.location.origin;
+        } catch {
+            return true;
+        }
+    }
+
+    function methodOf(input, init) {
+        const m = (init && init.method) || (input && input.method) || 'GET';
+        return String(m).toUpperCase();
+    }
+
+    async function withToken(input, init, token) {
+        const opts = Object.assign({}, init || {});
+        const headers = new Headers(opts.headers || (input && input.headers) || {});
+        if (token) headers.set('X-CSRF-Token', token);
+        opts.headers = headers;
+        return originalFetch(input, opts);
+    }
+
+    window.fetch = async function patchedFetch(input, init) {
+        const method = methodOf(input, init);
+        if (!MUTATING.has(method) || !isSameOrigin(input)) {
+            return originalFetch(input, init);
+        }
+        let token = await fetchToken();
+        let resp = await withToken(input, init, token);
+        if (resp.status === 403) {
+            // Possible CSRF token rotation (server restart). Refetch once and retry.
+            try {
+                const cloned = resp.clone();
+                const body = await cloned.json();
+                if (body && body.error === 'csrf_invalid') {
+                    resetToken();
+                    token = await fetchToken();
+                    resp = await withToken(input, init, token);
+                }
+            } catch { /* not JSON / not our shape — return original 403 */ }
+        }
+        return resp;
+    };
+})();
+
 // Agent configurations for integration snippets
 const AGENTS = [
     { id: 'claude-code', label: 'Claude Code' },

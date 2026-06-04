@@ -54,10 +54,18 @@ async def _echo_ws(websocket: WebSocket):
     await websocket.close()
 
 
-def _stub_app(allowed_origins=(ALLOWED, ALSO_ALLOWED), protected=("/api/", "/ws/")):
+def _stub_app(
+    allowed_origins=(ALLOWED, ALSO_ALLOWED),
+    protected=("/api/", "/ws/"),
+    require_origin_methods=(),
+):
     """Tiny Starlette app with one /api/ POST, one /ws/ websocket, and one /public route."""
     routes = [
-        Route("/api/things", _ok_handler, methods=["GET", "POST"]),
+        Route(
+            "/api/things",
+            _ok_handler,
+            methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        ),
         Route("/public/things", _ok_handler, methods=["GET", "POST"]),
         WebSocketRoute("/ws/echo", _echo_ws),
     ]
@@ -66,6 +74,7 @@ def _stub_app(allowed_origins=(ALLOWED, ALSO_ALLOWED), protected=("/api/", "/ws/
             OriginMiddleware,
             allowed_origins=allowed_origins,
             protected_path_prefixes=protected,
+            require_origin_methods=require_origin_methods,
         ),
     ]
     return Starlette(routes=routes, middleware=middleware)
@@ -193,6 +202,87 @@ class TestMiddlewareHTTP:
         ) as client:
             resp = await client.post("/api/things", headers={"Origin": ""})
         assert resp.status_code == 403
+
+
+# -----------------------------------------------------------------------------
+# Middleware against a stub app: require-on-mutating (defense vs missing Origin)
+# -----------------------------------------------------------------------------
+
+
+class TestRequireOriginOnMutating:
+    @pytest.mark.anyio
+    async def test_post_without_origin_blocked_when_required(self):
+        app = _stub_app(require_origin_methods=("POST", "PUT", "DELETE", "PATCH"))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.post("/api/things")
+        assert resp.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_put_without_origin_blocked_when_required(self):
+        app = _stub_app(require_origin_methods=("POST", "PUT", "DELETE", "PATCH"))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.put("/api/things")
+        assert resp.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_delete_without_origin_blocked_when_required(self):
+        app = _stub_app(require_origin_methods=("POST", "PUT", "DELETE", "PATCH"))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.delete("/api/things")
+        assert resp.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_patch_without_origin_blocked_when_required(self):
+        app = _stub_app(require_origin_methods=("POST", "PUT", "DELETE", "PATCH"))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.patch("/api/things")
+        assert resp.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_get_without_origin_still_allowed_when_required(self):
+        """GETs must remain pass-through — curl and the MCP client read endpoints."""
+        app = _stub_app(require_origin_methods=("POST", "PUT", "DELETE", "PATCH"))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.get("/api/things")
+        assert resp.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_post_with_allowed_origin_passes_when_required(self):
+        app = _stub_app(require_origin_methods=("POST", "PUT", "DELETE", "PATCH"))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.post("/api/things", headers={"Origin": ALLOWED})
+        assert resp.status_code == 200
+
+    @pytest.mark.anyio
+    async def test_method_list_is_case_insensitive(self):
+        """Construction normalizes methods to upper — lowercase config still works."""
+        app = _stub_app(require_origin_methods=("post",))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.post("/api/things")
+        assert resp.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_unprotected_path_ignores_origin_requirement(self):
+        app = _stub_app(require_origin_methods=("POST",))
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            resp = await c.post("/public/things")
+        assert resp.status_code == 200
 
 
 # -----------------------------------------------------------------------------
@@ -363,6 +453,26 @@ class TestWebAppIntegration:
             )
         # Whatever the route's own behavior is, it must not be 403 from middleware.
         assert resp.status_code != 403
+
+    @pytest.mark.anyio
+    async def test_create_app_blocks_post_without_origin(self, web_state):
+        """Wire-up assertion: create_app passes require_origin_methods to the middleware,
+        so a POST without Origin is rejected even with the right CSRF token."""
+        app = create_app(web_state, csrf_token="t")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post(
+                "/api/targets/test/rules/create",
+                json={"tool_name": "*", "field_path": "x"},
+                headers={"X-CSRF-Token": "t"},
+            )
+        assert resp.status_code == 403
+
+    @pytest.mark.anyio
+    async def test_create_app_get_without_origin_still_works(self, web_state):
+        app = create_app(web_state, csrf_token="t")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/api/targets")
+        assert resp.status_code == 200
 
     @pytest.mark.anyio
     async def test_custom_allowed_origins_via_env_equivalent(self, web_state):

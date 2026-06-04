@@ -164,11 +164,18 @@ async def state(store, mock_backend_client):
 
 @pytest_asyncio.fixture
 async def client(state, mock_backend_client):
-    app = create_app(state)
+    app = create_app(state, csrf_token="test-csrf-token")
     app.state.backend_client = mock_backend_client
     app.state.oauth_states = {}
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={
+            "X-CSRF-Token": "test-csrf-token",
+            "Origin": "http://127.0.0.1:9473",
+        },
+    ) as c:
         yield c
 
 

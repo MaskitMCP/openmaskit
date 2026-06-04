@@ -11,6 +11,7 @@ from starlette.middleware import Middleware
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from openmaskit.web.csrf import CsrfMiddleware, generate_csrf_token
 from openmaskit.web.origin import OriginMiddleware, default_localhost_origins
 
 if TYPE_CHECKING:
@@ -18,10 +19,13 @@ if TYPE_CHECKING:
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+_ORIGIN_REQUIRED_METHODS = ("POST", "PUT", "DELETE", "PATCH")
+
 
 def create_app(
     state: ProxyState,
     allowed_origins: Iterable[str] | None = None,
+    csrf_token: str | None = None,
 ) -> Starlette:
     from openmaskit.web.routes.custom_targets import (
         custom_target_activate,
@@ -55,6 +59,7 @@ def create_app(
     from openmaskit.web.routes.oauth import discover_oauth_metadata
     from openmaskit.web.routes.pages import (
         api_config,
+        api_csrf,
         api_targets,
         api_tools,
         api_tools_call,
@@ -82,6 +87,7 @@ def create_app(
         Route("/", targets_page),
         Route("/marketplace", marketplace_page),
         Route("/health", health_check, methods=["GET"]),
+        Route("/api/csrf", api_csrf),
         Route("/api/marketplace", marketplace_list),
         Route("/api/marketplace/install", marketplace_install, methods=["POST"]),
         Route("/api/marketplace/deactivate", marketplace_deactivate, methods=["POST"]),
@@ -133,10 +139,19 @@ def create_app(
         web_port = getattr(state, "web_port", 9473)
         allowed_origins = default_localhost_origins(web_port)
 
+    if csrf_token is None:
+        csrf_token = generate_csrf_token()
+
     middleware = [
-        Middleware(OriginMiddleware, allowed_origins=list(allowed_origins)),
+        Middleware(
+            OriginMiddleware,
+            allowed_origins=list(allowed_origins),
+            require_origin_methods=_ORIGIN_REQUIRED_METHODS,
+        ),
+        Middleware(CsrfMiddleware, token=csrf_token),
     ]
 
     app = Starlette(routes=routes, middleware=middleware)
     app.state.proxy_state = state
+    app.state.csrf_token = csrf_token
     return app

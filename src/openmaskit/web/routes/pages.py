@@ -29,6 +29,20 @@ async def tool_detail_page(request: Request):
     return FileResponse(STATIC_DIR / "tool_detail.html")
 
 
+async def api_csrf(request: Request):
+    """Return the per-process CSRF token to the dashboard JS.
+
+    Gated by ``OriginMiddleware``: a malicious page in the user's browser can
+    only fetch this endpoint cross-origin if its ``Origin`` is in the dashboard
+    allow-list, which by construction it isn't. CLI / curl callers can read it
+    too — that's fine, they're already same-machine.
+    """
+    token = getattr(request.app.state, "csrf_token", None)
+    if not token:
+        return JSONResponse({"error": "csrf_unavailable"}, status_code=500)
+    return JSONResponse({"token": token})
+
+
 async def api_config(request: Request):
     state = request.app.state.proxy_state
     vs = state.version_status or {}
