@@ -11,7 +11,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MAX_PARSE_LEN = 10 * 1024 * 1024  # 10 MiB
+DEFAULT_MAX_PARSE_LEN = 1024 * 1024  # 1 MiB
 
 
 def get_max_parse_len() -> int:

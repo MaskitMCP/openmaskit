@@ -147,7 +147,7 @@ openmaskit --version
 | `OPENMASKIT_TRAFFIC_MAX_ROWS` | Cap on stored audit rows (default 10000, oldest evicted first) |
 | `OPENMASKIT_ALLOWED_ORIGINS` | Comma-separated extra origins allowed to call `/api/*` |
 | `OPENMASKIT_MAX_REQUEST_BYTES` | Max HTTP request body size in bytes for the dashboard and MCP endpoints (default 1 MiB). Oversized requests get a 413. |
-| `OPENMASKIT_MAX_PARSE_BYTES` | Max length of an upstream text block (in chars) handed to the JSON / Python-repr parser (default 10 MiB). Oversized blocks skip parsing and fall through as plain text. |
+| `OPENMASKIT_MAX_PARSE_BYTES` | Max length of an upstream text block (in chars) handed to the JSON / Python-repr parser (default 1 MiB). Oversized blocks skip parsing and fall through as plain text. |
 | `OPENMASKIT_DISABLE_MARKETPLACE` | Set to `1` to opt out of all calls to `api.maskitmcp.com` (catalog, server detail, version check). Custom servers continue to work. |
 
 ## Dashboard

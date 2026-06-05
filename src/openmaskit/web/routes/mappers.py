@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from copy import deepcopy
 
 from starlette.requests import Request
@@ -34,33 +33,23 @@ def _validate_dot_path(path: str) -> bool:
 
 
 def _check_regex_safety(pattern: str) -> tuple[bool, str | None]:
-    """Check if regex pattern is safe from ReDoS attacks.
+    """Check if a regex pattern is safe from ReDoS attacks.
+
+    Structural rejection (nested quantifiers etc.) + a length cap. Runtime
+    defense lives in the engine via ``get_max_regex_input_bytes``, which
+    bounds the input the pattern can be applied to.
 
     Returns: (is_safe, error_message)
     """
-    # Check for known ReDoS patterns
     for dangerous_pattern in _REDOS_PATTERNS:
         if dangerous_pattern.search(pattern):
             return False, "Pattern contains dangerous nested quantifiers or alternation"
 
-    # Check pattern complexity (length limit)
     if len(pattern) > MAX_PATTERN_LENGTH:
         return False, f"Pattern too long (max {MAX_PATTERN_LENGTH} characters)"
 
-    # Test pattern with timeout (Python 3.11+)
     try:
-        compiled = re.compile(pattern)
-        # Test against pathological string (many 'a's, no match expected)
-        test_str = "a" * 100
-        if sys.version_info >= (3, 11):
-            # Use timeout parameter (Python 3.11+)
-            try:
-                compiled.search(test_str)
-            except TimeoutError:
-                return False, "Pattern triggers timeout on test string"
-        else:
-            # For older Python, just compile (no runtime protection)
-            pass
+        re.compile(pattern)
     except re.error as exc:
         return False, f"Invalid regex: {exc}"
 
