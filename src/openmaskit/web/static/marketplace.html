@@ -224,7 +224,17 @@
                                x-model="modal.byo.clientSecret" autocomplete="off" required>
                     </label>
 
-                    <template x-if="modal.availableScopes.length > 0">
+                    <template x-if="modal.byoScopesLoading">
+                        <div class="modal-field">
+                            <span class="modal-label">Scopes</span>
+                            <div class="modal-dcr-loading">
+                                <span class="spinner spinner-sm"></span>
+                                <span>Discovering scopes from the server…</span>
+                            </div>
+                        </div>
+                    </template>
+
+                    <template x-if="!modal.byoScopesLoading && modal.availableScopes.length > 0">
                         <div class="modal-field">
                             <span class="modal-label">Scopes</span>
                             <p class="modal-hint">The provider will show these on its consent screen. Required scopes can't be unchecked.</p>
@@ -627,6 +637,9 @@ function marketplacePage() {
             this.modal.oauthMode = null;
             this.modal.availableScopes = [];
             this.modal.selectedScopes = [];
+            // True while BYO is fetching scopes from /api/oauth/discover because
+            // the catalog entry omitted `available_scopes`.
+            this.modal.byoScopesLoading = false;
             this.modal.setupGuideUrl = server?.meta?.setup_guide_url || null;
             this.modal.mcpHost = server?.mcp_host || null;
             this.modal.byo = { clientId: '', clientSecret: '', redirectCopied: false };
@@ -652,21 +665,68 @@ function marketplacePage() {
         },
 
         openByoModal(server) {
-            const available = (server?.meta?.available_scopes || []).map(s => ({
-                scope: s.scope,
-                label: s.label || s.scope,
-                required: !!s.required,
-                default: s.default !== false,
-            }));
-            const initialSelected = available
-                .filter(s => s.required || s.default)
-                .map(s => s.scope);
-
             const promise = this.openModal(server, [], []);
             this.modal.oauthMode = 'byo';
-            this.modal.availableScopes = available;
-            this.modal.selectedScopes = initialSelected;
+
+            const meta = server?.meta || {};
+            if ('available_scopes' in meta) {
+                // Catalog explicitly shipped scopes (possibly an empty array,
+                // which means "no scopes to pick" — respect that).
+                const available = (meta.available_scopes || []).map(s => ({
+                    scope: s.scope,
+                    label: s.label || s.scope,
+                    required: !!s.required,
+                    default: s.default !== false,
+                }));
+                this.modal.availableScopes = available;
+                this.modal.selectedScopes = available
+                    .filter(s => s.required || s.default)
+                    .map(s => s.scope);
+            } else {
+                // Catalog omitted `available_scopes`. Try live discovery in
+                // the background — the picker populates reactively when
+                // scopes arrive. If discovery returns nothing, the picker
+                // stays hidden and OAuth proceeds without a `scope=` param.
+                this.modal.availableScopes = [];
+                this.modal.selectedScopes = [];
+                this.runByoScopeDiscovery(server?.mcp_host);
+            }
             return promise;
+        },
+
+        async runByoScopeDiscovery(mcpUrl) {
+            this.modal.byoScopesLoading = true;
+            try {
+                const discovered = await this.fetchDiscoveredScopes(mcpUrl);
+                const available = discovered.map(s => ({
+                    scope: s.scope,
+                    label: s.scope,           // PRM doesn't carry labels
+                    required: !!s.required,
+                    default: false,           // no default-on signal from discovery
+                }));
+                this.modal.availableScopes = available;
+                this.modal.selectedScopes = available
+                    .filter(s => s.required)
+                    .map(s => s.scope);
+            } finally {
+                this.modal.byoScopesLoading = false;
+            }
+        },
+
+        async fetchDiscoveredScopes(mcpUrl) {
+            if (!mcpUrl) return [];
+            try {
+                const res = await fetch('/api/oauth/discover', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: mcpUrl }),
+                });
+                if (!res.ok) return [];
+                const data = await res.json();
+                return data.scopes || [];
+            } catch (e) {
+                return [];
+            }
         },
 
         openDcrModal(server) {
