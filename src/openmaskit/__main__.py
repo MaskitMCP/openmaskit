@@ -323,6 +323,15 @@ async def async_main():
         server_id = record["id"]
         if server_id in state.targets:
             continue
+        if record["config"] is None:
+            # Config blob couldn't be decrypted (Fernet key changed or row
+            # corrupted). Don't try to connect — the dashboard will show it
+            # as broken so the user can uninstall and re-add.
+            logger.warning(
+                "Skipping startup reconnect for %s: config not decryptable",
+                server_id,
+            )
+            continue
 
         engine = MaskingEngine([], store, target_name=server_id)
         await engine.load_aliases()

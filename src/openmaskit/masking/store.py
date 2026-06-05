@@ -761,16 +761,17 @@ class MaskingStore:
         query = "SELECT id, name, config_enc, active, icon_url FROM mcp_servers ORDER BY name"
         async with self._db.execute(query) as cursor:
             rows = await cursor.fetchall()
-            return [
-                {
+            out: list[dict] = []
+            for row in rows:
+                cfg = self._safe_decrypt_config(row[2], row[0])
+                out.append({
                     "id": row[0],
                     "name": row[1],
-                    "config": json.dumps(self._decrypt_config(row[2])),
+                    "config": json.dumps(cfg) if cfg is not None else None,
                     "active": bool(row[3]),
                     "icon_url": row[4],
-                }
-                for row in rows
-            ]
+                })
+            return out
 
     async def update_server(self, server_id: str, name: str, config: dict) -> bool:
         blob = self._encrypt_config(config)
@@ -800,7 +801,7 @@ class MaskingStore:
                 {
                     "id": r[0],
                     "name": r[1],
-                    "config": self._decrypt_config(r[2]),
+                    "config": self._safe_decrypt_config(r[2], r[0]),
                     "active": bool(r[3]),
                     "icon_url": r[4],
                     "installed_at": r[5],
@@ -819,10 +820,29 @@ class MaskingStore:
             return {
                 "id": row[0],
                 "name": row[1],
-                "config": self._decrypt_config(row[2]),
+                "config": self._safe_decrypt_config(row[2], row[0]),
                 "active": bool(row[3]),
                 "installed_at": row[4],
             }
+
+    def _safe_decrypt_config(self, blob: bytes, server_id: str) -> dict | None:
+        """Decrypt ``config_enc`` for a row, returning ``None`` on failure.
+
+        A single undecryptable row used to raise out of the enclosing list
+        query, which made the entire Servers page error out after a Fernet
+        key change. Per-row None gives the dashboard a chance to render the
+        rest of the list and lets the user clean up the bad row.
+        """
+        try:
+            return self._decrypt_config(blob)
+        except ConfigDecryptionError as exc:
+            logger.warning(
+                "Failed to decrypt config for server %r: %s. "
+                "Listing as broken; uninstall to clean up.",
+                server_id,
+                exc,
+            )
+            return None
 
     async def update_server_config(self, server_id: str, config: dict):
         """Update the config JSON for a server."""

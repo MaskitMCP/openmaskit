@@ -177,3 +177,53 @@ class TestTrafficStore:
         await store.insert_many([_entry(status="blocked", rid="b")])
         rows = await store.query("srv")
         assert rows[0].status == "blocked"
+
+
+class TestDecryptFailHandling:
+    """A single undecryptable row used to raise out of the listing query
+    and break the entire traffic page; verify the row is now surfaced with
+    ``unmasked_*=None`` and the rest of the rows still come back."""
+
+    @pytest.mark.anyio
+    async def test_corrupted_args_blob_returns_none_unmasked(self, store):
+        await store.insert_many([_entry()])
+        # Overwrite the args_enc blob with garbage that Fernet can't decrypt.
+        await store._db.execute(
+            "UPDATE traffic SET args_enc = ?", (b"not-a-valid-fernet-token",)
+        )
+        await store._db.commit()
+        rows = await store.query("srv")
+        assert len(rows) == 1
+        assert rows[0].unmasked_args is None
+        # Plaintext columns and the response column still come through.
+        assert rows[0].masked_args == '{"q":"host_1"}'
+        assert rows[0].unmasked_response == "real content"
+
+    @pytest.mark.anyio
+    async def test_corrupted_response_blob_returns_none_unmasked(self, store):
+        await store.insert_many([_entry()])
+        await store._db.execute(
+            "UPDATE traffic SET response_enc = ?", (b"not-a-valid-fernet-token",)
+        )
+        await store._db.commit()
+        rows = await store.query("srv")
+        assert rows[0].unmasked_args == '{"q":"prod-db.internal.net"}'
+        assert rows[0].unmasked_response is None
+
+    @pytest.mark.anyio
+    async def test_one_bad_row_does_not_kill_the_listing(self, store):
+        """The point of the fix: a single bad row must not raise out of the
+        list query."""
+        await store.insert_many([_entry(rid="good")])
+        await store.insert_many([_entry(rid="bad")])
+        # Corrupt one row only (the second insert).
+        await store._db.execute(
+            "UPDATE traffic SET args_enc = ? WHERE request_id = ?",
+            (b"not-a-valid-fernet-token", "bad"),
+        )
+        await store._db.commit()
+        rows = await store.query("srv")
+        assert len(rows) == 2
+        by_rid = {r.request_id: r for r in rows}
+        assert by_rid["good"].unmasked_args == '{"q":"prod-db.internal.net"}'
+        assert by_rid["bad"].unmasked_args is None

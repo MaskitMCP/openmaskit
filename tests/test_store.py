@@ -573,3 +573,55 @@ class TestMappingsPkMigration:
             assert len(rows) == 1
         finally:
             await s2.close()
+
+
+class TestServerConfigDecryptFail:
+    """A single undecryptable config_enc row used to raise out of the list
+    queries and break the entire Servers page; verify it now surfaces as
+    ``config=None`` and other rows still come through."""
+
+    @pytest.mark.anyio
+    async def test_get_installed_servers_handles_bad_row(self, store):
+        await store.install_server("good", "Good", {"transport": "http", "url": "http://x"})
+        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
+        # Corrupt the bad row's config_enc blob.
+        await store._db.execute(
+            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
+            (b"not-a-valid-fernet-blob", "bad"),
+        )
+        await store._db.commit()
+
+        rows = await store.get_installed_servers()
+        by_id = {r["id"]: r for r in rows}
+        assert by_id["good"]["config"] == {"transport": "http", "url": "http://x"}
+        assert by_id["bad"]["config"] is None
+
+    @pytest.mark.anyio
+    async def test_get_all_servers_handles_bad_row(self, store):
+        await store.install_server("good", "Good", {"transport": "http", "url": "http://x"})
+        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
+        await store._db.execute(
+            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
+            (b"not-a-valid-fernet-blob", "bad"),
+        )
+        await store._db.commit()
+
+        rows = await store.get_all_servers()
+        by_id = {r["id"]: r for r in rows}
+        # get_all_servers JSON-encodes the config; bad row gets a literal None.
+        assert by_id["good"]["config"] == '{"transport": "http", "url": "http://x"}'
+        assert by_id["bad"]["config"] is None
+
+    @pytest.mark.anyio
+    async def test_get_server_returns_none_config_for_bad_row(self, store):
+        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
+        await store._db.execute(
+            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
+            (b"not-a-valid-fernet-blob", "bad"),
+        )
+        await store._db.commit()
+
+        record = await store.get_server("bad")
+        assert record is not None
+        assert record["id"] == "bad"
+        assert record["config"] is None

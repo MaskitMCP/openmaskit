@@ -91,9 +91,13 @@ async def api_targets(request: Request):
             "config": server_record["config"] if server_record else None,
         })
 
-    # Then, add inactive servers from database that aren't in state.targets
+    # Then, add inactive servers from database that aren't in state.targets.
+    # We include any row not in state.targets, even if the DB still marks it
+    # active — a row that's "active in DB but not connected" is an orphan
+    # (failed startup reconnect, undecryptable config, etc.) and the user
+    # needs to see it to act on it.
     for server in db_servers:
-        if server["id"] not in seen_ids and not server["active"]:
+        if server["id"] not in seen_ids:
             targets.append({
                 "name": server["id"],
                 "display_name": server["name"],
