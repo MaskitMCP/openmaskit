@@ -521,8 +521,11 @@ class TestDiscoverViaMcpProbe:
         assert result["issuer"] == "https://api.example.com"
         assert result["authorization_endpoint"] == "https://api.example.com/oauth/authorize"
         assert result["registration_endpoint"] == "https://api.example.com/oauth/register"
-        # PRM scopes take precedence over AS scopes
-        assert result["scopes_supported"] == ["read", "write"]
+        # PRM scopes drive the menu; no WWW-Auth scope so nothing is required.
+        assert result["scopes"] == [
+            {"scope": "read", "required": False},
+            {"scope": "write", "required": False},
+        ]
         assert result["resource"] == "https://mcp.example.com/mcp"
         assert result["resource_metadata_url"] == "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
 
@@ -600,12 +603,9 @@ class TestDiscoverViaMcpProbe:
     @pytest.mark.anyio
     @respx.mock
     async def test_www_authenticate_scope_used_when_prm_omits_scopes(self):
-        """When PRM has no `scopes_supported`, WWW-Auth `scope` fills both fields.
-
-        `scopes_supported` falls back to WWW-Auth because the picker needs
-        *some* menu to show; `scopes_required` carries the same tokens because
-        WWW-Auth is the canonical required signal.
-        """
+        """When PRM has no `scopes_supported`, WWW-Auth `scope` populates the
+        menu — and every entry is `required: True` because the canonical
+        required signal is the same source we fell back to."""
         respx.get("https://mcp.example.com/mcp").mock(
             return_value=httpx.Response(
                 401,
@@ -643,17 +643,19 @@ class TestDiscoverViaMcpProbe:
 
         result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
         assert result is not None
-        assert result["scopes_supported"] == ["repo:read", "repo:write"]
-        assert result["scopes_required"] == ["repo:read", "repo:write"]
+        assert result["scopes"] == [
+            {"scope": "repo:read", "required": True},
+            {"scope": "repo:write", "required": True},
+        ]
 
     @pytest.mark.anyio
     @respx.mock
-    async def test_supported_and_required_are_separate_fields_when_both_signal(self):
-        """PRM drives `scopes_supported`; WWW-Auth drives `scopes_required`.
+    async def test_supported_and_required_combined_when_both_signal(self):
+        """PRM drives the menu; WWW-Auth tags the `required` flag per entry.
 
-        The two concepts are not collapsed: PRM is the catalog (the menu),
-        WWW-Auth is the required subset (the locked subset). The install
-        picker uses both — render the menu, pre-check + lock the required.
+        PRM is the catalog (every entry appears); WWW-Auth is the locked
+        subset (those entries get `required: True`). The install picker
+        renders the menu and pre-checks + locks the required ones.
         """
         respx.get("https://mcp.example.com/mcp").mock(
             return_value=httpx.Response(
@@ -692,13 +694,17 @@ class TestDiscoverViaMcpProbe:
 
         result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
         assert result is not None
-        assert result["scopes_supported"] == ["read", "write", "admin"]
-        assert result["scopes_required"] == ["read"]
+        assert result["scopes"] == [
+            {"scope": "read", "required": True},
+            {"scope": "write", "required": False},
+            {"scope": "admin", "required": False},
+        ]
 
     @pytest.mark.anyio
     @respx.mock
-    async def test_warns_when_required_not_in_supported(self, caplog):
-        """Required ⊄ supported is malformed-but-legal; emit a warning."""
+    async def test_required_not_in_supported_is_appended_with_required_flag(self):
+        """Required ⊄ supported is malformed-but-legal; the straggler is
+        appended at the end of the unified list with `required: True`."""
         respx.get("https://mcp.example.com/mcp").mock(
             return_value=httpx.Response(
                 401,
@@ -734,26 +740,24 @@ class TestDiscoverViaMcpProbe:
             return_value=httpx.Response(404)
         )
 
-        with caplog.at_level("WARNING", logger="openmaskit.oauth.discovery"):
-            result = await discovery.discover_via_mcp_probe(
-                "https://mcp.example.com/mcp"
-            )
+        result = await discovery.discover_via_mcp_probe(
+            "https://mcp.example.com/mcp"
+        )
 
         assert result is not None
-        assert result["scopes_supported"] == ["read", "write"]
-        # `ghost_scope` is surfaced as required regardless of whether PRM
-        # lists it — the server is going to enforce it on us.
-        assert result["scopes_required"] == ["ghost_scope"]
-        assert any(
-            "ghost_scope" in rec.message and "may be misconfigured" in rec.message
-            for rec in caplog.records
-        )
+        # PRM scopes come first in order, then the malformed required token
+        # appended at the end with `required: True`.
+        assert result["scopes"] == [
+            {"scope": "read", "required": False},
+            {"scope": "write", "required": False},
+            {"scope": "ghost_scope", "required": True},
+        ]
 
     @pytest.mark.anyio
     @respx.mock
     async def test_prm_scopes_used_when_www_authenticate_omits_scope(self):
-        """No `scope` in the challenge → PRM `scopes_supported` is the menu,
-        `scopes_required` is empty (no signal means no enforced minimum)."""
+        """No `scope` in the challenge → PRM `scopes_supported` is the menu;
+        every entry is `required: False` because the server didn't enforce any."""
         respx.get("https://mcp.example.com/mcp").mock(
             return_value=httpx.Response(
                 401,
@@ -789,8 +793,7 @@ class TestDiscoverViaMcpProbe:
 
         result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
         assert result is not None
-        assert result["scopes_supported"] == ["from_prm"]
-        assert result["scopes_required"] == []
+        assert result["scopes"] == [{"scope": "from_prm", "required": False}]
 
 
 class TestDiscoverLegacy:
@@ -825,8 +828,8 @@ class TestDiscoverLegacy:
         assert result["issuer"] == "https://gitlab.com"
         assert result["registration_endpoint"] == "https://gitlab.com/oauth/applications"
         assert result["resource_metadata_url"] is None
-        # Legacy flow never probes WWW-Authenticate, so there's no required signal.
-        assert result["scopes_required"] == []
+        # Legacy flow never probes WWW-Authenticate, so nothing is required.
+        assert all(not s["required"] for s in result["scopes"])
 
     @pytest.mark.anyio
     @respx.mock
@@ -877,7 +880,10 @@ class TestDiscoverLegacy:
         result = await discovery.discover_legacy("https://api.example.com/v1/mcp")
         assert result is not None
         assert result["discovery_method"] == "legacy_host+resource"
-        assert result["scopes_supported"] == ["scope_a", "scope_b"]
+        assert result["scopes"] == [
+            {"scope": "scope_a", "required": False},
+            {"scope": "scope_b", "required": False},
+        ]
         assert result["resource_metadata_url"] == (
             "https://api.example.com/.well-known/oauth-protected-resource"
         )
@@ -913,7 +919,7 @@ class TestDiscoverLegacy:
         result = await discovery.discover_legacy("https://api.example.com")
         assert result is not None
         assert result["discovery_method"] == "legacy_host+resource"
-        assert result["scopes_supported"] == ["read"]
+        assert result["scopes"] == [{"scope": "read", "required": False}]
 
     @pytest.mark.anyio
     @respx.mock
@@ -957,7 +963,7 @@ class TestDiscoverLegacy:
         )
         result = await discovery.discover_legacy("https://api.example.com/v1/mcp")
         assert result is not None
-        assert result["scopes_supported"] == ["path_specific"]
+        assert result["scopes"] == [{"scope": "path_specific", "required": False}]
         assert result["resource_metadata_url"] == (
             "https://api.example.com/.well-known/oauth-protected-resource/v1/mcp"
         )

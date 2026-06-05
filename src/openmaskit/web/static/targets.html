@@ -533,28 +533,39 @@
                                 </label>
 
                                 <!-- Multi-select checkboxes (when discovery succeeded) -->
-                                <template x-if="modal.discoveryResult?.scopes_supported && modal.discoveryResult.scopes_supported.length > 0">
-                                    <div class="dcr-scopes-grid">
-                                        <template x-for="scope in modal.discoveryResult.scopes_supported" :key="scope">
-                                            <label class="dcr-scope-checkbox">
-                                                <input type="checkbox"
-                                                       :value="scope"
-                                                       x-model="modal.scopes"
-                                                       class="dcr-checkbox-input">
-                                                <span class="dcr-checkbox-label" x-text="scope"></span>
-                                            </label>
-                                        </template>
+                                <template x-if="dcrAllScopes().length > 0">
+                                    <div>
+                                        <label class="modal-scope-select-all-row">
+                                            <input type="checkbox"
+                                                   :checked="dcrAllNonRequiredSelected()"
+                                                   @change="dcrToggleAllScopes($event.target.checked)">
+                                            <span class="modal-scope-select-all-label">Select all</span>
+                                        </label>
+                                        <div class="modal-scope-list modal-scope-list-grid">
+                                            <template x-for="s in dcrAllScopes()" :key="s.scope">
+                                                <label class="modal-scope-item" :class="{ disabled: s.required }">
+                                                    <input type="checkbox"
+                                                           :value="s.scope"
+                                                           x-model="modal.scopes"
+                                                           :disabled="s.required">
+                                                    <span class="modal-scope-text">
+                                                        <code class="modal-scope-raw" x-text="s.scope"></code>
+                                                    </span>
+                                                    <span x-show="s.required" class="modal-scope-required">required</span>
+                                                </label>
+                                            </template>
+                                        </div>
                                     </div>
                                 </template>
 
                                 <!-- Text input fallback (when no discovery or scopes not available) -->
-                                <template x-if="!modal.discoveryResult?.scopes_supported || modal.discoveryResult.scopes_supported.length === 0">
+                                <template x-if="dcrAllScopes().length === 0">
                                     <input type="text"
                                            class="modal-input dcr-text-input"
                                            placeholder="api, read_user, write_repository"
                                            @input="modal.scopes = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)">
                                 </template>
-                                <p class="dcr-field-hint">Select OAuth scopes for this MCP server</p>
+                                <p class="dcr-field-hint">Required scopes can't be unchecked.</p>
                             </div>
 
                             <!-- Registration Token (Collapsible) -->
@@ -1043,19 +1054,40 @@ function targetsPage() {
                 // Extract and store issuer from discovery result
                 this.modal.issuer = this.modal.discoveryResult.issuer;
 
-                // Populate scopes dropdown
-                if (this.modal.discoveryResult.scopes_supported) {
-                    // Keep existing selections that are still valid
-                    this.modal.scopes = this.modal.scopes.filter(s =>
-                        this.modal.discoveryResult.scopes_supported.includes(s)
-                    );
-                }
+                // Keep existing selections that are still valid; ALWAYS keep required.
+                const all = this.dcrAllScopes();
+                const allTokens = all.map(s => s.scope);
+                const requiredTokens = all.filter(s => s.required).map(s => s.scope);
+                const kept = this.modal.scopes.filter(s => allTokens.includes(s));
+                this.modal.scopes = Array.from(new Set([...kept, ...requiredTokens]));
 
             } catch (error) {
                 this.modal.discoveryError = error.message;
                 this.modal.discoveryResult = null;
             } finally {
                 this.modal.discovering = false;
+            }
+        },
+
+        // ----- Scope picker helpers (DCR section) -----
+
+        dcrAllScopes() {
+            return this.modal.discoveryResult?.scopes || [];
+        },
+
+        dcrAllNonRequiredSelected() {
+            const nonRequired = this.dcrAllScopes().filter(s => !s.required);
+            if (nonRequired.length === 0) return true;
+            return nonRequired.every(s => this.modal.scopes.includes(s.scope));
+        },
+
+        dcrToggleAllScopes(checked) {
+            const all = this.dcrAllScopes();
+            const required = all.filter(s => s.required).map(s => s.scope);
+            if (checked) {
+                this.modal.scopes = all.map(s => s.scope);
+            } else {
+                this.modal.scopes = required;
             }
         },
 

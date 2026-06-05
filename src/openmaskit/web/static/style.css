@@ -4987,6 +4987,30 @@ code {
     letter-spacing: 0.05em;
     align-self: center;
 }
+.modal-scope-select-all-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+    transition: color var(--transition-fast);
+}
+.modal-scope-select-all-row input[type="checkbox"] {
+    accent-color: var(--accent);
+    margin: 0;
+}
+.modal-scope-select-all-row .modal-scope-select-all-label {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.modal-scope-select-all-row:hover .modal-scope-select-all-label {
+    color: var(--accent);
+}
 
 .modal-dcr-status {
     background: var(--bg-input);

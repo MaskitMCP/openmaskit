@@ -380,7 +380,7 @@ class TestUrlTemplating:
         async def fake_discover(url):
             return {
                 "issuer": "https://api.supabase.com",
-                "scopes_supported": ["projects:read"],
+                "scopes": [{"scope": "projects:read", "required": False}],
                 "registration_endpoint": "https://api.supabase.com/oauth/register",
                 "authorization_endpoint": "https://api.supabase.com/oauth/authorize",
                 "token_endpoint": "https://api.supabase.com/oauth/token",
@@ -444,7 +444,7 @@ class TestUrlTemplating:
             captured["url"] = url
             return {
                 "issuer": "https://api.supabase.com",
-                "scopes_supported": ["organizations:read"],
+                "scopes": [{"scope": "organizations:read", "required": False}],
             }
         monkeypatch.setattr(discovery, "discover", fake_discover)
 

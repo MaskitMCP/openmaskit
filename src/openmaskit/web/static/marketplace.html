@@ -297,19 +297,27 @@
                         </div>
                     </div>
 
-                    <template x-if="modal.dcr.discoveredScopes.length > 0">
+                    <template x-if="dcrAllScopes().length > 0">
                         <div class="modal-field">
                             <span class="modal-label">Scopes</span>
-                            <p class="modal-hint">Discovered from the server. Select the ones you want to grant.</p>
+                            <p class="modal-hint">Discovered from the server. Required scopes can't be unchecked.</p>
+                            <label class="modal-scope-select-all-row">
+                                <input type="checkbox"
+                                       :checked="dcrAllNonRequiredSelected()"
+                                       @change="dcrToggleAllScopes($event.target.checked)">
+                                <span class="modal-scope-select-all-label">Select all</span>
+                            </label>
                             <div class="modal-scope-list modal-scope-list-grid">
-                                <template x-for="scope in modal.dcr.discoveredScopes" :key="scope">
-                                    <label class="modal-scope-item">
+                                <template x-for="s in dcrAllScopes()" :key="s.scope">
+                                    <label class="modal-scope-item" :class="{ disabled: s.required }">
                                         <input type="checkbox"
-                                               :value="scope"
-                                               x-model="modal.selectedScopes">
+                                               :value="s.scope"
+                                               x-model="modal.selectedScopes"
+                                               :disabled="s.required">
                                         <span class="modal-scope-text">
-                                            <code class="modal-scope-raw" x-text="scope"></code>
+                                            <code class="modal-scope-raw" x-text="s.scope"></code>
                                         </span>
+                                        <span x-show="s.required" class="modal-scope-required">required</span>
                                     </label>
                                 </template>
                             </div>
@@ -584,7 +592,7 @@ function marketplacePage() {
                 discovering: false,
                 discoveryResult: null,
                 discoveryError: null,
-                discoveredScopes: [],
+                discoveredScopes: [], // [{scope: str, required: bool}, ...]
             },
         },
 
@@ -738,17 +746,42 @@ function marketplacePage() {
                 }
                 const data = await res.json();
                 this.modal.dcr.discoveryResult = data;
-                this.modal.dcr.discoveredScopes = data.scopes_supported || [];
-                // Keep prior selections that are still valid; otherwise none selected.
-                this.modal.selectedScopes = this.modal.selectedScopes.filter(s =>
-                    this.modal.dcr.discoveredScopes.includes(s)
-                );
+                this.modal.dcr.discoveredScopes = data.scopes || [];
+                // Keep prior selections that are still valid; ALWAYS keep required.
+                const allTokens = this.modal.dcr.discoveredScopes.map(s => s.scope);
+                const requiredTokens = this.modal.dcr.discoveredScopes
+                    .filter(s => s.required).map(s => s.scope);
+                const kept = this.modal.selectedScopes.filter(s => allTokens.includes(s));
+                this.modal.selectedScopes = Array.from(new Set([...kept, ...requiredTokens]));
             } catch (e) {
                 this.modal.dcr.discoveryError = e.message || 'Discovery failed';
                 this.modal.dcr.discoveryResult = null;
                 this.modal.dcr.discoveredScopes = [];
             } finally {
                 this.modal.dcr.discovering = false;
+            }
+        },
+
+        // ----- Scope picker helpers (shared by DCR section template) -----
+
+        dcrAllScopes() {
+            return this.modal.dcr.discoveredScopes || [];
+        },
+
+        dcrAllNonRequiredSelected() {
+            const nonRequired = this.dcrAllScopes().filter(s => !s.required);
+            if (nonRequired.length === 0) return true;
+            return nonRequired.every(s => this.modal.selectedScopes.includes(s.scope));
+        },
+
+        dcrToggleAllScopes(checked) {
+            const all = this.dcrAllScopes();
+            const required = all.filter(s => s.required).map(s => s.scope);
+            if (checked) {
+                this.modal.selectedScopes = all.map(s => s.scope);
+            } else {
+                // Uncheck non-required; required stay locked-on.
+                this.modal.selectedScopes = required;
             }
         },
 

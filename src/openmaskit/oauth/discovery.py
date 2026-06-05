@@ -293,35 +293,32 @@ async def discover_via_mcp_probe(mcp_url: str) -> dict | None:
     if not server_meta:
         return None
 
-    # `scopes_supported` and `scopes_required` are semantically distinct
-    # and we surface them as separate fields:
-    #
-    # - `scopes_supported`: PRM `scopes_supported` (the catalog of scopes
-    #   that the resource accepts) → falls back to WWW-Auth scope when PRM
-    #   omits the list → falls back to AS-wide `scopes_supported`. This is
-    #   what the install picker should render as the menu.
-    # - `scopes_required`: WWW-Auth `scope` per RFC 6750 §3 (minimum scopes
-    #   the resource says are required to access it). The install picker
-    #   should pre-check + lock these. Empty list when WWW-Auth omits scope.
-    scopes_supported = (
+    # Unified scope list: every entry is `{"scope": str, "required": bool}`.
+    # `required` is True iff WWW-Auth `scope` (RFC 6750 §3) lists the token.
+    # Source order: PRM-derived first (preserves PRM order), then any
+    # required-but-not-in-supported tokens appended (the defensive case).
+    supported_list = (
         prm.get("scopes_supported")
         or www_auth_scopes
         or server_meta.get("scopes_supported")
         or []
     )
-    scopes_required = list(www_auth_scopes) if www_auth_scopes else []
+    required_set = set(www_auth_scopes or [])
 
-    # Defensive: a required scope not in the supported menu is malformed
-    # (required should be a subset of supported), but the spec doesn't
-    # forbid it. Log so we have a diagnostic when a server is misconfigured.
-    if scopes_required:
-        extras = [s for s in scopes_required if s not in scopes_supported]
-        if extras:
-            logger.warning(
-                f"WWW-Authenticate scope tokens {extras!r} are not in PRM "
-                f"scopes_supported for {mcp_url}; server may be misconfigured. "
-                f"Surfacing them as required regardless."
-            )
+    scopes: list[dict] = []
+    seen: set[str] = set()
+    for s in supported_list:
+        if s in seen:
+            continue
+        seen.add(s)
+        scopes.append({"scope": s, "required": s in required_set})
+    # Defensive: required ⊄ supported is malformed but legal. Append the
+    # stragglers at the end so the picker still locks them.
+    for s in www_auth_scopes or []:
+        if s in seen:
+            continue
+        seen.add(s)
+        scopes.append({"scope": s, "required": True})
 
     return {
         "issuer": server_meta.get("issuer", issuer),
@@ -329,8 +326,7 @@ async def discover_via_mcp_probe(mcp_url: str) -> dict | None:
         "authorization_endpoint": server_meta.get("authorization_endpoint"),
         "token_endpoint": server_meta.get("token_endpoint"),
         "registration_endpoint": server_meta.get("registration_endpoint"),
-        "scopes_supported": scopes_supported,
-        "scopes_required": scopes_required,
+        "scopes": scopes,
         "resource": prm.get("resource"),
         "resource_metadata_url": prm_url,
         "discovery_method": "mcp_probe",
@@ -371,11 +367,13 @@ async def discover_legacy(mcp_url: str) -> dict | None:
         if prm:
             prm_url = candidate
 
-    scopes = (
+    supported_list = (
         (prm.get("scopes_supported") if prm else None)
         or server_meta.get("scopes_supported")
         or []
     )
+    # Legacy flow never probes WWW-Authenticate, so nothing is `required`.
+    scopes = [{"scope": s, "required": False} for s in supported_list]
 
     return {
         "issuer": server_meta.get("issuer", issuer),
@@ -383,9 +381,7 @@ async def discover_legacy(mcp_url: str) -> dict | None:
         "authorization_endpoint": server_meta.get("authorization_endpoint"),
         "token_endpoint": server_meta.get("token_endpoint"),
         "registration_endpoint": server_meta.get("registration_endpoint"),
-        "scopes_supported": scopes,
-        # No WWW-Authenticate probe in legacy flow → no required signal.
-        "scopes_required": [],
+        "scopes": scopes,
         "resource": prm.get("resource") if prm else None,
         "resource_metadata_url": prm_url,
         "discovery_method": "legacy_host" + ("+resource" if prm else ""),
