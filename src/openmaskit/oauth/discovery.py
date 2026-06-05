@@ -35,6 +35,16 @@ _RESOURCE_METADATA_RE = re.compile(
     re.IGNORECASE,
 )
 
+# RFC 6750 §3: WWW-Authenticate may carry a `scope` attribute listing the
+# scopes required for the resource. Value grammar is RFC 6749 §3.3:
+# space-delimited, case-sensitive tokens. The attribute name is
+# case-insensitive (RFC 7235); the *value* is case-sensitive and preserved
+# verbatim by the regex (IGNORECASE only affects matching, not capture).
+_SCOPE_RE = re.compile(
+    r'scope\s*=\s*(?:"([^"]*)"|([^\s,]+))',
+    re.IGNORECASE,
+)
+
 
 def issuer_matches(requested: str, claimed: str | None) -> bool:
     """RFC 8414 §3.3 issuer-identity check.
@@ -84,18 +94,44 @@ def extract_resource_metadata_url(www_authenticate: str) -> str | None:
     return m.group(1) or m.group(2)
 
 
-async def probe_mcp_for_resource_metadata(
+def extract_scope_from_www_authenticate(www_authenticate: str) -> list[str] | None:
+    """Return scope tokens from a WWW-Authenticate header, or None if absent.
+
+    Per RFC 6749 §3.3, scope values are space-delimited, case-sensitive
+    tokens. Per RFC 6750 §3, an MCP / OAuth resource server SHOULD include
+    this attribute on a 401 to indicate which scopes the access token must
+    cover for this request. Returns None when the attribute is absent so the
+    caller can distinguish "no signal" from "signal saying no scopes".
+    """
+    if not www_authenticate:
+        return None
+    m = _SCOPE_RE.search(www_authenticate)
+    if not m:
+        return None
+    value = m.group(1) if m.group(1) is not None else m.group(2)
+    if not value:
+        return []
+    return value.split()
+
+
+async def probe_mcp_for_www_authenticate(
     mcp_url: str, timeout: float = DEFAULT_TIMEOUT
-) -> str | None:
-    """Probe the MCP URL and return its advertised resource_metadata URL.
+) -> tuple[str | None, list[str] | None]:
+    """Probe the MCP URL and return the bits we care about from WWW-Authenticate.
 
     Tries GET first (cheap, no body), then falls back to a POST initialize
     JSON-RPC request, since some MCP servers only run the auth filter on
     POSTs that look like protocol traffic.
 
-    Returns the URL exactly as the server emitted it — preserving any query
-    string (Supabase encodes its `project_ref` here, and the query is part
-    of the resource identifier).
+    Returns `(resource_metadata_url, scope_tokens)`:
+    - `resource_metadata_url` is the URL exactly as the server emitted it —
+      preserving any query string (Supabase encodes its `project_ref` here,
+      and the query is part of the resource identifier).
+    - `scope_tokens` is the parsed RFC 6749 §3.3 token list from the `scope`
+      attribute if present, else None.
+
+    Returns `(None, None)` if the probe never sees a 401, or if neither
+    attribute is present on the 401 we do see.
     """
     headers = {"Accept": "application/json, text/event-stream"}
 
@@ -104,11 +140,11 @@ async def probe_mcp_for_resource_metadata(
         try:
             resp = await client.get(mcp_url, headers=headers)
             if resp.status_code == 401:
-                url = extract_resource_metadata_url(
-                    resp.headers.get("WWW-Authenticate", "")
-                )
-                if url:
-                    return url
+                header = resp.headers.get("WWW-Authenticate", "")
+                url = extract_resource_metadata_url(header)
+                scopes = extract_scope_from_www_authenticate(header)
+                if url or scopes is not None:
+                    return url, scopes
         except httpx.HTTPError as e:
             logger.debug(f"GET probe of {mcp_url} failed: {e}")
 
@@ -130,15 +166,15 @@ async def probe_mcp_for_resource_metadata(
                 headers={**headers, "Content-Type": "application/json"},
             )
             if resp.status_code == 401:
-                url = extract_resource_metadata_url(
-                    resp.headers.get("WWW-Authenticate", "")
-                )
-                if url:
-                    return url
+                header = resp.headers.get("WWW-Authenticate", "")
+                url = extract_resource_metadata_url(header)
+                scopes = extract_scope_from_www_authenticate(header)
+                if url or scopes is not None:
+                    return url, scopes
         except httpx.HTTPError as e:
             logger.debug(f"POST probe of {mcp_url} failed: {e}")
 
-    return None
+    return None, None
 
 
 async def fetch_protected_resource_metadata(
@@ -232,7 +268,7 @@ async def discover_via_mcp_probe(mcp_url: str) -> dict | None:
     Returns None if any step fails — caller can then fall back to
     `discover_legacy`.
     """
-    prm_url = await probe_mcp_for_resource_metadata(mcp_url)
+    prm_url, www_auth_scopes = await probe_mcp_for_www_authenticate(mcp_url)
     if not prm_url:
         return None
 
@@ -257,9 +293,20 @@ async def discover_via_mcp_probe(mcp_url: str) -> dict | None:
     if not server_meta:
         return None
 
-    # PRM is the source of truth for scopes (resource-specific). Fall back to
-    # AS metadata only if PRM didn't list any.
-    scopes = prm.get("scopes_supported") or server_meta.get("scopes_supported") or []
+    # Scope priority: RFC 6750 §3 `scope` attribute from the 401 challenge
+    # (the MCP spec frames this as "the scopes required for accessing the
+    # resource" — most direct, live, and resource-specific) → PRM
+    # `scopes_supported` (broader catalog of scopes used at this resource) →
+    # AS-wide `scopes_supported` (least specific) → empty list as last
+    # resort. WWW-Authenticate wins because when the server bothers to emit
+    # it, the MCP spec says it's the authoritative signal of what the client
+    # actually needs.
+    scopes = (
+        www_auth_scopes
+        or prm.get("scopes_supported")
+        or server_meta.get("scopes_supported")
+        or []
+    )
 
     return {
         "issuer": server_meta.get("issuer", issuer),

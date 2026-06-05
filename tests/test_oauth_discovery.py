@@ -43,7 +43,77 @@ class TestExtractResourceMetadata:
         assert discovery.extract_resource_metadata_url(None) is None  # type: ignore[arg-type]
 
 
-class TestProbeMcpForResourceMetadata:
+class TestExtractScopeFromWwwAuthenticate:
+    def test_quoted_multi_token(self):
+        header = 'Bearer scope="read write admin"'
+        assert discovery.extract_scope_from_www_authenticate(header) == [
+            "read",
+            "write",
+            "admin",
+        ]
+
+    def test_quoted_single_token(self):
+        header = 'Bearer scope="admin"'
+        assert discovery.extract_scope_from_www_authenticate(header) == ["admin"]
+
+    def test_unquoted_single_token(self):
+        # RFC 6749 §3.3 token grammar permits unquoted single tokens — no
+        # whitespace allowed in the value, so unquoted forms are rare but legal.
+        header = "Bearer scope=read"
+        assert discovery.extract_scope_from_www_authenticate(header) == ["read"]
+
+    def test_scope_before_other_params(self):
+        header = 'Bearer scope="a b", error="invalid_token"'
+        assert discovery.extract_scope_from_www_authenticate(header) == ["a", "b"]
+
+    def test_scope_after_other_params(self):
+        header = 'Bearer error="invalid_token", resource_metadata="https://x/prm", scope="a b"'
+        assert discovery.extract_scope_from_www_authenticate(header) == ["a", "b"]
+
+    def test_param_name_is_case_insensitive(self):
+        # RFC 7235 §2.1: auth-param name is case-insensitive.
+        assert discovery.extract_scope_from_www_authenticate(
+            'Bearer Scope="read"'
+        ) == ["read"]
+        assert discovery.extract_scope_from_www_authenticate(
+            'Bearer SCOPE="read"'
+        ) == ["read"]
+
+    def test_value_case_preserved(self):
+        # RFC 6749 §3.3: scope values are case-sensitive — must not lowercase.
+        header = 'Bearer scope="Read Write"'
+        assert discovery.extract_scope_from_www_authenticate(header) == [
+            "Read",
+            "Write",
+        ]
+
+    def test_multiple_spaces_between_tokens(self):
+        # Defensive: strictly RFC 6749 says single SP, but real servers
+        # sometimes emit multiple. `.split()` handles both transparently.
+        header = 'Bearer scope="read   write"'
+        assert discovery.extract_scope_from_www_authenticate(header) == [
+            "read",
+            "write",
+        ]
+
+    def test_empty_quoted_value(self):
+        # `scope=""` is present-but-empty; distinct from absent.
+        assert discovery.extract_scope_from_www_authenticate('Bearer scope=""') == []
+
+    def test_returns_none_when_absent(self):
+        assert (
+            discovery.extract_scope_from_www_authenticate(
+                'Bearer realm="x", resource_metadata="https://x/prm"'
+            )
+            is None
+        )
+
+    def test_returns_none_for_empty_header(self):
+        assert discovery.extract_scope_from_www_authenticate("") is None
+        assert discovery.extract_scope_from_www_authenticate(None) is None  # type: ignore[arg-type]
+
+
+class TestProbeMcpForWwwAuthenticate:
     @pytest.mark.anyio
     @respx.mock
     async def test_get_returns_401_with_resource_metadata(self):
@@ -55,8 +125,11 @@ class TestProbeMcpForResourceMetadata:
                 },
             )
         )
-        url = await discovery.probe_mcp_for_resource_metadata("https://mcp.example.com/mcp")
+        url, scopes = await discovery.probe_mcp_for_www_authenticate(
+            "https://mcp.example.com/mcp"
+        )
         assert url == "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
+        assert scopes is None
 
     @pytest.mark.anyio
     @respx.mock
@@ -69,8 +142,11 @@ class TestProbeMcpForResourceMetadata:
                 },
             )
         )
-        url = await discovery.probe_mcp_for_resource_metadata("https://mcp.supabase.com/mcp")
+        url, scopes = await discovery.probe_mcp_for_www_authenticate(
+            "https://mcp.supabase.com/mcp"
+        )
         assert url == "https://mcp.supabase.com/.well-known/oauth-protected-resource/mcp?project_ref=abc"
+        assert scopes is None
 
     @pytest.mark.anyio
     @respx.mock
@@ -84,24 +160,69 @@ class TestProbeMcpForResourceMetadata:
                 },
             )
         )
-        url = await discovery.probe_mcp_for_resource_metadata("https://mcp.example.com/mcp")
+        url, scopes = await discovery.probe_mcp_for_www_authenticate(
+            "https://mcp.example.com/mcp"
+        )
         assert url == "https://mcp.example.com/prm"
+        assert scopes is None
 
     @pytest.mark.anyio
     @respx.mock
     async def test_returns_none_when_no_www_authenticate(self):
         respx.get("https://mcp.example.com/mcp").mock(return_value=httpx.Response(200))
         respx.post("https://mcp.example.com/mcp").mock(return_value=httpx.Response(200))
-        url = await discovery.probe_mcp_for_resource_metadata("https://mcp.example.com/mcp")
+        url, scopes = await discovery.probe_mcp_for_www_authenticate(
+            "https://mcp.example.com/mcp"
+        )
         assert url is None
+        assert scopes is None
 
     @pytest.mark.anyio
     @respx.mock
     async def test_returns_none_on_network_error(self):
         respx.get("https://nope.example.com/mcp").mock(side_effect=httpx.ConnectError("boom"))
         respx.post("https://nope.example.com/mcp").mock(side_effect=httpx.ConnectError("boom"))
-        url = await discovery.probe_mcp_for_resource_metadata("https://nope.example.com/mcp")
+        url, scopes = await discovery.probe_mcp_for_www_authenticate(
+            "https://nope.example.com/mcp"
+        )
         assert url is None
+        assert scopes is None
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_extracts_both_prm_url_and_scope_from_same_challenge(self):
+        respx.get("https://mcp.example.com/mcp").mock(
+            return_value=httpx.Response(
+                401,
+                headers={
+                    "WWW-Authenticate": (
+                        'Bearer resource_metadata="https://mcp.example.com/prm", '
+                        'scope="read write"'
+                    )
+                },
+            )
+        )
+        url, scopes = await discovery.probe_mcp_for_www_authenticate(
+            "https://mcp.example.com/mcp"
+        )
+        assert url == "https://mcp.example.com/prm"
+        assert scopes == ["read", "write"]
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_returns_scope_only_when_prm_absent(self):
+        """Server emits `scope` but no `resource_metadata` — still useful."""
+        respx.get("https://mcp.example.com/mcp").mock(
+            return_value=httpx.Response(
+                401,
+                headers={"WWW-Authenticate": 'Bearer scope="read"'},
+            )
+        )
+        url, scopes = await discovery.probe_mcp_for_www_authenticate(
+            "https://mcp.example.com/mcp"
+        )
+        assert url is None
+        assert scopes == ["read"]
 
 
 class TestIssuerMatches:
@@ -475,6 +596,140 @@ class TestDiscoverViaMcpProbe:
         respx.post("https://mcp.example.com/mcp").mock(return_value=httpx.Response(200))
         result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
         assert result is None
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_www_authenticate_scope_used_when_prm_omits_scopes(self):
+        """RFC 6750 §3 `scope` fills in when PRM has no `scopes_supported`."""
+        respx.get("https://mcp.example.com/mcp").mock(
+            return_value=httpx.Response(
+                401,
+                headers={
+                    "WWW-Authenticate": (
+                        'Bearer resource_metadata="https://mcp.example.com/prm", '
+                        'scope="repo:read repo:write"'
+                    )
+                },
+            )
+        )
+        respx.get("https://mcp.example.com/prm").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://mcp.example.com/mcp",
+                    "authorization_servers": ["https://api.example.com"],
+                    # No `scopes_supported` — this is the gap WWW-Auth fills.
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "issuer": "https://api.example.com",
+                    "authorization_endpoint": "https://api.example.com/authorize",
+                    "token_endpoint": "https://api.example.com/token",
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+
+        result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
+        assert result is not None
+        assert result["scopes_supported"] == ["repo:read", "repo:write"]
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_www_authenticate_scope_takes_priority_over_prm(self):
+        """When both signals exist, WWW-Authenticate wins per MCP spec wording.
+
+        The challenge's `scope` is the server's direct statement of "what
+        you need to access this resource right now"; PRM `scopes_supported`
+        is a broader catalog. The MCP spec frames the challenge value as
+        authoritative.
+        """
+        respx.get("https://mcp.example.com/mcp").mock(
+            return_value=httpx.Response(
+                401,
+                headers={
+                    "WWW-Authenticate": (
+                        'Bearer resource_metadata="https://mcp.example.com/prm", '
+                        'scope="from_www_auth"'
+                    )
+                },
+            )
+        )
+        respx.get("https://mcp.example.com/prm").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://mcp.example.com/mcp",
+                    "authorization_servers": ["https://api.example.com"],
+                    "scopes_supported": ["from_prm"],
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "issuer": "https://api.example.com",
+                    "authorization_endpoint": "https://api.example.com/authorize",
+                    "token_endpoint": "https://api.example.com/token",
+                    "scopes_supported": ["from_as"],
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+
+        result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
+        assert result is not None
+        assert result["scopes_supported"] == ["from_www_auth"]
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_prm_scopes_used_when_www_authenticate_omits_scope(self):
+        """No `scope` in the challenge → PRM `scopes_supported` is the source."""
+        respx.get("https://mcp.example.com/mcp").mock(
+            return_value=httpx.Response(
+                401,
+                headers={
+                    "WWW-Authenticate": 'Bearer resource_metadata="https://mcp.example.com/prm"'
+                },
+            )
+        )
+        respx.get("https://mcp.example.com/prm").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://mcp.example.com/mcp",
+                    "authorization_servers": ["https://api.example.com"],
+                    "scopes_supported": ["from_prm"],
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "issuer": "https://api.example.com",
+                    "authorization_endpoint": "https://api.example.com/authorize",
+                    "token_endpoint": "https://api.example.com/token",
+                    "scopes_supported": ["from_as"],
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+
+        result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
+        assert result is not None
+        assert result["scopes_supported"] == ["from_prm"]
 
 
 class TestDiscoverLegacy:
