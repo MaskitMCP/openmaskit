@@ -29,6 +29,27 @@ async def hidden_tools_toggle(request: Request):
     if not tool_name:
         return JSONResponse({"error": "tool_name is required"}, status_code=400)
 
+    # When hiding, the supplied name must exact-match a tool the upstream
+    # advertises. MCP tool names are case-sensitive identifiers, and the
+    # runtime hidden-tool gate in proxy/core does a literal set lookup; if we
+    # accepted, say, "FooBar" while the actual tool is "foobar", the user
+    # would see a green confirmation while the dangerous tool stayed
+    # callable. Unhiding is always allowed so a tool removed from the
+    # upstream can still be cleaned out of the persisted set.
+    if hidden:
+        known_names = {t.get("name") for t in target.tool_schemas}
+        if tool_name not in known_names:
+            return JSONResponse(
+                {
+                    "error": "unknown_tool",
+                    "message": (
+                        f"Tool {tool_name!r} is not advertised by target "
+                        f"{target_name!r}. Tool names are case-sensitive."
+                    ),
+                },
+                status_code=400,
+            )
+
     store = state.store
     if hidden:
         await store.hide_tool(tool_name, target_name=target_name)

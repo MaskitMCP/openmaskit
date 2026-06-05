@@ -202,12 +202,8 @@ class TrafficStore:
             masked_args,
             masked_resp,
         ) = row
-        unmasked_args = (
-            self._enc.decrypt_bytes(args_enc).decode() if args_enc is not None else None
-        )
-        unmasked_response = (
-            self._enc.decrypt_bytes(resp_enc).decode() if resp_enc is not None else None
-        )
+        unmasked_args = self._safe_decrypt(args_enc, id_, "args")
+        unmasked_response = self._safe_decrypt(resp_enc, id_, "response")
         return TrafficEntry(
             id=id_,
             ts=ts,
@@ -221,3 +217,24 @@ class TrafficStore:
             masked_args=masked_args,
             masked_response=masked_resp,
         )
+
+    def _safe_decrypt(self, blob: bytes | None, row_id: int, field: str) -> str | None:
+        """Decrypt one of the Fernet-encrypted traffic columns, returning
+        ``None`` on either an absent column or a decryption failure.
+
+        Without this, one undecryptable row (Fernet key change, partial
+        corruption) used to raise out of the listing query and break the
+        entire traffic page. Logging the row id makes the bad row findable.
+        """
+        if blob is None:
+            return None
+        try:
+            return self._enc.decrypt_bytes(blob).decode()
+        except Exception as exc:
+            logger.warning(
+                "Traffic row %d: failed to decrypt %s column: %s",
+                row_id,
+                field,
+                exc,
+            )
+            return None

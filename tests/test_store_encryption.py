@@ -15,7 +15,7 @@ import aiosqlite
 import pytest
 import pytest_asyncio
 
-from openmaskit.masking.store import ConfigDecryptionError, MaskingStore
+from openmaskit.masking.store import MaskingStore
 
 
 @pytest_asyncio.fixture
@@ -125,19 +125,24 @@ class TestEncryptionAtRest:
         assert record["config"]["command"] == "new"
 
     @pytest.mark.anyio
-    async def test_corrupt_blob_raises_configdecryption_error(self, store):
+    async def test_corrupt_blob_surfaces_as_none_config(self, store):
+        """A corrupted (or key-rotated) blob used to raise out of every list
+        query and break the Servers page. ``get_server`` now returns the row
+        with ``config=None`` so the dashboard stays loadable and the user can
+        uninstall the broken row."""
         await store.install_server(
             "x", "X", {"transport": "stdio", "command": "uvx"}
         )
-        # Tamper with the blob: flip enough bytes that Fernet's HMAC rejects it.
         await store._db.execute(
             "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
             (b"not-a-real-fernet-token", "x"),
         )
         await store._db.commit()
 
-        with pytest.raises(ConfigDecryptionError):
-            await store.get_server("x")
+        record = await store.get_server("x")
+        assert record is not None
+        assert record["id"] == "x"
+        assert record["config"] is None
 
     @pytest.mark.anyio
     async def test_get_server_missing_returns_none_not_error(self, store):

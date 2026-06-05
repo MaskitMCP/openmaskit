@@ -29,6 +29,20 @@ async def tool_detail_page(request: Request):
     return FileResponse(STATIC_DIR / "tool_detail.html")
 
 
+async def api_csrf(request: Request):
+    """Return the per-process CSRF token to the dashboard JS.
+
+    Gated by ``OriginMiddleware``: a malicious page in the user's browser can
+    only fetch this endpoint cross-origin if its ``Origin`` is in the dashboard
+    allow-list, which by construction it isn't. CLI / curl callers can read it
+    too — that's fine, they're already same-machine.
+    """
+    token = getattr(request.app.state, "csrf_token", None)
+    if not token:
+        return JSONResponse({"error": "csrf_unavailable"}, status_code=500)
+    return JSONResponse({"token": token})
+
+
 async def api_config(request: Request):
     state = request.app.state.proxy_state
     vs = state.version_status or {}
@@ -77,9 +91,13 @@ async def api_targets(request: Request):
             "config": server_record["config"] if server_record else None,
         })
 
-    # Then, add inactive servers from database that aren't in state.targets
+    # Then, add inactive servers from database that aren't in state.targets.
+    # We include any row not in state.targets, even if the DB still marks it
+    # active — a row that's "active in DB but not connected" is an orphan
+    # (failed startup reconnect, undecryptable config, etc.) and the user
+    # needs to see it to act on it.
     for server in db_servers:
-        if server["id"] not in seen_ids and not server["active"]:
+        if server["id"] not in seen_ids:
             targets.append({
                 "name": server["id"],
                 "display_name": server["name"],
@@ -133,17 +151,27 @@ async def api_tools_call(request: Request):
     )
     session_msg = SessionMessage(message=JSONRPCMessage(root=rpc_request))
 
+    # try/finally guarantees collect() runs even if send() raises or the
+    # task is cancelled — otherwise the waiter sits in _waiters until the
+    # background eviction loop catches it.
     event = await target.response_dispatcher.register(request_id)
-    await target.ds_read_send.send(session_msg)
-
+    response_msg = None
+    timed_out = False
     try:
-        with anyio.fail_after(60):
-            await event.wait()
-    except TimeoutError:
-        await target.response_dispatcher.collect(request_id)
-        return JSONResponse({"error": "Timeout waiting for response"}, status_code=504)
+        await target.ds_read_send.send(session_msg)
+        try:
+            with anyio.fail_after(60):
+                await event.wait()
+        except TimeoutError:
+            timed_out = True
+    finally:
+        # Shield the cleanup so parent-scope cancellation can't interrupt
+        # collect() and leave the waiter dangling.
+        with anyio.CancelScope(shield=True):
+            response_msg = await target.response_dispatcher.collect(request_id)
 
-    response_msg = await target.response_dispatcher.collect(request_id)
+    if timed_out:
+        return JSONResponse({"error": "Timeout waiting for response"}, status_code=504)
     if response_msg is None:
         return JSONResponse({"error": "No response received"}, status_code=500)
 

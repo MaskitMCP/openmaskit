@@ -1,5 +1,6 @@
 """Tests for the masking store."""
 
+import aiosqlite
 import pytest
 
 from openmaskit.masking.rules import MaskingRule
@@ -398,3 +399,229 @@ class TestAtomicAliasGeneration:
         assert len(set(counters)) == 100, "All counters should be unique"
         # Note: we don't require sequential counters (1-100) under high concurrency
         # The important guarantee is uniqueness and correct value mapping
+
+
+class TestStorePragmas:
+    @pytest.mark.anyio
+    async def test_wal_mode_enabled(self, store):
+        """store.db should run in WAL mode to match traffic.db; the alias flush
+        loop and dashboard CRUD writes overlap, and rollback-journal mode
+        serializes them."""
+        cursor = await store._db.execute("PRAGMA journal_mode")
+        row = await cursor.fetchone()
+        assert row[0].lower() == "wal"
+
+    @pytest.mark.anyio
+    async def test_synchronous_normal(self, store):
+        cursor = await store._db.execute("PRAGMA synchronous")
+        row = await cursor.fetchone()
+        # SQLite reports synchronous as int: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA
+        assert row[0] == 1
+
+
+class TestPerTargetAliasNamespace:
+    """Aliases are unique per (target_name, alias), not globally.
+
+    Before the composite-PK migration, two targets that shared an alias prefix
+    would collide on INSERT and the second target's row was silently rejected.
+    """
+
+    @pytest.mark.anyio
+    async def test_same_alias_in_two_targets_persists(self, store):
+        """Both targets can independently hold 'host_1' for different values."""
+        a = await store.get_or_create_alias("prod-a.com", "tool", "host", "host", target_name="targetA")
+        b = await store.get_or_create_alias("prod-b.com", "tool", "host", "host", target_name="targetB")
+        assert a == "host_1"
+        assert b == "host_1"
+
+        # And the rows survive together.
+        mappings_a = await store.get_all_mappings(target_name="targetA")
+        mappings_b = await store.get_all_mappings(target_name="targetB")
+        assert len(mappings_a) == 1 and mappings_a[0]["real_value"] == "prod-a.com"
+        assert len(mappings_b) == 1 and mappings_b[0]["real_value"] == "prod-b.com"
+
+    @pytest.mark.anyio
+    async def test_resolve_alias_target_scoped(self, store):
+        await store.get_or_create_alias("prod-a.com", "tool", "host", "host", target_name="targetA")
+        await store.get_or_create_alias("prod-b.com", "tool", "host", "host", target_name="targetB")
+        assert await store.resolve_alias("host_1", target_name="targetA") == "prod-a.com"
+        assert await store.resolve_alias("host_1", target_name="targetB") == "prod-b.com"
+
+    @pytest.mark.anyio
+    async def test_per_target_counter_does_not_leak(self, store):
+        """Target A's counter advances don't push target B's counter forward."""
+        await store.get_or_create_alias("a1", "tool", "host", "host", target_name="targetA")
+        await store.get_or_create_alias("a2", "tool", "host", "host", target_name="targetA")
+        await store.get_or_create_alias("a3", "tool", "host", "host", target_name="targetA")
+        first_b = await store.get_or_create_alias("b1", "tool", "host", "host", target_name="targetB")
+        assert first_b == "host_1"
+
+    @pytest.mark.anyio
+    async def test_counters_reload_per_target_on_restart(self, tmp_path):
+        db_path = tmp_path / "per_target.db"
+
+        s1 = await MaskingStore.create(db_path)
+        await s1.get_or_create_alias("a1", "tool", "host", "host", target_name="A")
+        await s1.get_or_create_alias("a2", "tool", "host", "host", target_name="A")
+        await s1.get_or_create_alias("b1", "tool", "host", "host", target_name="B")
+        await s1.close()
+
+        s2 = await MaskingStore.create(db_path)
+        try:
+            next_a = await s2.get_or_create_alias("a3", "tool", "host", "host", target_name="A")
+            next_b = await s2.get_or_create_alias("b2", "tool", "host", "host", target_name="B")
+            assert next_a == "host_3"
+            assert next_b == "host_2"
+        finally:
+            await s2.close()
+
+
+class TestPersistAlias:
+    """``persist_alias`` writes the engine-minted alias verbatim."""
+
+    @pytest.mark.anyio
+    async def test_persist_stores_engine_chosen_alias(self, store):
+        await store.persist_alias("targetA", "host_42", "prod.example", "tool", "host")
+        assert await store.resolve_alias("host_42", target_name="targetA") == "prod.example"
+
+    @pytest.mark.anyio
+    async def test_persist_is_idempotent(self, store):
+        await store.persist_alias("targetA", "host_1", "prod.example", "tool", "host")
+        # Repeating the same call must not raise — INSERT OR IGNORE.
+        await store.persist_alias("targetA", "host_1", "prod.example", "tool", "host")
+        mappings = await store.get_all_mappings(target_name="targetA")
+        assert len(mappings) == 1
+
+    @pytest.mark.anyio
+    async def test_persist_keeps_counter_in_sync(self, store):
+        """A subsequent get_or_create_alias must not re-mint a persisted alias."""
+        await store.persist_alias("targetA", "host_5", "prod.example", "tool", "host")
+        a = await store.get_or_create_alias("new.example", "tool", "host", "host", target_name="targetA")
+        assert a == "host_6"
+
+    @pytest.mark.anyio
+    async def test_persist_does_not_overwrite_existing_value(self, store):
+        await store.persist_alias("targetA", "host_1", "first.example", "tool", "host")
+        await store.persist_alias("targetA", "host_1", "second.example", "tool", "host")
+        # First write wins — resolves to first.example, not second.
+        assert await store.resolve_alias("host_1", target_name="targetA") == "first.example"
+
+
+class TestMappingsPkMigration:
+    """Migration from the old PRIMARY KEY (alias) shape to (target_name, alias)."""
+
+    @pytest.mark.anyio
+    async def test_migration_rebuilds_pk_and_preserves_rows(self, tmp_path):
+        db_path = tmp_path / "legacy.db"
+
+        # Manually create a DB with the OLD schema and seed two rows.
+        legacy_db = await aiosqlite.connect(str(db_path))
+        try:
+            await legacy_db.executescript(
+                """
+                CREATE TABLE mappings (
+                    alias TEXT PRIMARY KEY,
+                    real_value TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    field_path TEXT NOT NULL,
+                    target_name TEXT NOT NULL DEFAULT 'default',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            await legacy_db.execute(
+                "INSERT INTO mappings (alias, real_value, tool_name, field_path, target_name) VALUES (?, ?, ?, ?, ?)",
+                ("host_1", "prod-a.com", "tool", "host", "targetA"),
+            )
+            await legacy_db.execute(
+                "INSERT INTO mappings (alias, real_value, tool_name, field_path, target_name) VALUES (?, ?, ?, ?, ?)",
+                ("host_2", "prod-b.com", "tool", "host", "targetB"),
+            )
+            await legacy_db.commit()
+        finally:
+            await legacy_db.close()
+
+        # Now open via MaskingStore — _migrate runs and rebuilds the PK.
+        store = await MaskingStore.create(db_path)
+        try:
+            assert await store._mappings_pk_is_composite()
+            # Both rows survived under their respective targets.
+            mappings_a = await store.get_all_mappings(target_name="targetA")
+            mappings_b = await store.get_all_mappings(target_name="targetB")
+            assert {m["real_value"] for m in mappings_a} == {"prod-a.com"}
+            assert {m["real_value"] for m in mappings_b} == {"prod-b.com"}
+            # And after migration, the previously-impossible cross-target
+            # collision is allowed.
+            await store.persist_alias("targetB", "host_1", "prod-b-extra.com", "tool", "host")
+            assert await store.resolve_alias("host_1", target_name="targetA") == "prod-a.com"
+            assert await store.resolve_alias("host_1", target_name="targetB") == "prod-b-extra.com"
+        finally:
+            await store.close()
+
+    @pytest.mark.anyio
+    async def test_migration_is_idempotent(self, tmp_path):
+        """Reopening a migrated DB does not re-migrate."""
+        db_path = tmp_path / "twice.db"
+        s1 = await MaskingStore.create(db_path)
+        await s1.get_or_create_alias("v", "t", "f", "p", target_name="A")
+        await s1.close()
+        # Reopen — _migrate_mappings_pk should detect composite PK and no-op.
+        s2 = await MaskingStore.create(db_path)
+        try:
+            assert await s2._mappings_pk_is_composite()
+            rows = await s2.get_all_mappings(target_name="A")
+            assert len(rows) == 1
+        finally:
+            await s2.close()
+
+
+class TestServerConfigDecryptFail:
+    """A single undecryptable config_enc row used to raise out of the list
+    queries and break the entire Servers page; verify it now surfaces as
+    ``config=None`` and other rows still come through."""
+
+    @pytest.mark.anyio
+    async def test_get_installed_servers_handles_bad_row(self, store):
+        await store.install_server("good", "Good", {"transport": "http", "url": "http://x"})
+        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
+        # Corrupt the bad row's config_enc blob.
+        await store._db.execute(
+            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
+            (b"not-a-valid-fernet-blob", "bad"),
+        )
+        await store._db.commit()
+
+        rows = await store.get_installed_servers()
+        by_id = {r["id"]: r for r in rows}
+        assert by_id["good"]["config"] == {"transport": "http", "url": "http://x"}
+        assert by_id["bad"]["config"] is None
+
+    @pytest.mark.anyio
+    async def test_get_all_servers_handles_bad_row(self, store):
+        await store.install_server("good", "Good", {"transport": "http", "url": "http://x"})
+        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
+        await store._db.execute(
+            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
+            (b"not-a-valid-fernet-blob", "bad"),
+        )
+        await store._db.commit()
+
+        rows = await store.get_all_servers()
+        by_id = {r["id"]: r for r in rows}
+        # get_all_servers JSON-encodes the config; bad row gets a literal None.
+        assert by_id["good"]["config"] == '{"transport": "http", "url": "http://x"}'
+        assert by_id["bad"]["config"] is None
+
+    @pytest.mark.anyio
+    async def test_get_server_returns_none_config_for_bad_row(self, store):
+        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
+        await store._db.execute(
+            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
+            (b"not-a-valid-fernet-blob", "bad"),
+        )
+        await store._db.commit()
+
+        record = await store.get_server("bad")
+        assert record is not None
+        assert record["id"] == "bad"
+        assert record["config"] is None

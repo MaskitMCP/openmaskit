@@ -24,12 +24,13 @@ class ConfigDecryptionError(RuntimeError):
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS mappings (
-    alias TEXT PRIMARY KEY,
+    target_name TEXT NOT NULL DEFAULT 'default',
+    alias TEXT NOT NULL,
     real_value TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     field_path TEXT NOT NULL,
-    target_name TEXT NOT NULL DEFAULT 'default',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (target_name, alias)
 );
 
 CREATE TABLE IF NOT EXISTS rules (
@@ -110,7 +111,11 @@ CREATE INDEX IF NOT EXISTS idx_injections_target ON injections(target_name);
 class MaskingStore:
     def __init__(self, db: aiosqlite.Connection):
         self._db = db
-        self._alias_counters: dict[str, int] = {}
+        # Per-target alias counter map: {target_name: {prefix: max_counter}}.
+        # Scoping is required because aliases are unique per (target_name, alias),
+        # not globally; two targets can independently hold "host_1" without
+        # colliding.
+        self._alias_counters: dict[str, dict[str, int]] = {}
         # Server config columns are Fernet-encrypted at rest because they hold
         # user-supplied credentials (stdio env vars, HTTP static headers, OAuth
         # secrets). Same key file as OAuth token files.
@@ -133,6 +138,12 @@ class MaskingStore:
         path = Path(path).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         db = await aiosqlite.connect(str(path))
+        # WAL + synchronous=NORMAL match traffic.db: the alias flush loop and
+        # rule/mapper CRUD from the dashboard are concurrent writers, and
+        # reads from the engine startup load happen alongside. Without WAL,
+        # SQLite's default rollback journal serializes everything.
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
         await db.executescript(_SCHEMA)
         await db.commit()
         store = cls(db)
@@ -182,6 +193,7 @@ class MaskingStore:
             await self._db.commit()
 
         await self._migrate_mcp_servers_encryption()
+        await self._migrate_mappings_pk()
 
     async def _migrate_mcp_servers_encryption(self) -> None:
         """Migrate mcp_servers.config (plaintext JSON TEXT) to config_enc (BLOB).
@@ -246,29 +258,90 @@ class MaskingStore:
         await self._db.commit()
         logger.info("Migrated %d mcp_servers rows to encrypted storage", len(old_rows))
 
+    async def _migrate_mappings_pk(self) -> None:
+        """Rebuild ``mappings`` with PK ``(target_name, alias)``.
+
+        Old releases used ``alias`` alone as the PK, which meant two targets
+        with overlapping alias_prefixes (e.g. both have a ``host`` rule) would
+        collide at INSERT time and the second target's row would silently be
+        rejected. After this migration each target has its own namespace for
+        aliases.
+
+        Idempotent: a no-op once the PK is already composite (or on a fresh
+        install — ``_SCHEMA`` creates the new shape directly).
+        """
+        if await self._mappings_pk_is_composite():
+            return
+
+        logger.info("Migrating mappings to composite (target_name, alias) PK")
+        await self._db.executescript(
+            """
+            CREATE TABLE mappings_new (
+                target_name TEXT NOT NULL DEFAULT 'default',
+                alias TEXT NOT NULL,
+                real_value TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                field_path TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (target_name, alias)
+            );
+            """
+        )
+        # The old PK on `alias` guarantees uniqueness, so a direct copy can't
+        # generate composite-PK duplicates.
+        await self._db.execute(
+            """
+            INSERT INTO mappings_new
+                (target_name, alias, real_value, tool_name, field_path, created_at)
+            SELECT target_name, alias, real_value, tool_name, field_path, created_at
+            FROM mappings
+            """
+        )
+        await self._db.execute("DROP TABLE mappings")
+        await self._db.execute("ALTER TABLE mappings_new RENAME TO mappings")
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mappings_real_value ON mappings(real_value)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mappings_target ON mappings(target_name)"
+        )
+        await self._db.commit()
+        logger.info("Migration to composite mappings PK complete")
+
+    async def _mappings_pk_is_composite(self) -> bool:
+        cursor = await self._db.execute("PRAGMA table_info(mappings)")
+        rows = await cursor.fetchall()
+        # Each row is (cid, name, type, notnull, dflt_value, pk). pk > 0 means
+        # the column participates in the PK.
+        pk_cols = {row[1] for row in rows if row[5] > 0}
+        return pk_cols == {"target_name", "alias"}
+
     async def _load_counters(self, target_name: str | None = None):
-        """Load current max alias counters from existing mappings."""
+        """Load current max alias counters from existing mappings, per target."""
         if target_name:
-            query = "SELECT alias FROM mappings WHERE target_name = ?"
+            query = "SELECT target_name, alias FROM mappings WHERE target_name = ?"
             params: tuple = (target_name,)
         else:
-            query = "SELECT alias FROM mappings"
+            query = "SELECT target_name, alias FROM mappings"
             params = ()
 
         async with self._db.execute(query, params) as cursor:
-            async for (alias,) in cursor:
+            async for (tname, alias) in cursor:
                 parts = alias.rsplit("_", 1)
                 if len(parts) == 2 and parts[1].isdigit():
                     prefix = parts[0]
                     num = int(parts[1])
-                    self._alias_counters[prefix] = max(
-                        self._alias_counters.get(prefix, 0), num
-                    )
+                    bucket = self._alias_counters.setdefault(tname, {})
+                    bucket[prefix] = max(bucket.get(prefix, 0), num)
 
     async def get_or_create_alias(
         self, real_value: str, tool_name: str, field_path: str, prefix: str, target_name: str = "default"
     ) -> str:
-        """Get or create alias for a real value (handles concurrent requests)."""
+        """Get or create alias for a real value, scoped to ``target_name``.
+
+        The minted alias namespace is per-target: two targets can each hold
+        ``host_1`` for different real values, and they don't see each other.
+        """
         # Check existing first - this handles the common case after warmup
         async with self._db.execute(
             "SELECT alias FROM mappings WHERE real_value = ? AND field_path = ? AND target_name = ?",
@@ -278,23 +351,25 @@ class MaskingStore:
             if row:
                 return row[0]
 
+        bucket = self._alias_counters.setdefault(target_name, {})
+
         # Create new alias - use retry loop to handle concurrent inserts
-        # This is the standard pattern for handling races in optimistic concurrency
         for attempt in range(3):
-            counter = self._alias_counters.get(prefix, 0) + 1
-            self._alias_counters[prefix] = counter
+            counter = bucket.get(prefix, 0) + 1
+            bucket[prefix] = counter
             alias = f"{prefix}_{counter}"
 
             try:
                 await self._db.execute(
-                    "INSERT INTO mappings (alias, real_value, tool_name, field_path, target_name) VALUES (?, ?, ?, ?, ?)",
-                    (alias, real_value, tool_name, field_path, target_name),
+                    "INSERT INTO mappings (target_name, alias, real_value, tool_name, field_path) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (target_name, alias, real_value, tool_name, field_path),
                 )
                 await self._db.commit()
                 return alias
             except aiosqlite.IntegrityError:
-                # Another coroutine created an alias for this value concurrently
-                # Try to fetch it
+                # Another coroutine in the same target created this alias
+                # concurrently; re-check by real_value.
                 async with self._db.execute(
                     "SELECT alias FROM mappings WHERE real_value = ? AND field_path = ? AND target_name = ?",
                     (real_value, field_path, target_name),
@@ -302,16 +377,60 @@ class MaskingStore:
                     row = await cursor.fetchone()
                     if row:
                         return row[0]
-                # If still not found, retry with new counter
                 if attempt < 2:
                     continue
-                # Last attempt failed - raise
                 raise
 
-    async def resolve_alias(self, alias: str) -> str | None:
-        """Look up the real value for an alias."""
+    async def persist_alias(
+        self,
+        target_name: str,
+        alias: str,
+        real_value: str,
+        tool_name: str,
+        field_path: str,
+    ) -> None:
+        """Persist an engine-minted alias under ``(target_name, alias)``.
+
+        Used by ``MaskingEngine.flush_pending`` to write back the alias the
+        engine already returned to the caller. The engine's per-target counter
+        is the authority for alias selection; the store just persists. ``INSERT
+        OR IGNORE`` makes the call idempotent if the same pending row gets
+        flushed twice (e.g. retry on shutdown).
+        """
+        await self._db.execute(
+            "INSERT OR IGNORE INTO mappings "
+            "(target_name, alias, real_value, tool_name, field_path) VALUES (?, ?, ?, ?, ?)",
+            (target_name, alias, real_value, tool_name, field_path),
+        )
+        await self._db.commit()
+        # Keep the store's counter in sync so a subsequent direct
+        # ``get_or_create_alias`` call doesn't try to re-mint the same number.
+        parts = alias.rsplit("_", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            prefix, num = parts[0], int(parts[1])
+            bucket = self._alias_counters.setdefault(target_name, {})
+            bucket[prefix] = max(bucket.get(prefix, 0), num)
+
+    async def resolve_alias(
+        self, alias: str, target_name: str | None = None
+    ) -> str | None:
+        """Look up the real value for an alias.
+
+        When ``target_name`` is provided, the lookup is scoped to that target —
+        the only correct mode now that aliases are unique per-target rather
+        than globally. ``target_name=None`` falls back to "any target's row";
+        kept for test ergonomics and for legacy callers that don't yet know
+        which target they're in.
+        """
+        if target_name is not None:
+            async with self._db.execute(
+                "SELECT real_value FROM mappings WHERE alias = ? AND target_name = ?",
+                (alias, target_name),
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else None
         async with self._db.execute(
-            "SELECT real_value FROM mappings WHERE alias = ?", (alias,)
+            "SELECT real_value FROM mappings WHERE alias = ? LIMIT 1", (alias,)
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None
@@ -642,16 +761,17 @@ class MaskingStore:
         query = "SELECT id, name, config_enc, active, icon_url FROM mcp_servers ORDER BY name"
         async with self._db.execute(query) as cursor:
             rows = await cursor.fetchall()
-            return [
-                {
+            out: list[dict] = []
+            for row in rows:
+                cfg = self._safe_decrypt_config(row[2], row[0])
+                out.append({
                     "id": row[0],
                     "name": row[1],
-                    "config": json.dumps(self._decrypt_config(row[2])),
+                    "config": json.dumps(cfg) if cfg is not None else None,
                     "active": bool(row[3]),
                     "icon_url": row[4],
-                }
-                for row in rows
-            ]
+                })
+            return out
 
     async def update_server(self, server_id: str, name: str, config: dict) -> bool:
         blob = self._encrypt_config(config)
@@ -681,7 +801,7 @@ class MaskingStore:
                 {
                     "id": r[0],
                     "name": r[1],
-                    "config": self._decrypt_config(r[2]),
+                    "config": self._safe_decrypt_config(r[2], r[0]),
                     "active": bool(r[3]),
                     "icon_url": r[4],
                     "installed_at": r[5],
@@ -700,10 +820,29 @@ class MaskingStore:
             return {
                 "id": row[0],
                 "name": row[1],
-                "config": self._decrypt_config(row[2]),
+                "config": self._safe_decrypt_config(row[2], row[0]),
                 "active": bool(row[3]),
                 "installed_at": row[4],
             }
+
+    def _safe_decrypt_config(self, blob: bytes, server_id: str) -> dict | None:
+        """Decrypt ``config_enc`` for a row, returning ``None`` on failure.
+
+        A single undecryptable row used to raise out of the enclosing list
+        query, which made the entire Servers page error out after a Fernet
+        key change. Per-row None gives the dashboard a chance to render the
+        rest of the list and lets the user clean up the bad row.
+        """
+        try:
+            return self._decrypt_config(blob)
+        except ConfigDecryptionError as exc:
+            logger.warning(
+                "Failed to decrypt config for server %r: %s. "
+                "Listing as broken; uninstall to clean up.",
+                server_id,
+                exc,
+            )
+            return None
 
     async def update_server_config(self, server_id: str, config: dict):
         """Update the config JSON for a server."""

@@ -121,7 +121,7 @@ The `try_parse_structured` utility attempts JSON first, then falls back to `ast.
 Two SQLite databases:
 
 **`~/.openmaskit/store.db`** (masking config + state):
-- `mappings` — alias ↔ real_value (persists across restarts so the same real value always gets the same alias)
+- `mappings` — alias ↔ real_value, scoped per target via the composite PK `(target_name, alias)`. Two targets with overlapping rule prefixes can independently hold the same alias (e.g. both `host_1`); the engine's per-target counter is the authority and `store.persist_alias` writes it back verbatim.
 - `rules` — masking rules created via Web UI (merged with config-file rules at startup), supports `action` column (`mask` or `strip`)
 - `response_mappers` — output mapper configs (regex or json_field_mask) with optional `config` JSON column
 - `hidden_tools` — tools hidden per server (blocked from agent access)

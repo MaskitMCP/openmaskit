@@ -61,6 +61,20 @@ class ResponseDispatcher:
     async def register(self, request_id: str | int) -> anyio.Event:
         async with self._lock:
             self._evict_stale()
+            existing = self._waiters.get(request_id)
+            if existing is not None:
+                # A second register() for the same id means either a buggy or
+                # malicious downstream reusing JSON-RPC ids. We replace the
+                # entry (matching prior behavior) but wake the orphaned waiter
+                # with empty results so its caller fails fast instead of
+                # waiting 60s for a timeout, and log loudly so a real client
+                # bug is visible.
+                logger.warning(
+                    "ResponseDispatcher: register() collided on request_id=%r; "
+                    "orphaning prior waiter",
+                    request_id,
+                )
+                existing[0].set()
             event = anyio.Event()
             self._waiters[request_id] = (event, [], time.time())
             return event
@@ -75,7 +89,13 @@ class ResponseDispatcher:
             return False
 
     def dispatch_sync(self, request_id: str | int, msg: SessionMessage) -> bool:
-        """Synchronous dispatch for use in sync intercept functions."""
+        """Synchronous dispatch for use in sync intercept functions.
+
+        Safe to skip the async lock: this runs on the same single-threaded
+        event loop as register/collect, the dict access is a single atomic
+        Python operation, and there are no awaits between the membership
+        check and the mutation that another coroutine could interleave with.
+        """
         if request_id in self._waiters:
             event, results, _ = self._waiters[request_id]
             results.append(msg)

@@ -18,6 +18,9 @@ from openmaskit.masking.rules import (
     delete_nested_value,
     get_nested_value,
     set_nested_value,
+    walk_and_delete,
+    walk_and_mask,
+    walk_strings,
 )
 from openmaskit.masking.store import MaskingStore
 
@@ -281,12 +284,21 @@ class MaskingEngine:
                     logger.warning("Invalid regex in mapper %d: %s", m.id, exc)
 
     async def flush_pending(self):
-        """Write pending alias mappings to the database."""
+        """Write pending alias mappings to the database.
+
+        Uses ``store.persist_alias`` so the engine's per-target counter — the
+        only counter that observes every mint — is the source of truth. The
+        previous implementation called ``store.get_or_create_alias`` and threw
+        away the alias the store returned, which silently diverged the
+        in-memory cache from the DB row whenever the store's counter and the
+        engine's counter disagreed.
+        """
         writes = self._pending_writes[:]
         self._pending_writes.clear()
         for alias, real_value, tool_name, field_path in writes:
-            prefix = alias.rsplit("_", 1)[0]
-            await self._store.get_or_create_alias(real_value, tool_name, field_path, prefix, self._target_name)
+            await self._store.persist_alias(
+                self._target_name, alias, real_value, tool_name, field_path,
+            )
 
     def mask_response(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
         """Mask sensitive fields in a tool call response (synchronous, uses cache)."""
@@ -309,11 +321,16 @@ class MaskingEngine:
             [m for m in self._mappers if m.active and m.matches_tool(tool_name)],
             key=lambda m: m.order,
         )
-        if applicable_mappers and "content" in result and isinstance(result["content"], list):
-            result["content"] = [
-                self._apply_mappers_to_block(block, tool_name, applicable_mappers)
-                for block in result["content"]
-            ]
+        if applicable_mappers:
+            if "structuredContent" in result and isinstance(result["structuredContent"], (dict, list)):
+                self._apply_mappers_to_structured(
+                    result["structuredContent"], tool_name, applicable_mappers
+                )
+            if "content" in result and isinstance(result["content"], list):
+                result["content"] = [
+                    self._apply_mappers_to_block(block, tool_name, applicable_mappers)
+                    for block in result["content"]
+                ]
 
         return result
 
@@ -323,34 +340,24 @@ class MaskingEngine:
             return arguments
         return self._unmask_recursive(arguments)
 
-    def _mask_dict(
-        self, data: dict[str, Any], tool_name: str, rules: list[MaskingRule]
-    ) -> dict[str, Any]:
-        for rule in rules:
-            if rule.action == "strip":
-                delete_nested_value(data, rule.field_path)
-            else:
-                value = get_nested_value(data, rule.field_path)
-                if value is not None and isinstance(value, str):
-                    alias = self._get_or_create_alias(
-                        value, tool_name, rule.field_path, rule.effective_prefix
-                    )
-                    set_nested_value(data, rule.field_path, alias)
-        return data
-
     def _mask_structured(
         self, data: Any, tool_name: str, rules: list[MaskingRule]
     ) -> Any:
-        """Apply rules to a structured payload that may be a dict, a list of
-        dicts, or arbitrarily nested combinations. Rules target dict items
-        only; list elements are recursed into so the same rule applies to
-        every dict in the list."""
-        if isinstance(data, dict):
-            return self._mask_dict(data, tool_name, rules)
-        if isinstance(data, list):
-            for i, item in enumerate(data):
-                if isinstance(item, (dict, list)):
-                    data[i] = self._mask_structured(item, tool_name, rules)
+        """Apply rules to an arbitrarily nested dict/list payload. Each rule's
+        `field_path` is resolved with implicit list-fanout — `a.b.c` applies
+        to every `c` reachable along `a.b`, regardless of how many list nestings
+        sit on the way."""
+        if not isinstance(data, (dict, list)):
+            return data
+        for rule in rules:
+            if rule.action == "strip":
+                walk_and_delete(data, rule.field_path)
+            else:
+                def _mask_one(value: str, rule: MaskingRule = rule) -> str:
+                    return self._get_or_create_alias(
+                        value, tool_name, rule.field_path, rule.effective_prefix
+                    )
+                walk_and_mask(data, rule.field_path, _mask_one)
         return data
 
     def _get_or_create_alias(
@@ -444,6 +451,27 @@ class MaskingEngine:
         block["text"] = text
         return block
 
+    def _apply_mappers_to_structured(
+        self,
+        data: Any,
+        tool_name: str,
+        mappers: list[ResponseMapper],
+    ) -> None:
+        """Apply mappers to an arbitrarily nested dict/list payload (in place).
+        Regex mappers scan every string leaf; json_field_mask mappers walk
+        the dot-path with implicit list-fanout."""
+        if not isinstance(data, (dict, list)):
+            return
+        for mapper in mappers:
+            if mapper.mapper_type == "regex_replace":
+                if mapper.id in self._compiled_patterns:
+                    def _per_str(value: str, mapper: ResponseMapper = mapper) -> str:
+                        return self._apply_regex_mapper(value, tool_name, mapper)
+                    walk_strings(data, _per_str)
+            elif mapper.mapper_type == "json_field_mask":
+                path_parts = mapper.pattern.split(".")
+                self._mask_at_json_path(data, path_parts, tool_name, mapper)
+
     def _apply_regex_mapper(
         self, text: str, tool_name: str, mapper: ResponseMapper
     ) -> str:
@@ -504,14 +532,13 @@ class MaskingEngine:
         value = data[current_key]
 
         if not remaining:
+            # String-only by design: stringifying non-string scalars would
+            # change the field's type on the unmask round-trip and break
+            # strictly-typed upstream tools. Mirrors rule-path semantics in
+            # rules._mask_terminal.
             if isinstance(value, str):
                 data[current_key] = self._get_or_create_alias(
                     value, tool_name, f"mapper:{mapper.id}:{mapper.pattern}", mapper.alias_prefix
-                )
-                return True
-            elif isinstance(value, (int, float, bool)):
-                data[current_key] = self._get_or_create_alias(
-                    str(value), tool_name, f"mapper:{mapper.id}:{mapper.pattern}", mapper.alias_prefix
                 )
                 return True
             elif isinstance(value, list):

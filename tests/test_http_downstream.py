@@ -329,3 +329,76 @@ class TestResponseDispatcher:
         # Registering same ID again should work (overwrite)
         event2 = await target.response_dispatcher.register(request_id=30)
         assert event2 is not None
+        # The orphaned waiter is woken with empty results so its caller
+        # doesn't hang for 60s — collect returns None for an empty waiter
+        # but here the dict only contains the second registration, and
+        # event1.is_set() is True so any coroutine waiting on it returns.
+        assert event1.is_set()
+        assert event2 is not event1
+
+    @pytest.mark.anyio
+    async def test_dispatcher_logs_warning_on_duplicate_id(self, state, caplog):
+        """A duplicate register is a real bug — surface it in the log."""
+        import logging
+        target = state.targets["test"]
+        await target.response_dispatcher.register(request_id=31)
+        with caplog.at_level(logging.WARNING, logger="openmaskit.proxy.core"):
+            await target.response_dispatcher.register(request_id=31)
+        assert any(
+            "register() collided" in rec.message and "31" in rec.message
+            for rec in caplog.records
+        )
+
+    @pytest.mark.anyio
+    async def test_send_failure_does_not_leak_waiter(self, state):
+        """If ds_read_send.send() raises after register(), the http handler's
+        try/finally must collect() so the waiter dict is empty."""
+        target = state.targets["test"]
+        # Close the send side so the next send() raises ClosedResourceError.
+        await target.ds_read_send.aclose()
+
+        async with httpx.AsyncClient(
+            # raise_app_exceptions=False so the handler's exception becomes a
+            # 500 instead of bubbling out of the test client; we only care
+            # that the finally cleanup ran.
+            transport=httpx.ASGITransport(
+                app=create_mcp_app(state), raise_app_exceptions=False
+            ),
+            base_url="http://test",
+        ) as c:
+            await c.post(
+                "/test/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 99,
+                    "method": "tools/call",
+                    "params": {"name": "x", "arguments": {}},
+                },
+            )
+
+        # Regardless of which 5xx the handler returned, _waiters must be empty.
+        assert 99 not in target.response_dispatcher._waiters
+        assert len(target.response_dispatcher._waiters) == 0
+
+    @pytest.mark.anyio
+    async def test_cancellation_during_wait_does_not_leak_waiter(self, state):
+        """If the awaiting task is cancelled, the shielded collect() still
+        runs and the waiter is reaped. Mirrors the production handler's
+        register → wait → shielded-collect pattern."""
+        target = state.targets["test"]
+
+        async def fake_request():
+            event = await target.response_dispatcher.register(request_id=77)
+            try:
+                await event.wait()
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await target.response_dispatcher.collect(77)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(fake_request)
+            await anyio.sleep(0.05)  # let it register and start waiting
+            tg.cancel_scope.cancel()
+
+        assert 77 not in target.response_dispatcher._waiters
+        assert len(target.response_dispatcher._waiters) == 0

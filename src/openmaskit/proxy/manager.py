@@ -240,7 +240,14 @@ class TargetManager:
                         if new_token:
                             # Success! Reconnect the target
                             logger.info(f"Token refreshed, reconnecting {server_id}")
-                            config = (await self._store.get_server(server_id))["config"]
+                            record = await self._store.get_server(server_id)
+                            config = record["config"] if record else None
+                            if config is None:
+                                logger.error(
+                                    f"Cannot reconnect {server_id}: stored config is "
+                                    f"undecryptable; uninstall and re-add the server."
+                                )
+                                return
 
                             # Remove old connection
                             await self.remove_target(server_id)

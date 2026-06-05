@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import re
-import sys
+from copy import deepcopy
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from openmaskit.masking.mappers import ResponseMapper
 from openmaskit.masking.parsing import try_parse_structured
+from openmaskit.masking.rules import walk_strings
 
 MAX_PATTERN_LENGTH = 500
 MAX_NAME_LENGTH = 256
@@ -32,33 +33,23 @@ def _validate_dot_path(path: str) -> bool:
 
 
 def _check_regex_safety(pattern: str) -> tuple[bool, str | None]:
-    """Check if regex pattern is safe from ReDoS attacks.
+    """Check if a regex pattern is safe from ReDoS attacks.
+
+    Structural rejection (nested quantifiers etc.) + a length cap. Runtime
+    defense lives in the engine via ``get_max_regex_input_bytes``, which
+    bounds the input the pattern can be applied to.
 
     Returns: (is_safe, error_message)
     """
-    # Check for known ReDoS patterns
     for dangerous_pattern in _REDOS_PATTERNS:
         if dangerous_pattern.search(pattern):
             return False, "Pattern contains dangerous nested quantifiers or alternation"
 
-    # Check pattern complexity (length limit)
     if len(pattern) > MAX_PATTERN_LENGTH:
         return False, f"Pattern too long (max {MAX_PATTERN_LENGTH} characters)"
 
-    # Test pattern with timeout (Python 3.11+)
     try:
-        compiled = re.compile(pattern)
-        # Test against pathological string (many 'a's, no match expected)
-        test_str = "a" * 100
-        if sys.version_info >= (3, 11):
-            # Use timeout parameter (Python 3.11+)
-            try:
-                compiled.search(test_str)
-            except TimeoutError:
-                return False, "Pattern triggers timeout on test string"
-        else:
-            # For older Python, just compile (no runtime protection)
-            pass
+        re.compile(pattern)
     except re.error as exc:
         return False, f"Invalid regex: {exc}"
 
@@ -222,10 +213,16 @@ async def mappers_delete(request: Request):
 
 
 async def mappers_preview(request: Request):
+    """Preview a regex_replace mapper. Scans the same surfaces the live engine
+    will: each text block's raw text, and every string leaf in
+    `structuredContent`. Does NOT scan a serialized form of the whole response
+    — patterns that depend on JSON syntax (e.g. `"key": <value>`) deliberately
+    show zero matches here, mirroring what live masking will produce."""
     body = await request.json()
-    text = body.get("text", "")
     pattern = body.get("pattern", "")
     alias_prefix = body.get("alias_prefix", "value")
+    result_obj = body.get("result")
+    text_legacy = body.get("text", "")
 
     if not pattern:
         return JSONResponse({"error": "pattern is required"}, status_code=400)
@@ -260,8 +257,29 @@ async def mappers_preview(request: Request):
             matches.append({"original": full, "alias": alias})
             return alias
 
-    result = compiled.sub(replacer, text)
-    return JSONResponse({"result": result, "matches": matches})
+    if isinstance(result_obj, dict):
+        masked = deepcopy(result_obj)
+
+        if isinstance(masked.get("content"), list):
+            for block in masked["content"]:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                ):
+                    block["text"] = compiled.sub(replacer, block["text"])
+
+        sc = masked.get("structuredContent")
+        if isinstance(sc, (dict, list)):
+            walk_strings(sc, lambda v: compiled.sub(replacer, v))
+
+        preview_text = json.dumps(masked, indent=2, ensure_ascii=False)
+        return JSONResponse({"result": preview_text, "matches": matches})
+
+    # Legacy path: caller sent a single text string. Preserved so external
+    # tooling that hits this endpoint directly keeps working.
+    result_text = compiled.sub(replacer, text_legacy)
+    return JSONResponse({"result": result_text, "matches": matches})
 
 
 async def mappers_reorder(request: Request):

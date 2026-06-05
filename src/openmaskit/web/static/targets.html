@@ -264,7 +264,8 @@
                                 <h3 class="tgt-card-name" x-text="target.display_name"></h3>
                             </div>
                             <div class="tgt-card-meta">
-                                <span class="tgt-meta-badge" x-text="JSON.parse(target.config).transport"></span>
+                                <span class="tgt-meta-badge" x-text="target.config ? JSON.parse(target.config).transport : 'broken'"
+                                      :title="target.config ? '' : 'Config could not be decrypted — the Fernet key likely changed. Delete this server to clean up.'"></span>
                             </div>
                         </div>
                     </div>
@@ -291,7 +292,11 @@
 
             <div class="modal-body">
                 <div class="config-preview">
-                    <pre x-text="detailsModal.server ? JSON.stringify(JSON.parse(detailsModal.server.config), null, 2) : ''"></pre>
+                    <pre x-text="detailsModal.server
+                        ? (detailsModal.server.config
+                            ? JSON.stringify(JSON.parse(detailsModal.server.config), null, 2)
+                            : 'Config could not be decrypted — the Fernet key likely changed. Delete this server to clean up.')
+                        : ''"></pre>
                 </div>
             </div>
 

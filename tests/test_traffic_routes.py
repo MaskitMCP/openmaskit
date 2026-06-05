@@ -45,9 +45,16 @@ async def state(store, traffic_store):
 
 @pytest_asyncio.fixture
 async def client(state):
-    app = create_app(state)
+    app = create_app(state, csrf_token="test-csrf-token")
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={
+            "X-CSRF-Token": "test-csrf-token",
+            "Origin": "http://127.0.0.1:9473",
+        },
+    ) as c:
         yield c
 
 

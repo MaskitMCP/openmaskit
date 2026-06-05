@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="/static/style.css">
     <link rel="stylesheet" href="/static/tutorial.css">
+    <script src="/static/shared.js"></script>
     <script src="/static/tutorial.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
 </head>
@@ -444,6 +445,7 @@ function toolDetail() {
         tryArgs: {},
         tryLoading: false,
         tryResult: null,
+        tryRawResult: null,
         tryError: null,
         jsonTree: null,
         treeExpanded: {},
@@ -574,6 +576,7 @@ function toolDetail() {
         async callTool() {
             this.tryLoading = true;
             this.tryResult = null;
+            this.tryRawResult = null;
             this.tryError = null;
             this.jsonTree = null;
             this.treeExpanded = {};
@@ -594,6 +597,7 @@ function toolDetail() {
                     this.tryError = typeof data.error === 'string' ? data.error : JSON.stringify(data.error, null, 2);
                 } else {
                     this.tryResult = JSON.stringify(data.result, null, 2);
+                    this.tryRawResult = data.result || null;
                     this.aliasMap = data.aliases || {};
                     this.jsonTree = null;
                     const textBlock = data.result?.content?.find(b => b.type === 'text');
@@ -781,7 +785,10 @@ function toolDetail() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        text: this.tryResult || '',
+                        // Send the raw result object so the backend can mirror
+                        // the live engine's scope (text blocks + structuredContent
+                        // string leaves), not the pretty-printed wrapper.
+                        result: this.tryRawResult,
                         pattern: this.newMapper.pattern,
                         alias_prefix: this.newMapper.alias_prefix,
                     }),

@@ -245,7 +245,11 @@ class TestJsonFieldMask:
         masked = engine.mask_response("test_tool", result)
         assert masked["content"][0]["text"] == '{"other": "data"}'
 
-    async def test_numeric_value_masked(self, engine):
+    async def test_numeric_value_left_untouched(self, engine):
+        """Non-string scalars (int/float/bool) are intentionally NOT masked.
+        Stringifying them would change the field type on the unmask round-trip
+        and break strictly-typed upstream tools. Revisit if/when the alias
+        cache carries original-type info."""
         mapper = ResponseMapper(
             id=1, tool_name="*", mapper_type="json_field_mask",
             pattern="secret_port", alias_prefix="port",
@@ -256,7 +260,7 @@ class TestJsonFieldMask:
         masked = engine.mask_response("test_tool", result)
         import json
         data = json.loads(masked["content"][0]["text"])
-        assert data["secret_port"] == "port_1"
+        assert data["secret_port"] == 5432
 
     async def test_same_value_same_alias(self, engine):
         mapper = ResponseMapper(
