@@ -381,6 +381,14 @@ async def marketplace_install(request: Request):
             issuer = discovered["issuer"]
             if not selected_scopes and discovered.get("scopes_supported"):
                 selected_scopes = list(discovered["scopes_supported"])
+            # WWW-Authenticate required scopes get enforced even if the user
+            # picked a custom subset — they can't be deselected without the
+            # resource server refusing the token.
+            required = discovered.get("scopes_required") or []
+            if required:
+                selected_scopes = list(
+                    dict.fromkeys(list(selected_scopes) + list(required))
+                )
 
         oauth_cfg: dict = {"issuer": issuer, "scopes": selected_scopes}
         if registration_token:

@@ -293,20 +293,35 @@ async def discover_via_mcp_probe(mcp_url: str) -> dict | None:
     if not server_meta:
         return None
 
-    # Scope priority: RFC 6750 §3 `scope` attribute from the 401 challenge
-    # (the MCP spec frames this as "the scopes required for accessing the
-    # resource" — most direct, live, and resource-specific) → PRM
-    # `scopes_supported` (broader catalog of scopes used at this resource) →
-    # AS-wide `scopes_supported` (least specific) → empty list as last
-    # resort. WWW-Authenticate wins because when the server bothers to emit
-    # it, the MCP spec says it's the authoritative signal of what the client
-    # actually needs.
-    scopes = (
-        www_auth_scopes
-        or prm.get("scopes_supported")
+    # `scopes_supported` and `scopes_required` are semantically distinct
+    # and we surface them as separate fields:
+    #
+    # - `scopes_supported`: PRM `scopes_supported` (the catalog of scopes
+    #   that the resource accepts) → falls back to WWW-Auth scope when PRM
+    #   omits the list → falls back to AS-wide `scopes_supported`. This is
+    #   what the install picker should render as the menu.
+    # - `scopes_required`: WWW-Auth `scope` per RFC 6750 §3 (minimum scopes
+    #   the resource says are required to access it). The install picker
+    #   should pre-check + lock these. Empty list when WWW-Auth omits scope.
+    scopes_supported = (
+        prm.get("scopes_supported")
+        or www_auth_scopes
         or server_meta.get("scopes_supported")
         or []
     )
+    scopes_required = list(www_auth_scopes) if www_auth_scopes else []
+
+    # Defensive: a required scope not in the supported menu is malformed
+    # (required should be a subset of supported), but the spec doesn't
+    # forbid it. Log so we have a diagnostic when a server is misconfigured.
+    if scopes_required:
+        extras = [s for s in scopes_required if s not in scopes_supported]
+        if extras:
+            logger.warning(
+                f"WWW-Authenticate scope tokens {extras!r} are not in PRM "
+                f"scopes_supported for {mcp_url}; server may be misconfigured. "
+                f"Surfacing them as required regardless."
+            )
 
     return {
         "issuer": server_meta.get("issuer", issuer),
@@ -314,7 +329,8 @@ async def discover_via_mcp_probe(mcp_url: str) -> dict | None:
         "authorization_endpoint": server_meta.get("authorization_endpoint"),
         "token_endpoint": server_meta.get("token_endpoint"),
         "registration_endpoint": server_meta.get("registration_endpoint"),
-        "scopes_supported": scopes,
+        "scopes_supported": scopes_supported,
+        "scopes_required": scopes_required,
         "resource": prm.get("resource"),
         "resource_metadata_url": prm_url,
         "discovery_method": "mcp_probe",
@@ -368,6 +384,8 @@ async def discover_legacy(mcp_url: str) -> dict | None:
         "token_endpoint": server_meta.get("token_endpoint"),
         "registration_endpoint": server_meta.get("registration_endpoint"),
         "scopes_supported": scopes,
+        # No WWW-Authenticate probe in legacy flow → no required signal.
+        "scopes_required": [],
         "resource": prm.get("resource") if prm else None,
         "resource_metadata_url": prm_url,
         "discovery_method": "legacy_host" + ("+resource" if prm else ""),

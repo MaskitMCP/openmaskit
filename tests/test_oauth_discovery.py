@@ -600,7 +600,12 @@ class TestDiscoverViaMcpProbe:
     @pytest.mark.anyio
     @respx.mock
     async def test_www_authenticate_scope_used_when_prm_omits_scopes(self):
-        """RFC 6750 §3 `scope` fills in when PRM has no `scopes_supported`."""
+        """When PRM has no `scopes_supported`, WWW-Auth `scope` fills both fields.
+
+        `scopes_supported` falls back to WWW-Auth because the picker needs
+        *some* menu to show; `scopes_required` carries the same tokens because
+        WWW-Auth is the canonical required signal.
+        """
         respx.get("https://mcp.example.com/mcp").mock(
             return_value=httpx.Response(
                 401,
@@ -639,16 +644,16 @@ class TestDiscoverViaMcpProbe:
         result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
         assert result is not None
         assert result["scopes_supported"] == ["repo:read", "repo:write"]
+        assert result["scopes_required"] == ["repo:read", "repo:write"]
 
     @pytest.mark.anyio
     @respx.mock
-    async def test_www_authenticate_scope_takes_priority_over_prm(self):
-        """When both signals exist, WWW-Authenticate wins per MCP spec wording.
+    async def test_supported_and_required_are_separate_fields_when_both_signal(self):
+        """PRM drives `scopes_supported`; WWW-Auth drives `scopes_required`.
 
-        The challenge's `scope` is the server's direct statement of "what
-        you need to access this resource right now"; PRM `scopes_supported`
-        is a broader catalog. The MCP spec frames the challenge value as
-        authoritative.
+        The two concepts are not collapsed: PRM is the catalog (the menu),
+        WWW-Auth is the required subset (the locked subset). The install
+        picker uses both — render the menu, pre-check + lock the required.
         """
         respx.get("https://mcp.example.com/mcp").mock(
             return_value=httpx.Response(
@@ -656,7 +661,7 @@ class TestDiscoverViaMcpProbe:
                 headers={
                     "WWW-Authenticate": (
                         'Bearer resource_metadata="https://mcp.example.com/prm", '
-                        'scope="from_www_auth"'
+                        'scope="read"'
                     )
                 },
             )
@@ -667,7 +672,7 @@ class TestDiscoverViaMcpProbe:
                 json={
                     "resource": "https://mcp.example.com/mcp",
                     "authorization_servers": ["https://api.example.com"],
-                    "scopes_supported": ["from_prm"],
+                    "scopes_supported": ["read", "write", "admin"],
                 },
             )
         )
@@ -678,7 +683,6 @@ class TestDiscoverViaMcpProbe:
                     "issuer": "https://api.example.com",
                     "authorization_endpoint": "https://api.example.com/authorize",
                     "token_endpoint": "https://api.example.com/token",
-                    "scopes_supported": ["from_as"],
                 },
             )
         )
@@ -688,12 +692,68 @@ class TestDiscoverViaMcpProbe:
 
         result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
         assert result is not None
-        assert result["scopes_supported"] == ["from_www_auth"]
+        assert result["scopes_supported"] == ["read", "write", "admin"]
+        assert result["scopes_required"] == ["read"]
+
+    @pytest.mark.anyio
+    @respx.mock
+    async def test_warns_when_required_not_in_supported(self, caplog):
+        """Required ⊄ supported is malformed-but-legal; emit a warning."""
+        respx.get("https://mcp.example.com/mcp").mock(
+            return_value=httpx.Response(
+                401,
+                headers={
+                    "WWW-Authenticate": (
+                        'Bearer resource_metadata="https://mcp.example.com/prm", '
+                        'scope="ghost_scope"'
+                    )
+                },
+            )
+        )
+        respx.get("https://mcp.example.com/prm").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "resource": "https://mcp.example.com/mcp",
+                    "authorization_servers": ["https://api.example.com"],
+                    "scopes_supported": ["read", "write"],
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "issuer": "https://api.example.com",
+                    "authorization_endpoint": "https://api.example.com/authorize",
+                    "token_endpoint": "https://api.example.com/token",
+                },
+            )
+        )
+        respx.get("https://api.example.com/.well-known/openid-configuration").mock(
+            return_value=httpx.Response(404)
+        )
+
+        with caplog.at_level("WARNING", logger="openmaskit.oauth.discovery"):
+            result = await discovery.discover_via_mcp_probe(
+                "https://mcp.example.com/mcp"
+            )
+
+        assert result is not None
+        assert result["scopes_supported"] == ["read", "write"]
+        # `ghost_scope` is surfaced as required regardless of whether PRM
+        # lists it — the server is going to enforce it on us.
+        assert result["scopes_required"] == ["ghost_scope"]
+        assert any(
+            "ghost_scope" in rec.message and "may be misconfigured" in rec.message
+            for rec in caplog.records
+        )
 
     @pytest.mark.anyio
     @respx.mock
     async def test_prm_scopes_used_when_www_authenticate_omits_scope(self):
-        """No `scope` in the challenge → PRM `scopes_supported` is the source."""
+        """No `scope` in the challenge → PRM `scopes_supported` is the menu,
+        `scopes_required` is empty (no signal means no enforced minimum)."""
         respx.get("https://mcp.example.com/mcp").mock(
             return_value=httpx.Response(
                 401,
@@ -730,6 +790,7 @@ class TestDiscoverViaMcpProbe:
         result = await discovery.discover_via_mcp_probe("https://mcp.example.com/mcp")
         assert result is not None
         assert result["scopes_supported"] == ["from_prm"]
+        assert result["scopes_required"] == []
 
 
 class TestDiscoverLegacy:
@@ -764,6 +825,8 @@ class TestDiscoverLegacy:
         assert result["issuer"] == "https://gitlab.com"
         assert result["registration_endpoint"] == "https://gitlab.com/oauth/applications"
         assert result["resource_metadata_url"] is None
+        # Legacy flow never probes WWW-Authenticate, so there's no required signal.
+        assert result["scopes_required"] == []
 
     @pytest.mark.anyio
     @respx.mock
