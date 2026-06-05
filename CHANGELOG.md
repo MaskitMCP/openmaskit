@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-05
+
+This release bundles a security and correctness pass. Two breaking changes
+worth surfacing up front: the dashboard API now requires a CSRF token + an
+allowed `Origin` on mutating requests (CLI / script clients need to set both),
+and the `mappings` table primary key migrated from `alias` to
+`(target_name, alias)` so two targets with overlapping rule prefixes can
+independently hold the same alias. The migration runs automatically on first
+open of an existing `store.db`.
+
+### Added
+- HTTP body size cap via a new `BodySizeLimitMiddleware` on the dashboard and MCP endpoints (`OPENMASKIT_MAX_REQUEST_BYTES`, default 1 MiB; oversized → 413). Rejects by `Content-Length` and by actual byte count.
+- CSRF token defense on mutating `/api/*` requests. Process-scoped random token served from `GET /api/csrf`, validated via `X-CSRF-Token`; dashboard JS attaches it automatically.
+- Per-text-block parse cap on upstream tool responses (`OPENMASKIT_MAX_PARSE_BYTES`, default 1 MiB). Bounds memory from a malicious upstream returning a giant nested literal that would otherwise OOM the proxy via `ast.literal_eval`.
+
+### Changed
+- **BREAKING.** `mappings` primary key is now `(target_name, alias)`. Aliases are now namespaced per target; flush uses a new `persist_alias` so the engine's chosen alias is persisted verbatim instead of being silently renumbered by a separate store counter. Migration runs on first open of an existing `~/.openmaskit/store.db`.
+- **BREAKING.** Mutating `/api/*` requests (POST/PUT/DELETE/PATCH) now require both an allowed `Origin` header and a valid `X-CSRF-Token`. Existing CLI / script clients hitting the dashboard API need to set both. The MCP endpoint (`:9474`) is unaffected — real MCP clients send neither.
+- `store.db` now runs with `journal_mode=WAL` and `synchronous=NORMAL`, matching `traffic.db`. Removes write serialization between the alias flush loop and dashboard CRUD.
+- Toggling a tool as hidden via the API now rejects names that don't exact-match an advertised tool (case-sensitive), with a 400 `unknown_tool` error. Unhide is unconditional so stale entries can be removed.
+
+### Fixed
+- Masking rules now fan out across list nestings — `categories.id` against `{"categories": [{"id": "a"}, {"id": "b"}]}` reaches both. Regex mappers also run on `structuredContent` string leaves, not just text blocks. Mapper preview matches live behavior.
+- A bad `config_enc` / encrypted-traffic row used to raise out of every list query and break the entire Servers / Traffic page. Per-row decrypt now falls back to `None` so the dashboard stays loadable and orphan rows are visible for cleanup. Orphan rows (active in DB but not connected at startup, e.g. undecryptable config) are now surfaced in the Inactive section instead of vanishing.
+- `ResponseDispatcher` waiter leaks: the HTTP handler now wraps register-send-wait in `try/finally` with a shielded `collect()` so a `send()` failure or task cancellation can't leave a waiter dangling for 120s. A duplicate register on the same request id wakes the orphan and logs a warning.
+
+### Removed
+- Dead `re.Pattern.search(test_str)` "TimeoutError" branch in mapper pre-validation. Python's stdlib `re` has never had a per-call timeout; that block never fired.
+
 ## [0.3.1] - 2026-06-03
 
 ### Fixed
@@ -65,7 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Env-var modal polish.
 
-[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.1.2...v0.2.0
