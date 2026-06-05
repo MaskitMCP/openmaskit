@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from openmaskit.masking.parsing import _convert_tuples, try_parse_structured
+from openmaskit.masking.parsing import (
+    DEFAULT_MAX_PARSE_LEN,
+    _convert_tuples,
+    get_max_parse_len,
+    try_parse_structured,
+)
 
 
 class TestTryParseStructured:
@@ -71,6 +76,54 @@ class TestTryParseStructured:
         result = try_parse_structured(text)
         assert result is not None
         assert result.format == "json"
+
+
+class TestSizeCap:
+    """Defense against a malicious upstream returning a huge nested literal."""
+
+    def test_oversized_input_rejected(self, monkeypatch):
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", "100")
+        text = "[" + ",".join(['"x"'] * 200) + "]"  # well over 100 chars
+        assert try_parse_structured(text) is None
+
+    def test_under_limit_still_parses(self, monkeypatch):
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", "100")
+        result = try_parse_structured('{"k": "v"}')
+        assert result is not None
+        assert result.data == {"k": "v"}
+
+    def test_exactly_at_limit_parses(self, monkeypatch):
+        text = '{"a":1}'
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", str(len(text)))
+        result = try_parse_structured(text)
+        assert result is not None
+        assert result.data == {"a": 1}
+
+    def test_python_repr_path_also_capped(self, monkeypatch):
+        """The literal_eval branch is the real motivation for the cap."""
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", "100")
+        text = "{'items': [" + ",".join(["'x'"] * 200) + "]}"
+        assert try_parse_structured(text) is None
+
+
+class TestGetMaxParseLen:
+    def test_default_when_unset(self, monkeypatch):
+        monkeypatch.delenv("OPENMASKIT_MAX_PARSE_BYTES", raising=False)
+        assert get_max_parse_len() == DEFAULT_MAX_PARSE_LEN
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", "2048")
+        assert get_max_parse_len() == 2048
+
+    def test_non_numeric_falls_back(self, monkeypatch):
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", "lots")
+        assert get_max_parse_len() == DEFAULT_MAX_PARSE_LEN
+
+    def test_non_positive_falls_back(self, monkeypatch):
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", "0")
+        assert get_max_parse_len() == DEFAULT_MAX_PARSE_LEN
+        monkeypatch.setenv("OPENMASKIT_MAX_PARSE_BYTES", "-1")
+        assert get_max_parse_len() == DEFAULT_MAX_PARSE_LEN
 
 
 class TestConvertTuples:

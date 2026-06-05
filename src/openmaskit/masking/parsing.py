@@ -4,8 +4,31 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
+import os
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MAX_PARSE_LEN = 10 * 1024 * 1024  # 10 MiB
+
+
+def get_max_parse_len() -> int:
+    """Max input length passed to ``json.loads`` / ``ast.literal_eval``, in chars.
+
+    Reads ``OPENMASKIT_MAX_PARSE_BYTES`` from the environment; falls back to
+    the default if unset, non-numeric, or non-positive. Bounds memory usage
+    from a malicious upstream MCP server that sends a giant nested literal.
+    """
+    raw = os.environ.get("OPENMASKIT_MAX_PARSE_BYTES")
+    if raw is None:
+        return DEFAULT_MAX_PARSE_LEN
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_PARSE_LEN
+    return value if value > 0 else DEFAULT_MAX_PARSE_LEN
 
 
 @dataclass
@@ -15,7 +38,21 @@ class ParseResult:
 
 
 def try_parse_structured(text: str) -> ParseResult | None:
-    """Try JSON first, fall back to ast.literal_eval. Returns None if neither works."""
+    """Try JSON first, fall back to ast.literal_eval. Returns None if neither works.
+
+    Input larger than ``get_max_parse_len()`` is rejected outright (returns
+    None). ``ast.literal_eval`` builds an AST sized roughly proportional to
+    the input, so an unbounded upstream response can OOM the proxy; the cap
+    is the simplest defense.
+    """
+    if len(text) > get_max_parse_len():
+        logger.warning(
+            "try_parse_structured: input length %d exceeds cap %d; skipping parse",
+            len(text),
+            get_max_parse_len(),
+        )
+        return None
+
     try:
         data = json.loads(text)
         if isinstance(data, (dict, list)):
