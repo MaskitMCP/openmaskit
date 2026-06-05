@@ -302,6 +302,46 @@ class TestHiddenToolsAPI:
         resp = await client.get("/api/targets/nope/hidden_tools")
         assert resp.status_code == 404
 
+    @pytest.mark.anyio
+    async def test_hide_unknown_tool_rejected(self, client, state):
+        """Hiding a name that isn't in tool_schemas would be a silent no-op at
+        runtime — we should fail the request loudly instead."""
+        resp = await client.post(
+            "/api/targets/test/hidden_tools/toggle",
+            json={"tool_name": "nope_not_a_tool", "hidden": True},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error"] == "unknown_tool"
+        target = state.get_target("test")
+        assert "nope_not_a_tool" not in target.hidden_tools
+
+    @pytest.mark.anyio
+    async def test_hide_case_mismatch_rejected(self, client, state):
+        """Same as above with a case variant — MCP tool names are case-sensitive."""
+        resp = await client.post(
+            "/api/targets/test/hidden_tools/toggle",
+            json={"tool_name": "GET_TIME", "hidden": True},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "unknown_tool"
+        target = state.get_target("test")
+        assert "GET_TIME" not in target.hidden_tools
+        assert "get_time" not in target.hidden_tools
+
+    @pytest.mark.anyio
+    async def test_unhide_unknown_tool_allowed(self, client, state):
+        """Unhide is a cleanup path — it must succeed even for tools the
+        upstream no longer advertises so a stale entry can be removed."""
+        target = state.get_target("test")
+        target.hidden_tools.add("removed_by_upstream")
+        resp = await client.post(
+            "/api/targets/test/hidden_tools/toggle",
+            json={"tool_name": "removed_by_upstream", "hidden": False},
+        )
+        assert resp.status_code == 200
+        assert "removed_by_upstream" not in target.hidden_tools
+
 
 class TestMappingsAPI:
     @pytest.mark.anyio
