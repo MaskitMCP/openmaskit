@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-06
+
+### Added
+- Pre-install runtime check: the marketplace install modal now shows the command line that will run plus a `/api/install/check` runtime-presence badge — `✓ detected` (with path), `⚠ not on PATH` (with an install hint), or `podman (substituted for docker)` via the existing container-runtime detection. The modal also opens for bare catalog entries (server-memory etc.) that previously installed in one click, so every install confirms what runs locally.
+- RFC 6750 §3 `WWW-Authenticate` `scope` parsing, with RFC 6749 §3.3 token-grammar enforcement. OAuth discovery now combines protected-resource-metadata `scopes_supported` and the resource server's required scopes into a unified `scopes: [{scope, required}]` list; the install modal renders required scopes as locked-checked.
+- BYO scope discovery fallback: when a catalog entry omits `available_scopes`, the BYO install modal runs live discovery against the resolved MCP URL so the user still sees a scope picker.
+
+### Changed
+- `/api/oauth/discover` returns a single `scopes` field of `{scope, required}` objects instead of separate `scopes_supported` and `scopes_required` arrays. Marketplace install modal frontend updated to match.
+
 ## [0.4.0] - 2026-06-05
 
 This release bundles a security and correctness pass. Two breaking changes
@@ -94,7 +104,8 @@ open of an existing `store.db`.
 ### Changed
 - Env-var modal polish.
 
-[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.2.0...v0.3.0
