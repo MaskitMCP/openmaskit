@@ -60,6 +60,7 @@ def create_app(
         marketplace_reauthorize,
         reconfigure_target,
     )
+    from openmaskit.web.routes.install_check import install_check
     from openmaskit.web.routes.oauth_callback import oauth_callback
     from openmaskit.web.routes.oauth import discover_oauth_metadata
     from openmaskit.web.routes.pages import (
@@ -101,6 +102,7 @@ def create_app(
         Route("/api/targets/{target_id}/reconfigure", reconfigure_target, methods=["POST"]),
         Route("/oauth/callback/{handle}", oauth_callback, methods=["GET"]),
         Route("/api/oauth/discover", discover_oauth_metadata, methods=["POST"]),
+        Route("/api/install/check", install_check, methods=["POST"]),
         Route("/targets/{target_name}/tools", tools_page),
         Route("/api/config", api_config),
         Route("/api/targets/custom", custom_target_create, methods=["POST"]),
