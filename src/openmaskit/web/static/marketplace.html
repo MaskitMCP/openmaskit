@@ -157,6 +157,62 @@
         <div class="modal" @click.outside="modalCancel()">
             <h3 x-text="modalTitle()">Configuration Required</h3>
 
+            <!-- What will run on your machine. Pre-install transparency: show the
+                 command line (stdio) or upstream URL (http) plus a runtime check. -->
+            <template x-if="modal.preflight.kind">
+                <div class="modal-field">
+                    <span class="modal-label">What will run on your machine</span>
+
+                    <template x-if="modal.preflight.kind === 'http'">
+                        <div>
+                            <div class="modal-copy-row">
+                                <code class="modal-copy-value" x-text="modal.preflight.url"></code>
+                            </div>
+                            <p class="modal-hint">No subprocess runs locally.</p>
+                        </div>
+                    </template>
+
+                    <template x-if="modal.preflight.kind === 'stdio'">
+                        <div>
+                            <div class="modal-copy-row">
+                                <code class="modal-copy-value" x-text="'$ ' + modal.preflight.commandLine"></code>
+                            </div>
+
+                            <template x-if="modal.preflight.loading">
+                                <div class="modal-dcr-loading">
+                                    <span class="spinner spinner-sm"></span>
+                                    <span>Checking runtime…</span>
+                                </div>
+                            </template>
+
+                            <template x-if="!modal.preflight.loading && modal.preflight.present === true">
+                                <p class="modal-preflight-ok">
+                                    <span class="modal-preflight-mark">✓</span>
+                                    <code x-text="modal.preflight.resolvedCommand"></code>
+                                    <template x-if="modal.preflight.resolvedCommand !== modal.preflight.catalogCommand">
+                                        <span class="modal-preflight-sub">(substituted for <code x-text="modal.preflight.catalogCommand"></code>)</span>
+                                    </template>
+                                    <template x-if="modal.preflight.resolvedPath">
+                                        <span class="modal-preflight-path" x-text="modal.preflight.resolvedPath"></span>
+                                    </template>
+                                </p>
+                            </template>
+
+                            <template x-if="!modal.preflight.loading && modal.preflight.present === false">
+                                <p class="modal-preflight-missing">
+                                    <span class="modal-preflight-mark">⚠</span>
+                                    <code x-text="modal.preflight.catalogCommand"></code>
+                                    <span>not detected on PATH.</span>
+                                    <template x-if="modal.preflight.installHint">
+                                        <a :href="modal.preflight.installHint" target="_blank" rel="noopener">Install</a>
+                                    </template>
+                                </p>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
             <!-- URL params: server-specific identifiers that go in the upstream URL
                  (e.g. Supabase project_ref). Rendered before credentials so a DCR
                  entry's discovery can run against the resolved URL. -->
@@ -604,6 +660,18 @@ function marketplacePage() {
                 discoveryError: null,
                 discoveredScopes: [], // [{scope: str, required: bool}, ...]
             },
+            // "What will run on your machine" preview.
+            preflight: {
+                kind: null,                 // 'stdio' | 'http' | null (hidden)
+                commandLine: '',            // rendered command line for stdio
+                catalogCommand: '',         // first token of catalog command (for substitution display)
+                url: '',                    // upstream URL for http
+                loading: false,
+                present: null,              // true | false | null (unknown)
+                resolvedCommand: null,
+                resolvedPath: null,
+                installHint: null,
+            },
         },
 
         showToast(msg, type = 'success') {
@@ -660,8 +728,72 @@ function marketplacePage() {
                 }
             }
 
+            this.setupPreflight(server);
+
             this.modal.visible = true;
             return new Promise((resolve) => { _modalResolve = resolve; });
+        },
+
+        setupPreflight(server) {
+            // Reset to hidden state before deciding.
+            this.modal.preflight = {
+                kind: null,
+                commandLine: '',
+                catalogCommand: '',
+                url: '',
+                loading: false,
+                present: null,
+                resolvedCommand: null,
+                resolvedPath: null,
+                installHint: null,
+            };
+
+            const transport = server?.transport_type || 'http';
+
+            if (transport === 'http') {
+                const url = server?.mcp_host;
+                if (!url) return;  // Nothing meaningful to show.
+                this.modal.preflight.kind = 'http';
+                this.modal.preflight.url = url;
+                return;
+            }
+
+            // stdio entry — render the command line and kick off the runtime check.
+            const cmd = (server?.meta?.command || '').trim();
+            if (!cmd) return;
+            const args = Array.isArray(server?.meta?.args) ? server.meta.args : [];
+
+            this.modal.preflight.kind = 'stdio';
+            this.modal.preflight.commandLine = args.length
+                ? `${cmd} ${args.join(' ')}`
+                : cmd;
+            this.modal.preflight.catalogCommand = cmd.split(/\s+/)[0];
+            this.modal.preflight.loading = true;
+            this.runPreflightCheck(this.modal.preflight.catalogCommand);
+        },
+
+        async runPreflightCheck(command) {
+            try {
+                const res = await fetch('/api/install/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command }),
+                });
+                if (!res.ok) {
+                    this.modal.preflight.loading = false;
+                    return;
+                }
+                const data = await res.json();
+                this.modal.preflight.loading = false;
+                this.modal.preflight.present = !!data.present;
+                this.modal.preflight.resolvedCommand = data.resolved_command || null;
+                this.modal.preflight.resolvedPath = data.resolved_path || null;
+                this.modal.preflight.installHint = data.install_hint || null;
+            } catch (e) {
+                // Network failure: leave `present` null so the template hides
+                // the status line. The install can still proceed.
+                this.modal.preflight.loading = false;
+            }
         },
 
         openByoModal(server) {
@@ -772,9 +904,15 @@ function marketplacePage() {
         },
 
         modalTitle() {
-            if (this.modal.oauthMode === 'byo') return `Connect ${this.modal.server?.name || 'server'}`;
-            if (this.modal.oauthMode === 'dcr') return `Connect ${this.modal.server?.name || 'server'}`;
-            return 'Configuration Required';
+            const name = this.modal.server?.name || 'server';
+            if (this.modal.oauthMode === 'byo' || this.modal.oauthMode === 'dcr') {
+                return `Connect ${name}`;
+            }
+            const hasAnyConfig = this.modal.envVars.length > 0
+                || this.modal.headerVars.length > 0
+                || this.modal.configurableArgs.length > 0
+                || this.modal.urlParams.length > 0;
+            return hasAnyConfig ? `Configure ${name}` : `Install ${name}`;
         },
 
         async copyRedirectUri() {
@@ -1052,17 +1190,23 @@ function marketplacePage() {
                 dcrPayload = result.dcr;
                 urlParams = result.urlParams || {};
             } else if (isHostedBroker) {
-                // Hosted-broker: only collect env vars (OAuth handled by backend).
-                // URL templating against hosted-broker entries isn't supported
-                // yet — would need backend coordination since the broker
-                // controls the upstream URL.
-                if (needsEnv) {
-                    const result = await this.openModal(server, server.env_vars, [], []);
-                    if (!result) return;
-                    envVars = result.envValues;
-                }
-            } else if (needsEnv || needsHeaders || hasConfigurableArgs || needsUrlParams) {
-                // Non-OAuth with env vars, static headers, args, or URL params to fill in.
+                // Hosted-broker: env vars (when present) + the always-shown
+                // "what will run" confirmation. OAuth itself is handled by the
+                // backend; URL templating against hosted-broker entries isn't
+                // supported yet — would need backend coordination since the
+                // broker controls the upstream URL.
+                const result = await this.openModal(
+                    server,
+                    needsEnv ? server.env_vars : [],
+                    [],
+                    [],
+                );
+                if (!result) return;
+                envVars = result.envValues;
+            } else {
+                // Non-OAuth: always open the modal so the user sees the
+                // "what will run" preview, even when there's nothing to
+                // configure (e.g. server-memory).
                 const result = await this.openModal(
                     server,
                     needsEnv ? server.env_vars : [],
