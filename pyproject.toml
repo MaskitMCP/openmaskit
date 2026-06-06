@@ -1,6 +1,6 @@
 [project]
 name = "openmaskit"
-version = "0.4.1"
+version = "0.5.0"
 description = "Drop-in MCP proxy that keeps your secrets out of the context window"
 readme = "README.md"
 authors = [

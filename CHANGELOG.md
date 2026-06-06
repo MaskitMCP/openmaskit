@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-06
+
 ### Changed
 - OAuth install and reauthorize now redirect the dashboard tab to the authorization server (same-tab navigation) instead of spawning a new window via `webbrowser.open`. The local OAuth callback runs at `:9473/oauth/callback/{handle}` and finishes the install on the redirect back. Fixes tab stacking, makes the flow work in headless Docker, and respects the browser the user is actually running the dashboard in.
 - User-pinned OAuth scope is now defended by a `PinnedScopeClientMetadata` subclass that rejects writes to `scope` instead of the previous `sys._getframe`-based monkey patch of `mcp.client.auth.oauth2.get_client_metadata_scopes`. Same behaviour (operator's scope choice wins over PRM `scopes_supported`), no frame inspection, no upstream-module patching.
@@ -112,7 +114,8 @@ open of an existing `store.db`.
 ### Changed
 - Env-var modal polish.
 
-[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.0...v0.3.1
