@@ -12,6 +12,10 @@
   <strong>⚠️ Early stage — expect breaking changes.</strong>
 </p>
 
+<p align="center">
+  <a href="https://www.openmaskit.com/docs/"><strong>Read the docs →</strong></a>
+</p>
+
 ---
 
 ## What it does
