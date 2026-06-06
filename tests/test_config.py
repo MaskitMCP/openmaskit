@@ -18,7 +18,6 @@ class TestLoadConfig:
         config = load_config(path=tmp_path / "nonexistent.yaml")
         assert config.web_port == 9473
         assert config.mcp_port == 9474
-        assert config.oauth_port == 3131
         assert config.store_path == "~/.openmaskit/store.db"
         assert config.targets == {}
 
@@ -41,7 +40,6 @@ class TestLoadConfig:
                 rules: []
             web_port: 8473
             mcp_port: 8474
-            oauth_port: 8131
             store_path: "/custom/store.db"
         """)
         config_file = tmp_path / "config.yaml"
@@ -50,7 +48,6 @@ class TestLoadConfig:
         config = load_config(path=config_file)
         assert config.web_port == 8473
         assert config.mcp_port == 8474
-        assert config.oauth_port == 8131
         assert config.store_path == "/custom/store.db"
         assert len(config.targets) == 2
         assert "time" in config.targets
@@ -97,7 +94,6 @@ class TestLoadConfig:
                 rules: []
             web_port: 5000
             mcp_port: 5001
-            oauth_port: 5002
             store_path: "/original/store.db"
         """)
         config_file = tmp_path / "config.yaml"
@@ -107,12 +103,10 @@ class TestLoadConfig:
             path=config_file,
             web_port=6000,
             mcp_port=6001,
-            oauth_port=6002,
             store_path="/override/store.db",
         )
         assert config.web_port == 6000
         assert config.mcp_port == 6001
-        assert config.oauth_port == 6002
         assert config.store_path == "/override/store.db"
 
     def test_cli_overrides_empty_config(self):
@@ -121,12 +115,10 @@ class TestLoadConfig:
             path=Path("nonexistent.yaml"),
             web_port=7000,
             mcp_port=7001,
-            oauth_port=7002,
             store_path="/custom/store.db",
         )
         assert config.web_port == 7000
         assert config.mcp_port == 7001
-        assert config.oauth_port == 7002
         assert config.store_path == "/custom/store.db"
 
     def test_invalid_transport_raises_error(self, tmp_path):
@@ -234,7 +226,6 @@ class TestLoadConfig:
             targets: {}
             web_port: 5000
             mcp_port: 5001
-            oauth_port: 5002
             store_path: "/original/store.db"
         """)
         config_file = tmp_path / "config.yaml"
@@ -243,7 +234,6 @@ class TestLoadConfig:
         config = load_config(path=config_file, web_port=6000)
         assert config.web_port == 6000  # Overridden
         assert config.mcp_port == 5001  # From config
-        assert config.oauth_port == 5002  # From config
 
     def test_empty_yaml_file_uses_defaults(self, tmp_path):
         """Empty YAML file should use defaults."""

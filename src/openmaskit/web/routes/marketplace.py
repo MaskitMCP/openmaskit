@@ -13,6 +13,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 
 from openmaskit.oauth import discovery
+from openmaskit.oauth.install_flow import prepare_oauth_install
 from openmaskit.security import TokenEncryption, validate_server_id
 from openmaskit.web.routes._http_config import clean_http_headers
 
@@ -98,6 +99,11 @@ def _resolve_mcp_url(
     if not filled:
         return mcp_host, None
     return f"{mcp_host}?{urlencode(filled)}", None
+
+
+def _oauth_token_path(manager, handle: str) -> Path:
+    """Same path FileTokenStorage reads from at runtime: ``{store_dir}/oauth/{handle}.json``."""
+    return Path(manager._store_path).expanduser().parent / "oauth" / f"{handle}.json"
 
 
 def _require_supported(state) -> JSONResponse | None:
@@ -311,8 +317,9 @@ async def marketplace_install(request: Request):
     declared_params = (server_info.get("meta") or {}).get("params") or []
     user_params = body.get("params") or {}
 
-    # BYO: user supplies their own OAuth client credentials. OpenMaskit runs the
-    # OAuth flow directly against the provider via the local :3131 callback.
+    # BYO: user supplies their own OAuth client credentials. OpenMaskit prepares
+    # the OAuth authorize URL and returns it to the FE for a same-tab redirect;
+    # the dashboard's /oauth/callback/{handle} route finishes the install.
     if oauth_mode == "byo":
         client_id = (body.get("client_id") or "").strip()
         client_secret = (body.get("client_secret") or "").strip()
@@ -334,19 +341,33 @@ async def marketplace_install(request: Request):
         if err:
             return JSONResponse({"error": err}, status_code=400)
 
+        scope = " ".join(selected_scopes)
         config = {
             "transport": "http",
             "url": resolved_url,
             "oauth": {
                 "client_id": client_id,
                 "client_secret": client_secret,
-                "scope": " ".join(selected_scopes),
+                "scope": scope,
             },
         }
-        return await _install_and_connect(store, manager, server_id, server_info, config)
+        return await _begin_oauth_install(
+            request=request,
+            manager=manager,
+            oauth_states=oauth_states,
+            server_id=server_id,
+            server_info=server_info,
+            config=config,
+            mode="byo",
+            resolved_url=resolved_url,
+            scope=scope,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
 
-    # DCR: OpenMaskit dynamically registers a client at install time, then runs
-    # the OAuth flow directly against the provider via the local :3131 callback.
+    # DCR: OpenMaskit dynamically registers a client at install time, then prepares
+    # the OAuth authorize URL and returns it to the FE for a same-tab redirect;
+    # the dashboard's /oauth/callback/{handle} route finishes the install.
     if oauth_mode == "dcr":
         issuer = (body.get("issuer") or "").strip()
         selected_scopes = body.get("selected_scopes") or []
@@ -396,12 +417,26 @@ async def marketplace_install(request: Request):
             oauth_cfg["registration_token"] = registration_token
 
         config = {"transport": "http", "url": resolved_url, "oauth": oauth_cfg}
-        return await _install_and_connect(store, manager, server_id, server_info, config)
+        scope = " ".join(selected_scopes)
+        return await _begin_oauth_install(
+            request=request,
+            manager=manager,
+            oauth_states=oauth_states,
+            server_id=server_id,
+            server_info=server_info,
+            config=config,
+            mode="dcr",
+            resolved_url=resolved_url,
+            scope=scope,
+            issuer=issuer,
+            registration_token=registration_token or None,
+        )
 
     # Hosted-broker OAuth: redirect through auth.maskitmcp.com.
     if server_info.get("requires_oauth"):
         csrf_state = str(uuid4())
         oauth_states[csrf_state] = {
+            "mode": "broker",
             "server_id": backend_id,
             "handle": server_id,
             "timestamp": time.time(),
@@ -458,6 +493,79 @@ async def marketplace_install(request: Request):
     return await _install_and_connect(store, manager, server_id, server_info, config)
 
 
+async def _begin_oauth_install(
+    *,
+    request: Request,
+    manager,
+    oauth_states: dict,
+    server_id: str,
+    server_info: dict,
+    config: dict,
+    mode: str,
+    resolved_url: str,
+    scope: str,
+    client_id: str | None = None,
+    client_secret: str | None = None,
+    issuer: str | None = None,
+    registration_token: str | None = None,
+    reauthorize: bool = False,
+) -> JSONResponse:
+    """Prepare a BYO/DCR install or reauthorize and return the authorize URL.
+
+    Stashes everything the callback needs (token endpoint, client credentials,
+    PKCE verifier, target config) in the process-wide ``oauth_states`` map
+    keyed by the OAuth ``state`` parameter. The FE redirects the dashboard tab
+    to ``oauth_url``; the AS bounces back to ``/oauth/callback/{handle}`` where
+    ``oauth_callback`` finishes the flow.
+    """
+    if manager is None:
+        return JSONResponse(
+            {"error": "Target manager not available"}, status_code=503
+        )
+    store_path = _oauth_token_path(manager, server_id)
+    base_url = f"{request.url.scheme}://{request.url.netloc}"
+
+    try:
+        prep = await prepare_oauth_install(
+            resolved_url=resolved_url,
+            mode=mode,  # type: ignore[arg-type]
+            store_path=store_path,
+            base_url=base_url,
+            handle=server_id,
+            scope=scope,
+            client_id=client_id,
+            client_secret=client_secret,
+            issuer=issuer,
+            registration_token=registration_token,
+        )
+    except RuntimeError as exc:
+        logger.exception(f"OAuth install prep failed for {server_id}")
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    oauth_states[prep.state] = {
+        "mode": mode,
+        "handle": server_id,
+        "timestamp": time.time(),
+        "token_endpoint": prep.token_endpoint,
+        "client_id": prep.client_id,
+        "client_secret": prep.client_secret,
+        "auth_method": prep.auth_method,
+        "code_verifier": prep.code_verifier,
+        "redirect_uri": prep.redirect_uri,
+        "scope": prep.scope,
+        "resource": prep.resource,
+        "server_info": server_info,
+        "icon_url": server_info.get("icon_url"),
+        "config": config,
+        "reauthorize": reauthorize,
+    }
+    logger.info(
+        f"Prepared {mode} OAuth flow for {server_id} "
+        f"(reauthorize={reauthorize}); returning oauth_url to FE"
+    )
+    return JSONResponse({"ok": True, "oauth_url": prep.oauth_url})
+
+
 async def _install_and_connect(store, manager, server_id, server_info, config) -> JSONResponse:
     """Persist a marketplace server and attempt to connect it. On connect failure,
     the server is left installed but deactivated so the user can retry from the UI.
@@ -489,11 +597,10 @@ async def _install_and_connect(store, manager, server_id, server_info, config) -
 async def marketplace_reauthorize(request: Request):
     """Trigger a fresh OAuth flow for an installed server.
 
-    BYO/DCR servers run the OAuth flow locally via the :3131 callback — we wipe the
-    cached tokens (preserving client_info so we don't re-prompt or re-register),
-    then bounce the target so its next connection attempt triggers the browser flow.
-
-    Hosted-broker servers return a fresh authorize URL the UI redirects to.
+    All three modes (broker / BYO / DCR) now return a fresh ``oauth_url`` for
+    the dashboard to navigate to in-tab. The callback handler at
+    ``/oauth/callback/{handle}`` exchanges the code, writes new tokens, and
+    reconnects the target.
     """
     state = request.app.state.proxy_state
     store = state.store
@@ -531,6 +638,7 @@ async def marketplace_reauthorize(request: Request):
 
         csrf_state = str(uuid4())
         oauth_states[csrf_state] = {
+            "mode": "broker",
             "server_id": backend_id,
             "handle": target_id,
             "timestamp": time.time(),
@@ -542,28 +650,54 @@ async def marketplace_reauthorize(request: Request):
         )
         return JSONResponse({"ok": True, "oauth_url": oauth_url})
 
-    # BYO / DCR: clear tokens locally, then bounce the target.
+    # BYO / DCR: build a fresh authorize URL and return it for in-tab redirect.
     if not manager:
         return JSONResponse({"error": "Target manager not available"}, status_code=503)
 
-    token_path = (
-        Path(manager._store_path).expanduser().parent / "oauth" / f"{target_id}.json"
-    )
-    _clear_oauth_tokens(token_path)
+    resolved_url = config.get("url")
+    if not resolved_url:
+        return JSONResponse(
+            {"error": "Server config missing url; cannot reauthorize"},
+            status_code=500,
+        )
 
-    try:
-        if target_id in state.targets:
-            await manager.remove_target(target_id)
-        await manager.add_target(target_id, config)
-        await store.activate_server(target_id)
-        return JSONResponse({"ok": True, "connected": True})
-    except Exception as exc:
-        logger.exception(f"Re-authorization failed for {target_id}")
-        if hasattr(exc, "exceptions") and exc.exceptions:
-            error_msg = str(exc.exceptions[0])
-        else:
-            error_msg = str(exc)
-        return JSONResponse({"ok": False, "error": error_msg}, status_code=500)
+    # Drop only the tokens — keep client_info on disk so BYO doesn't re-prompt
+    # and DCR doesn't re-register against the AS.
+    _clear_oauth_tokens(_oauth_token_path(manager, target_id))
+
+    if oauth_cfg.get("issuer"):
+        mode = "dcr"
+        scope_str = " ".join(oauth_cfg.get("scopes") or [])
+        return await _begin_oauth_install(
+            request=request,
+            manager=manager,
+            oauth_states=oauth_states,
+            server_id=target_id,
+            server_info={},
+            config=config,
+            mode=mode,
+            resolved_url=resolved_url,
+            scope=scope_str,
+            issuer=oauth_cfg["issuer"],
+            registration_token=oauth_cfg.get("registration_token"),
+            reauthorize=True,
+        )
+
+    # BYO
+    return await _begin_oauth_install(
+        request=request,
+        manager=manager,
+        oauth_states=oauth_states,
+        server_id=target_id,
+        server_info={},
+        config=config,
+        mode="byo",
+        resolved_url=resolved_url,
+        scope=oauth_cfg.get("scope") or "",
+        client_id=oauth_cfg.get("client_id"),
+        client_secret=oauth_cfg.get("client_secret"),
+        reauthorize=True,
+    )
 
 
 def _clear_oauth_tokens(token_path: Path) -> None:

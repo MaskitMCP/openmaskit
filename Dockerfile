@@ -27,7 +27,7 @@ RUN uv pip install .
 ENV OPENMASKIT_HOST=0.0.0.0
 
 # Expose ports
-EXPOSE 9473 9474 3131
+EXPOSE 9473 9474
 
 # Health check using the /health endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

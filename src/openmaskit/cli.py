@@ -66,12 +66,6 @@ Documentation: https://github.com/MaskitMCP/openmaskit"""
         help="MCP server endpoint port (default: 9474)",
     )
 
-    parser.add_argument(
-        "-o", "--oauth-port",
-        type=int,
-        help="OAuth callback server port (default: 3131)",
-    )
-
     # Store path
     parser.add_argument(
         "-s", "--store-path",

@@ -22,7 +22,6 @@ from openmaskit.config import load_config
 from openmaskit.masking.engine import MaskingEngine
 from openmaskit.masking.rules import ArgumentGuardrail, ArgumentInjection, MaskingRule
 from openmaskit.masking.store import MaskingStore
-from openmaskit.oauth.handler import OAuthCallbackServer
 from openmaskit.proxy.core import ProxyState, TargetState, run_proxy_for_target
 from openmaskit.proxy.http_downstream import create_mcp_app
 from openmaskit.proxy.manager import TargetManager, _build_upstream_config
@@ -143,7 +142,6 @@ async def _graceful_shutdown(
     shutdown_event: anyio.Event,
     web_server,
     mcp_server,
-    callback_web_server,
     tg,
     drain_timeout: float,
     flush_timeout: float,
@@ -163,7 +161,6 @@ async def _graceful_shutdown(
     logger.info("Stage 1/4: Stopping request acceptance")
     web_server.should_exit = True
     mcp_server.should_exit = True
-    callback_web_server.should_exit = True
 
     # Stage 2: Drain in-flight requests
     logger.info(f"Stage 2/4: Draining in-flight requests ({drain_timeout}s timeout)")
@@ -231,7 +228,6 @@ async def async_main():
         path=args.config_path,
         web_port=args.web_port,
         mcp_port=args.mcp_port,
-        oauth_port=args.oauth_port,
         store_path=args.store_path,
     )
     bind_host = os.environ.get("OPENMASKIT_HOST", "127.0.0.1")
@@ -267,7 +263,6 @@ async def async_main():
     state.traffic_store = traffic_store
     state.traffic_buffer = traffic_buffer
     state.mcp_port = config.mcp_port
-    state.oauth_port = config.oauth_port
 
     # Create per-target state
     for name, target_config in config.targets.items():
@@ -356,20 +351,6 @@ async def async_main():
     shutdown_event = anyio.Event()
     _install_shutdown_noise_filter(shutdown_event)
 
-    # Shared OAuth callback server (always running)
-    callback_server = OAuthCallbackServer(port=config.oauth_port)
-    callback_app = callback_server.create_app()
-    callback_uvicorn_config = uvicorn.Config(
-        callback_app,
-        host=bind_host,
-        port=config.oauth_port,
-        log_level="warning",
-        log_config=None,
-    )
-    callback_web_server = uvicorn.Server(callback_uvicorn_config)
-    callback_web_server.install_signal_handlers = lambda: None
-    state.callback_server = callback_server
-
     installation_id = _load_installation_id()
     openmaskit_version = __version__
     print('----------------------------------------------------------------------------------------------------------')
@@ -400,7 +381,6 @@ async def async_main():
 
     logger.info("OpenMaskit proxy starting")
     logger.info(f"Dashboard: http://{bind_host}:{config.web_port}")
-    logger.info(f"OAuth callback: http://{bind_host}:{config.oauth_port}/callback")
     if backend_client.enabled:
         logger.info("Backend integration enabled.")
     logger.info("MCP servers:")
@@ -465,7 +445,6 @@ async def async_main():
                     us_read, us_write, container_info = await stack.enter_async_context(
                         connect_upstream(target_config.upstream, config.store_path,
                                        errlog=upstream_errlog, server_id=name,
-                                       callback_server=callback_server,
                                        container_runtime=config.container_runtime)
                     )
                     target_state.container_info = container_info
@@ -496,7 +475,6 @@ async def async_main():
                             r, w, ci = await own_stack.enter_async_context(
                                 connect_upstream(upstream_cfg, config.store_path,
                                                errlog=upstream_errlog, server_id=name,
-                                               callback_server=callback_server,
                                                container_runtime=config.container_runtime)
                             )
                             return own_stack, r, w, ci
@@ -545,7 +523,6 @@ async def async_main():
 
             async with anyio.create_task_group() as tg:
                 manager = TargetManager(state, store, config.store_path,
-                                       callback_server=callback_server,
                                        container_runtime=config.container_runtime)
                 manager.set_task_group(tg, shutdown_event)
                 state.target_manager = manager
@@ -561,7 +538,7 @@ async def async_main():
                             logger.info(f"Received {sig.name}, initiating graceful shutdown")
                             await _graceful_shutdown(
                                 state, shutdown_event, web_server, mcp_server,
-                                callback_web_server, tg, DRAIN_TIMEOUT, FLUSH_TIMEOUT
+                                tg, DRAIN_TIMEOUT, FLUSH_TIMEOUT
                             )
                             break
 
@@ -595,7 +572,6 @@ async def async_main():
 
                 tg.start_soon(web_server.serve)
                 tg.start_soon(mcp_server.serve)
-                tg.start_soon(callback_web_server.serve)
 
     except Exception as exc:
         logger.exception(f"Error: {type(exc).__name__}: {exc}")

@@ -377,51 +377,54 @@ class TestFetchOauthServerMetadata:
 
     @pytest.mark.anyio
     @respx.mock
-    async def test_rejects_metadata_with_mismatched_issuer(self):
-        """RFC 8414 §3.3: skip a response whose `issuer` doesn't match."""
-        bad = {
+    async def test_accepts_metadata_with_mismatched_issuer(self):
+        """Slack: PRM points at mcp.slack.com but AS metadata declares
+        issuer slack.com. RFC 8414 §3.3 says these MUST match; real-world
+        deployments routinely don't. The MCP SDK doesn't enforce the check
+        and neither do we — the URL we fetched from is the authoritative
+        source for where the AS lives.
+        """
+        mismatched = {
             "issuer": "https://impostor.example.com",
             "authorization_endpoint": "https://impostor.example.com/authorize",
             "token_endpoint": "https://impostor.example.com/token",
         }
         respx.get("https://api.example.com/.well-known/oauth-authorization-server").mock(
-            return_value=httpx.Response(200, json=bad)
+            return_value=httpx.Response(200, json=mismatched)
         )
         respx.get("https://api.example.com/.well-known/openid-configuration").mock(
             return_value=httpx.Response(404)
         )
         result = await discovery.fetch_oauth_server_metadata("https://api.example.com")
-        assert result is None
+        assert result is not None
+        assert result["authorization_endpoint"] == (
+            "https://impostor.example.com/authorize"
+        )
 
     @pytest.mark.anyio
     @respx.mock
-    async def test_issuer_mismatch_on_spec_form_continues_to_append_form(self):
-        """If spec-form has wrong issuer, the append-form fallback still works."""
-        bad = {"issuer": "https://impostor.example.com/tenant1"}
-        good = {
-            "issuer": "https://legacy.example.com/tenant1",
+    async def test_spec_form_wins_even_when_issuer_disagrees(self):
+        """Spec-form returns first; we no longer skip on issuer mismatch,
+        so the append-form is never consulted in this case.
+        """
+        spec_form = {
+            "issuer": "https://impostor.example.com/tenant1",
             "authorization_endpoint": "https://legacy.example.com/tenant1/authorize",
             "token_endpoint": "https://legacy.example.com/tenant1/token",
-            "registration_endpoint": "https://legacy.example.com/tenant1/register",
+            "registration_endpoint": "https://legacy.example.com/tenant1/spec-form-register",
         }
         respx.get(
             "https://legacy.example.com/.well-known/oauth-authorization-server/tenant1"
-        ).mock(return_value=httpx.Response(200, json=bad))
-        respx.get(
-            "https://legacy.example.com/tenant1/.well-known/oauth-authorization-server"
-        ).mock(return_value=httpx.Response(200, json=good))
+        ).mock(return_value=httpx.Response(200, json=spec_form))
         respx.get(
             "https://legacy.example.com/.well-known/openid-configuration/tenant1"
-        ).mock(return_value=httpx.Response(404))
-        respx.get(
-            "https://legacy.example.com/tenant1/.well-known/openid-configuration"
         ).mock(return_value=httpx.Response(404))
         result = await discovery.fetch_oauth_server_metadata(
             "https://legacy.example.com/tenant1"
         )
         assert result is not None
         assert result["registration_endpoint"] == (
-            "https://legacy.example.com/tenant1/register"
+            "https://legacy.example.com/tenant1/spec-form-register"
         )
 
     @pytest.mark.anyio

@@ -29,7 +29,6 @@ def load_config(
     path: Path | None = None,
     web_port: int | None = None,
     mcp_port: int | None = None,
-    oauth_port: int | None = None,
     store_path: str | None = None,
 ) -> MultiTargetConfig:
     if path is None:
@@ -39,16 +38,12 @@ def load_config(
             targets={},
             web_port=9473,
             mcp_port=9474,
-            oauth_port=3131,
             store_path="~/.openmaskit/store.db",
         )
-        # Apply CLI overrides to empty config
         if web_port is not None:
             config.web_port = web_port
         if mcp_port is not None:
             config.mcp_port = mcp_port
-        if oauth_port is not None:
-            config.oauth_port = oauth_port
         if store_path is not None:
             config.store_path = store_path
         return config
@@ -68,16 +63,12 @@ def load_config(
             targets=targets,
             web_port=raw.get("web_port", 9473),
             mcp_port=raw.get("mcp_port", 9474),
-            oauth_port=raw.get("oauth_port", 3131),
             store_path=raw.get("store_path", "~/.openmaskit/store.db"),
         )
-        # Apply CLI overrides
         if web_port is not None:
             config.web_port = web_port
         if mcp_port is not None:
             config.mcp_port = mcp_port
-        if oauth_port is not None:
-            config.oauth_port = oauth_port
         if store_path is not None:
             config.store_path = store_path
         return config
@@ -88,16 +79,12 @@ def load_config(
             targets={},
             web_port=raw.get("web_port", 9473),
             mcp_port=raw.get("mcp_port", 9474),
-            oauth_port=raw.get("oauth_port", 3131),
             store_path=raw.get("store_path", "~/.openmaskit/store.db"),
         )
-        # Apply CLI overrides
         if web_port is not None:
             config.web_port = web_port
         if mcp_port is not None:
             config.mcp_port = mcp_port
-        if oauth_port is not None:
-            config.oauth_port = oauth_port
         if store_path is not None:
             config.store_path = store_path
         return config
@@ -111,16 +98,12 @@ def load_config(
         targets={"default": target},
         web_port=raw.get("web_port", 9473),
         mcp_port=raw.get("mcp_port", 9474),
-        oauth_port=raw.get("oauth_port", 3131),
         store_path=raw.get("store_path", "~/.openmaskit/store.db"),
     )
-    # Apply CLI overrides
     if web_port is not None:
         config.web_port = web_port
     if mcp_port is not None:
         config.mcp_port = mcp_port
-    if oauth_port is not None:
-        config.oauth_port = oauth_port
     if store_path is not None:
         config.store_path = store_path
     return config

@@ -7,7 +7,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TextIO
+from typing import Any, TextIO
 
 import anyio
 import httpx
@@ -30,9 +30,6 @@ from openmaskit.container import (
     stop_container,
     sweep_server_orphans,
 )
-
-if TYPE_CHECKING:
-    from openmaskit.oauth.handler import OAuthCallbackServer
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +184,6 @@ async def connect_upstream(
     errlog: TextIO = sys.stderr,
     extra_env: dict[str, str] | None = None,
     server_id: str | None = None,
-    callback_server: "OAuthCallbackServer | None" = None,
     container_runtime: str | None = None,
 ):
     """
@@ -304,7 +300,6 @@ async def connect_upstream(
                 upstream.url,
                 upstream.oauth,
                 oauth_store_path,
-                callback_server=callback_server,
             )
 
             http_client = httpx.AsyncClient(

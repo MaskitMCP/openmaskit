@@ -4987,6 +4987,27 @@ code {
     letter-spacing: 0.05em;
     align-self: center;
 }
+.modal-scope-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.modal-scope-toggle-all {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: border-color 120ms, color 120ms;
+}
+.modal-scope-toggle-all:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
 .modal-scope-select-all-row {
     display: inline-flex;
     align-items: center;

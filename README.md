@@ -124,7 +124,6 @@ targets:
 # Optional overrides (defaults shown)
 web_port: 9473
 mcp_port: 9474
-oauth_port: 3131
 # container_runtime: podman    # auto-detected from docker/podman/nerdctl/finch
 ```
 
@@ -134,7 +133,7 @@ oauth_port: 3131
 openmaskit                              # use ./openmaskit.yaml (or start empty)
 openmaskit path/to/config.yaml          # custom config
 openmaskit -c path/to/config.yaml       # same, via flag
-openmaskit -w 9473 -m 9474 -o 3131      # override ports
+openmaskit -w 9473 -m 9474              # override ports
 openmaskit -s ~/.openmaskit/store.db        # override SQLite path
 openmaskit --version
 ```
@@ -187,7 +186,7 @@ A few things worth knowing about:
 
 ```bash
 docker build -t openmaskit .
-docker run -p 9473:9473 -p 9474:9474 -p 3131:3131 openmaskit
+docker run -p 9473:9473 -p 9474:9474 openmaskit
 ```
 
 The container supports HTTP-based MCP servers. For stdio servers (`uvx`, `npx`), run OpenMaskit natively.

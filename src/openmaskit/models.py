@@ -74,6 +74,5 @@ class MultiTargetConfig(BaseModel):
     targets: dict[str, TargetConfig]
     web_port: int = 9473
     mcp_port: int = 9474
-    oauth_port: int = 3131
     store_path: str = "~/.openmaskit/store.db"
     container_runtime: str | None = None  # Optional override for docker/podman/nerdctl/finch
