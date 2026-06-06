@@ -16,7 +16,7 @@ OpenMaskit runs **locally on the user's own machine** — like a CLI dev tool (D
 
 The threats that **do** still matter, even for a local tool:
 
-- **Browser-based cross-origin attacks against localhost.** A malicious webpage the user visits can `fetch()`/`WebSocket` against `127.0.0.1:9473`/`9474`/`3131` and exfiltrate secrets. This is the canonical "localhost service" attack class (cf. the Docker daemon, ethdev wallets, etc.). CSRF tokens, `Origin` header checks on POST and WS, and not echoing the alias map / unmasked previews to API callers are all still required.
+- **Browser-based cross-origin attacks against localhost.** A malicious webpage the user visits can `fetch()`/`WebSocket` against `127.0.0.1:9473`/`9474` and exfiltrate secrets. This is the canonical "localhost service" attack class (cf. the Docker daemon, ethdev wallets, etc.). CSRF tokens, `Origin` header checks on POST and WS, and not echoing the alias map / unmasked previews to API callers are all still required.
 - **OAuth callback integrity** — the OAuth flow physically goes through the browser, so `state` validation and code-injection defenses still apply.
 - **Malicious upstream MCP server** — OpenMaskit talks to third-party MCP servers; their responses must not be able to crash the proxy, ReDoS the masking engine, or poison persistent state.
 - **Correctness bugs** (mask/unmask collisions, races, leaks) — same as any other software.
@@ -149,14 +149,14 @@ Catalog entries carry an `oauth_mode` field that determines the install flow. Th
 | `oauth_mode`  | Flow                                                                                                                                                              | Redirect URI                              |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `null` (hosted) | Hosted broker via `auth.maskitmcp.com`. `BackendClient.get_oauth_authorize_url` builds the URL; the broker handles code exchange; tokens land back over HTTPS.    | `http://localhost:9473/oauth/callback/{handle}` |
-| `"byo"`         | Bring-your-own OAuth client. User pastes `client_id` / `client_secret` in the install modal; OpenMaskit runs the OAuth flow directly against the provider.        | `http://localhost:3131/callback`          |
-| `"dcr"`         | Dynamic Client Registration. OpenMaskit discovers the authorization server, registers a client at install time, then runs the OAuth flow against it. | `http://localhost:3131/callback`          |
+| `"byo"`         | Bring-your-own OAuth client. User pastes `client_id` / `client_secret` in the install modal; OpenMaskit runs the OAuth flow directly against the provider.        | `http://localhost:9473/oauth/callback/{handle}` |
+| `"dcr"`         | Dynamic Client Registration. OpenMaskit discovers the authorization server, registers a client at install time, then runs the OAuth flow against it. | `http://localhost:9473/oauth/callback/{handle}` |
 
 For BYO entries the catalog provides `meta.available_scopes` (`[{scope, label, required, default}]`) which the modal renders as a checklist; required scopes are locked-checked. When the catalog entry omits `available_scopes` entirely (key absent, not just empty), the install modal falls back to live discovery against the resolved MCP URL via `/api/oauth/discover`. For DCR entries scopes are discovered live via `/api/oauth/discover` — catalog doesn't need to ship them. DCR discovery (`openmaskit.oauth.discovery`) implements the MCP authorization spec: probe the MCP URL, parse `WWW-Authenticate` for the `resource_metadata` link (RFC 9728), follow it (preserving query string verbatim — Supabase scopes its resource by `project_ref` there), then read `authorization_servers[0]` and fetch its OAuth metadata. The authorization server may live at a different host than the MCP endpoint. Falls back to host-derived `<scheme>://<host>/.well-known/...` for servers that don't advertise `WWW-Authenticate` (GitLab). DCR catalog entries can omit `oauth.issuer` — when absent, the install handler runs discovery on the resolved URL to find it. Any catalog entry — BYO, DCR, or a plain env-var stdio install — can ship `meta.setup_guide_url`; the install modal renders a "Setup guide ↗" link inline with the credentials/env-var prompt.
 
 Catalog entries that need a user-supplied identifier in the upstream URL (Supabase `project_ref`, future workspace/project IDs) ship `meta.params: [{name, label, required, placeholder, description}]`. The install handler validates user values against the declared list (rejecting undeclared names so callers can't sneak extra query keys onto the upstream URL), URL-encodes them via `_resolve_mcp_url` in `web/routes/marketplace.py`, and appends them to `mcp_host` as a query string. For DCR entries with templated `mcp_host`, discovery runs against the **resolved** URL so the protected-resource metadata lookup includes the right resource identifier.
 
-BYO and DCR installs both build a `transport: "http"` config with an `oauth` block (same shape as custom targets) and call `manager.add_target`. The existing `oauth/handler.py:create_oauth_provider` already handles both modes — BYO uses its manual branch (pre-seeds `client_info` from the config), DCR uses its discovery + DCR branch. Either way the local `OAuthCallbackServer` on port 3131 (`config.oauth_port`) receives the callback. **No new code paths in `oauth/handler.py` are needed for marketplace BYO/DCR — the install handler just shapes the config dict and the existing OAuth provider does the rest.**
+BYO and DCR installs both build a `transport: "http"` config with an `oauth` block (same shape as custom targets). Install-time OAuth (AS metadata discovery, optional DCR, persisting `client_info`, PKCE + state generation, and assembling the authorize URL) is owned by `oauth/install_flow.py:prepare_oauth_install`. The marketplace install handler calls it, stashes `{token_endpoint, client creds, PKCE verifier, code_verifier, redirect_uri, scope, resource, config, server_info}` in `app.state.oauth_states[state]`, and returns `{oauth_url}` to the FE for a same-tab redirect. The AS bounces back to `/oauth/callback/{handle}` on `:9473`, where `web/routes/oauth_callback.py` calls `oauth/code_exchange.py:exchange_code` to swap code for tokens, persists the tokens via `FileTokenStorage`, and calls `manager.add_target`. Runtime auth (refresh, adding bearer header) stays on the MCP SDK's `OAuthClientProvider` via `oauth/handler.py:create_oauth_provider`, which reads the `client_info` and tokens that install-time wrote.
 
 Hosted-broker installs are tagged in storage with the placeholder `config.oauth.client_id == "managed-by-backend"`; this is how `marketplace_reauthorize` distinguishes them from BYO/DCR. Hosted entries also preserve `config.backend_id` so reauthorize can ask the broker for a fresh authorize URL.
 
@@ -164,7 +164,7 @@ Hosted-broker installs are tagged in storage with the placeholder `config.oauth.
 
 `POST /api/marketplace/{target_id}/reauthorize` triggers a fresh OAuth flow for an installed server. The Re-authorize button on each server card (`targets.html`) calls it.
 
-- **BYO / DCR**: drops the `tokens` key from the encrypted `{store_dir}/oauth/{handle}.json` (preserves `client_info` so we don't re-prompt for creds or re-run DCR), `remove_target` + `add_target`, the browser-popup OAuth flow runs, returns `{connected: true}` once tokens are written. The token file is updated by `FileTokenStorage` from `oauth/handler.py`.
+- **BYO / DCR**: re-runs `prepare_oauth_install` with `reauthorize=True` (preserves `client_info` so we don't re-prompt for creds or re-run DCR), stashes the state, and returns `{oauth_url}` for the UI to redirect to. The callback at `/oauth/callback/{handle}` calls `exchange_code`, writes fresh tokens, and `remove_target` + `add_target` to swap in the new connection.
 - **Hosted broker**: re-runs `BackendClient.get_oauth_authorize_url` and returns `{oauth_url}` for the UI to redirect to. The callback then re-exchanges via `oauth_callback.py` as on first install.
 
 ### Custom targets (runtime)
@@ -175,20 +175,28 @@ Users can add arbitrary MCP servers via the dashboard (Servers page → "Add Ser
 
 Handles hot-adding and removing MCP server targets at runtime. Holds references to the shared task group and exit stack so it can spawn proxy loops and connect upstream without restarting. Called by both marketplace and custom target API routes.
 
-### OAuth handler (`oauth/handler.py`)
+### OAuth modules
 
-Shared OAuth 2.1 callback server running on port 3131. Started once in `__main__.py` and shared across all targets. OAuth tokens are stored per-server at `{store_dir}/oauth/{server_id}.json`, Fernet-encrypted.
+OAuth is split across four files in `src/openmaskit/oauth/`:
 
-Two OAuth flow shapes go through this callback:
+- **`install_flow.py`** — install-time orchestration. `prepare_oauth_install` resolves AS metadata (with caller-supplied issuer or live discovery against the MCP URL), runs DCR if needed, persists `client_info` via `FileTokenStorage`, generates PKCE + state, and returns an `InstallPrep` carrying the authorize URL plus everything the callback needs.
+- **`authorize_url.py`** — small RFC 6749 §4.1.1 + RFC 7636 (PKCE S256) URL builder. Includes the RFC 8707 `resource` indicator when PRM advertises one.
+- **`code_exchange.py`** — POSTs to the AS's `token_endpoint` to swap code for tokens. Supports `client_secret_post`, `client_secret_basic`, and `none`. Surfaces RFC 6749 §5.2 `error` / `error_description` verbatim.
+- **`handler.py`** — runtime only. `create_oauth_provider` reads the previously-persisted `client_info` and tokens and wires an MCP SDK `OAuthClientProvider` for runtime refresh + bearer-header injection. The `redirect_handler` / `callback_handler` callbacks raise loudly so the user is forced through the dashboard's Re-authorize button if tokens are lost. The `PinnedScopeClientMetadata` subclass in this file rejects SDK-side writes to `scope` so the operator's selected scope survives the SDK's PRM-based reassignment in 401 / 403 `insufficient_scope` paths.
+
+OAuth tokens are stored per-server at `{store_dir}/oauth/{handle}.json`, Fernet-encrypted.
+
+Three OAuth flow shapes share `web/routes/oauth_callback.py:oauth_callback` (path `/oauth/callback/{handle}` on the web port):
 
 - **Marketplace servers (hosted broker).** OpenMaskit redirects the browser to `auth.maskitmcp.com`, which redirects to the provider, handles the code exchange server-side, and bounces back to the local callback with tokens. The local code never sees the provider's client_secret. See `BackendClient.get_oauth_authorize_url` / `exchange_code` / `refresh_oauth_token`.
-- **Custom HTTP targets (DCR or direct).** The local handler runs the flow against the upstream provider directly using either Dynamic Client Registration or user-supplied credentials.
+- **BYO marketplace targets and custom HTTP targets with user-supplied credentials.** `install_flow` writes `client_info` and runs the flow against the upstream provider directly.
+- **DCR marketplace targets and custom HTTP targets without credentials.** `install_flow` discovers the AS and runs RFC 7591 Dynamic Client Registration before kicking off the flow.
 
-When adding BYO-credential or new DCR paths, the catalog entry signals the flow via an `oauth_mode` field (`"byo" | "dcr" | null`); the absence of the field implies the hosted-broker default.
+Catalog entries signal the flow via an `oauth_mode` field (`"byo" | "dcr" | null`); the absence of the field implies the hosted-broker default.
 
 ### Bind host
 
-All servers (web, MCP, OAuth callback) bind to the address in `OPENMASKIT_HOST` env var (default `127.0.0.1`). The Dockerfile sets this to `0.0.0.0` so the container is accessible from the host.
+All servers (web + MCP) bind to the address in `OPENMASKIT_HOST` env var (default `127.0.0.1`). The Dockerfile sets this to `0.0.0.0` so the container is accessible from the host.
 
 ## Configuration
 
