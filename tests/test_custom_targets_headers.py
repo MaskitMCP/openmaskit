@@ -127,6 +127,9 @@ class TestReservedHeaderDenylist:
 
 class TestBuildConfigHttpHeaders:
     def test_http_with_headers_round_trips(self):
+        # _build_config now emits the typed shape so the storage layer knows
+        # which header values are secret. Legacy bare-string payloads default
+        # to type=secret (conservative).
         config, err = _build_config(
             {
                 "transport": "http",
@@ -137,8 +140,8 @@ class TestBuildConfigHttpHeaders:
         assert err is None
         assert config["transport"] == "http"
         assert config["headers"] == {
-            "DD-API-KEY": "abc",
-            "DD-APPLICATION-KEY": "def",
+            "DD-API-KEY": {"value": "abc", "type": "secret"},
+            "DD-APPLICATION-KEY": {"value": "def", "type": "secret"},
         }
 
     def test_http_without_headers_omits_key(self):
@@ -201,7 +204,9 @@ class TestBuildConfigHttpHeaders:
             }
         )
         assert err is None
-        assert config["headers"] == {"Authorization": "Bearer static-token"}
+        assert config["headers"] == {
+            "Authorization": {"value": "Bearer static-token", "type": "secret"},
+        }
 
     def test_http_propagates_cleaner_error(self):
         config, err = _build_config(

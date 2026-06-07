@@ -4,11 +4,17 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from openmaskit.config_serde import load_runtime_config
 from openmaskit.masking.engine import MaskingEngine
 from openmaskit.masking.store import MaskingStore
 from openmaskit.proxy.core import ProxyState, TargetState
 from openmaskit.web.app import create_app
 from openmaskit.web.routes.custom_targets import _slugify
+
+
+def _stored(record):
+    """Decrypt + flatten the runtime config off a store row for assertions."""
+    return load_runtime_config(record["config_json"])
 
 
 @pytest_asyncio.fixture
@@ -78,10 +84,13 @@ class TestCustomTargetCreate:
         record = await state.store.get_server("my-postgres")
         assert record is not None
         assert record["name"] == "My Postgres"
-        assert record["config"]["transport"] == "stdio"
-        assert record["config"]["command"] == "uvx"
-        assert record["config"]["args"] == ["mcp-server-postgres"]
-        assert record["config"]["env"]["DATABASE_URI"] == "postgresql://localhost/test"
+        assert record["source"] == "custom"
+        assert record["backend_id"] is None
+        cfg = _stored(record)
+        assert cfg["transport"] == "stdio"
+        assert cfg["command"] == "uvx"
+        assert cfg["args"] == ["mcp-server-postgres"]
+        assert cfg["env"]["DATABASE_URI"] == "postgresql://localhost/test"
 
     @pytest.mark.anyio
     async def test_create_http_target(self, client, state):
@@ -96,9 +105,10 @@ class TestCustomTargetCreate:
         assert resp.status_code == 201
         record = await state.store.get_server("my-api")
         assert record is not None
-        assert record["config"]["transport"] == "http"
-        assert record["config"]["url"] == "https://mcp.example.com/mcp"
-        assert "oauth" not in record["config"]
+        cfg = _stored(record)
+        assert cfg["transport"] == "http"
+        assert cfg["url"] == "https://mcp.example.com/mcp"
+        assert "oauth" not in cfg
 
     @pytest.mark.anyio
     async def test_create_http_target_with_oauth(self, client, state):
@@ -113,9 +123,10 @@ class TestCustomTargetCreate:
         )
         assert resp.status_code == 201
         record = await state.store.get_server("oauth-server")
-        assert record["config"]["oauth"]["client_id"] == "abc"
-        assert record["config"]["oauth"]["client_secret"] == "xyz"
-        assert record["config"]["oauth"]["scope"] == "read"
+        cfg = _stored(record)
+        assert cfg["oauth"]["client_id"] == "abc"
+        assert cfg["oauth"]["client_secret"] == "xyz"
+        assert cfg["oauth"]["scope"] == "read"
 
     @pytest.mark.anyio
     async def test_create_missing_name(self, client):
@@ -155,7 +166,13 @@ class TestCustomTargetCreate:
 
     @pytest.mark.anyio
     async def test_create_duplicate_id(self, client, state):
-        await state.store.install_server("my-server", "My Server", {"transport": "stdio", "command": "uvx"})
+        await state.store.install_server(
+            "my-server",
+            "My Server",
+            source="custom",
+            backend_id=None,
+            config={"transport": "stdio", "command": "uvx"},
+        )
         resp = await client.post(
             "/api/targets/custom",
             json={"name": "My Server", "transport": "stdio", "command": "npx"},
@@ -217,7 +234,7 @@ class TestCustomTargetContainerNameValidation:
         )
         assert resp.status_code == 201
         record = await state.store.get_server("my-container")
-        assert "--name" in record["config"]["args"]
+        assert "--name" in _stored(record)["args"]
 
     @pytest.mark.anyio
     async def test_no_user_name_accepted(self, client):
@@ -253,12 +270,20 @@ class TestCustomTargetContainerNameValidation:
 class TestCustomTargetGet:
     @pytest.mark.anyio
     async def test_get_custom_target(self, client, state):
-        await state.store.install_server("my-db", "My DB", {"transport": "stdio", "command": "uvx", "args": ["pg"]})
+        await state.store.install_server(
+            "my-db",
+            "My DB",
+            source="custom",
+            backend_id=None,
+            config={"transport": "stdio", "command": "uvx", "args": ["pg"]},
+        )
         resp = await client.get("/api/targets/custom/my-db")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == "my-db"
         assert data["name"] == "My DB"
+        # GET returns the redacted display shape, not the runtime view —
+        # but command + args have no secrets so they pass through unchanged.
         assert data["config"]["command"] == "uvx"
 
     @pytest.mark.anyio
@@ -275,7 +300,13 @@ class TestCustomTargetGet:
 class TestCustomTargetUpdate:
     @pytest.mark.anyio
     async def test_update_custom_target(self, client, state):
-        await state.store.install_server("my-db", "My DB", {"transport": "stdio", "command": "uvx", "args": []})
+        await state.store.install_server(
+            "my-db",
+            "My DB",
+            source="custom",
+            backend_id=None,
+            config={"transport": "stdio", "command": "uvx", "args": []},
+        )
         resp = await client.post(
             "/api/targets/custom/my-db/update",
             json={"name": "My DB", "transport": "stdio", "command": "npx", "args": ["new-arg"]},
@@ -284,8 +315,9 @@ class TestCustomTargetUpdate:
         assert resp.json()["ok"] is True
 
         record = await state.store.get_server("my-db")
-        assert record["config"]["command"] == "npx"
-        assert record["config"]["args"] == ["new-arg"]
+        cfg = _stored(record)
+        assert cfg["command"] == "npx"
+        assert cfg["args"] == ["new-arg"]
 
     @pytest.mark.anyio
     async def test_update_config_target_forbidden(self, client):
@@ -307,7 +339,13 @@ class TestCustomTargetUpdate:
 class TestCustomTargetDelete:
     @pytest.mark.anyio
     async def test_delete_custom_target(self, client, state):
-        await state.store.install_server("my-db", "My DB", {"transport": "stdio", "command": "uvx"})
+        await state.store.install_server(
+            "my-db",
+            "My DB",
+            source="custom",
+            backend_id=None,
+            config={"transport": "stdio", "command": "uvx"},
+        )
         resp = await client.post("/api/targets/custom/my-db/delete")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -340,6 +378,13 @@ class TestApiTargetsEditable:
 
     @pytest.mark.anyio
     async def test_custom_target_editable(self, client, state):
+        await state.store.install_server(
+            "my-custom",
+            "My Custom",
+            source="custom",
+            backend_id=None,
+            config={"transport": "stdio", "command": "uvx"},
+        )
         engine = MaskingEngine([], state.store, target_name="my-custom")
         target = TargetState(name="my-custom", engine=engine)
         state.targets["my-custom"] = target
@@ -348,3 +393,56 @@ class TestApiTargetsEditable:
         data = resp.json()
         t = next(t for t in data["targets"] if t["name"] == "my-custom")
         assert t["editable"] is True
+
+    @pytest.mark.anyio
+    async def test_marketplace_target_not_editable(self, client, state):
+        """A row with source='marketplace' cannot be edited via the custom
+        target API. The Edit button on the Servers page is hidden via this flag."""
+        await state.store.install_server(
+            "slack",
+            "Slack",
+            source="marketplace",
+            backend_id="catalog-uuid",
+            config={"transport": "http", "url": "https://mcp.slack.com/mcp"},
+        )
+        engine = MaskingEngine([], state.store, target_name="slack")
+        target = TargetState(name="slack", engine=engine)
+        state.targets["slack"] = target
+
+        resp = await client.get("/api/targets")
+        data = resp.json()
+        t = next(t for t in data["targets"] if t["name"] == "slack")
+        assert t["editable"] is False
+        assert t["source"] == "marketplace"
+        assert t["backend_id"] == "catalog-uuid"
+
+    @pytest.mark.anyio
+    async def test_marketplace_target_blocked_on_custom_endpoints(self, client, state):
+        """GET / update / delete on a marketplace row through the custom-target
+        API return 403 — the gate fires before any DB/connect work."""
+        await state.store.install_server(
+            "slack",
+            "Slack",
+            source="marketplace",
+            backend_id="catalog-uuid",
+            config={"transport": "http", "url": "https://mcp.slack.com/mcp"},
+        )
+
+        get_resp = await client.get("/api/targets/custom/slack")
+        assert get_resp.status_code == 403
+        assert "marketplace" in get_resp.json()["error"].lower()
+
+        upd_resp = await client.post(
+            "/api/targets/custom/slack/update",
+            json={"name": "Slack", "transport": "http", "url": "https://evil.example"},
+        )
+        assert upd_resp.status_code == 403
+
+        del_resp = await client.post("/api/targets/custom/slack/delete")
+        assert del_resp.status_code == 403
+
+        # The row is untouched: same URL, same name.
+        from openmaskit.config_serde import load_runtime_config
+        record = await state.store.get_server("slack")
+        assert record is not None
+        assert load_runtime_config(record["config_json"])["url"] == "https://mcp.slack.com/mcp"

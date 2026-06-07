@@ -80,4 +80,4 @@ class TestVersion:
         """__version__ is a non-empty string matching pyproject.toml or 'unknown'."""
         assert isinstance(__version__, str)
         assert len(__version__) > 0
-        assert __version__ == "0.5.0" or __version__ == "unknown"
+        assert __version__ == "0.6.0" or __version__ == "unknown"

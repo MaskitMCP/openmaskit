@@ -575,53 +575,77 @@ class TestMappingsPkMigration:
             await s2.close()
 
 
-class TestServerConfigDecryptFail:
-    """A single undecryptable config_enc row used to raise out of the list
-    queries and break the entire Servers page; verify it now surfaces as
-    ``config=None`` and other rows still come through."""
+class TestServerSchemaContract:
+    """The store API hands callers raw ``config_json`` text plus the new
+    ``source`` and ``backend_id`` columns. Loading and redaction live in
+    ``openmaskit.config_serde`` — see ``test_config_serde.py``. Here we just
+    verify the column contract.
+    """
 
     @pytest.mark.anyio
-    async def test_get_installed_servers_handles_bad_row(self, store):
-        await store.install_server("good", "Good", {"transport": "http", "url": "http://x"})
-        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
-        # Corrupt the bad row's config_enc blob.
-        await store._db.execute(
-            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
-            (b"not-a-valid-fernet-blob", "bad"),
+    async def test_install_custom_sets_source_and_null_backend_id(self, store):
+        await store.install_server(
+            "myhost",
+            "Myhost",
+            source="custom",
+            backend_id=None,
+            config={"transport": "http", "url": "http://x"},
         )
-        await store._db.commit()
-
-        rows = await store.get_installed_servers()
-        by_id = {r["id"]: r for r in rows}
-        assert by_id["good"]["config"] == {"transport": "http", "url": "http://x"}
-        assert by_id["bad"]["config"] is None
+        row = await store.get_server("myhost")
+        assert row["source"] == "custom"
+        assert row["backend_id"] is None
+        # config_json is plaintext JSON (with secrets inline-encrypted in
+        # general — none in this trivial config).
+        assert '"url":"http://x"' in row["config_json"].replace(" ", "")
 
     @pytest.mark.anyio
-    async def test_get_all_servers_handles_bad_row(self, store):
-        await store.install_server("good", "Good", {"transport": "http", "url": "http://x"})
-        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
-        await store._db.execute(
-            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
-            (b"not-a-valid-fernet-blob", "bad"),
+    async def test_install_marketplace_carries_backend_id(self, store):
+        await store.install_server(
+            "slack",
+            "Slack",
+            source="marketplace",
+            backend_id="catalog-uuid-123",
+            config={"transport": "http", "url": "https://mcp.slack.com/mcp"},
         )
-        await store._db.commit()
-
-        rows = await store.get_all_servers()
-        by_id = {r["id"]: r for r in rows}
-        # get_all_servers JSON-encodes the config; bad row gets a literal None.
-        assert by_id["good"]["config"] == '{"transport": "http", "url": "http://x"}'
-        assert by_id["bad"]["config"] is None
+        row = await store.get_server("slack")
+        assert row["source"] == "marketplace"
+        assert row["backend_id"] == "catalog-uuid-123"
 
     @pytest.mark.anyio
-    async def test_get_server_returns_none_config_for_bad_row(self, store):
-        await store.install_server("bad", "Bad", {"transport": "http", "url": "http://y"})
-        await store._db.execute(
-            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
-            (b"not-a-valid-fernet-blob", "bad"),
-        )
-        await store._db.commit()
+    async def test_install_rejects_invalid_source(self, store):
+        import pytest as _pt
+        with _pt.raises(ValueError, match="Invalid source"):
+            await store.install_server(
+                "x", "X", source="legacy", backend_id=None,
+                config={"transport": "http", "url": "x"},
+            )
 
-        record = await store.get_server("bad")
-        assert record is not None
-        assert record["id"] == "bad"
-        assert record["config"] is None
+    @pytest.mark.anyio
+    async def test_update_server_preserves_secret_when_omitted(self, store):
+        """End-to-end check that update_server uses ``merge_update`` semantics."""
+        from openmaskit.config_serde import load_runtime_config
+        await store.install_server(
+            "h",
+            "H",
+            source="custom",
+            backend_id=None,
+            config={
+                "transport": "http",
+                "url": "https://x",
+                "oauth": {"client_id": "cid", "client_secret": "original-secret"},
+            },
+        )
+        # User edits the URL but leaves client_secret blank — should keep stored.
+        await store.update_server(
+            "h",
+            "H",
+            {
+                "transport": "http",
+                "url": "https://new-url",
+                "oauth": {"client_id": "cid", "client_secret": ""},
+            },
+        )
+        row = await store.get_server("h")
+        runtime = load_runtime_config(row["config_json"])
+        assert runtime["url"] == "https://new-url"
+        assert runtime["oauth"]["client_secret"] == "original-secret"

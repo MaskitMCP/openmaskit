@@ -204,7 +204,13 @@ class TestMarketplaceList:
     @pytest.mark.anyio
     async def test_shows_installed_status(self, client, state):
         store = state.store
-        await store.install_server("slack", "Slack", {"transport": "http", "url": "https://mcp.slack.com/mcp"})
+        await store.install_server(
+            "slack",
+            "Slack",
+            source="marketplace",
+            backend_id="slack-catalog-uuid",
+            config={"transport": "http", "url": "https://mcp.slack.com/mcp"},
+        )
 
         resp = await client.get("/api/marketplace")
         data = resp.json()
@@ -244,13 +250,22 @@ class TestMarketplaceInstall:
 
         record = await state.store.get_server("postgres")
         assert record is not None
-        assert record["config"]["env"]["DATABASE_URI"] == "postgresql://localhost/test"
+        from openmaskit.config_serde import load_runtime_config
+        runtime_config = load_runtime_config(record["config_json"])
+        assert runtime_config["env"]["DATABASE_URI"] == "postgresql://localhost/test"
+        # Marketplace install carries source + backend_id on the row.
+        assert record["source"] == "marketplace"
+        assert record["backend_id"] is not None
 
     @pytest.mark.anyio
     async def test_install_already_installed(self, client, state):
         """Cannot install server that's already installed."""
         await state.store.install_server(
-            "docker", "Docker", {"transport": "stdio", "command": "uvx", "args": ["mcp-server-docker"]}
+            "docker",
+            "Docker",
+            source="marketplace",
+            backend_id="docker-uuid",
+            config={"transport": "stdio", "command": "uvx", "args": ["mcp-server-docker"]},
         )
         resp = await client.post(
             "/api/marketplace/install",
@@ -641,7 +656,13 @@ class TestResolveMcpUrl:
 class TestMarketplaceDeactivate:
     @pytest.mark.anyio
     async def test_deactivate_installed_server(self, client, state):
-        await state.store.install_server("docker", "Docker", {"transport": "stdio", "command": "uvx"})
+        await state.store.install_server(
+            "docker",
+            "Docker",
+            source="marketplace",
+            backend_id="docker-uuid",
+            config={"transport": "stdio", "command": "uvx"},
+        )
         resp = await client.post(
             "/api/marketplace/deactivate",
             json={"server_id": "docker"},
@@ -672,7 +693,13 @@ class TestMarketplaceActivate:
 
     @pytest.mark.anyio
     async def test_activate_already_active_target(self, client, state):
-        await state.store.install_server("docker", "Docker", {"transport": "stdio", "command": "uvx"})
+        await state.store.install_server(
+            "docker",
+            "Docker",
+            source="marketplace",
+            backend_id="docker-uuid",
+            config={"transport": "stdio", "command": "uvx"},
+        )
         engine = MaskingEngine([], state.store, target_name="docker")
         target = TargetState(name="docker", engine=engine)
         state.targets["docker"] = target
@@ -743,7 +770,13 @@ class TestMarketplaceVersionGating:
 
     @pytest.mark.anyio
     async def test_activate_returns_426_when_update_required(self, client, state):
-        await state.store.install_server("docker", "Docker", {"transport": "stdio", "command": "uvx"})
+        await state.store.install_server(
+            "docker",
+            "Docker",
+            source="marketplace",
+            backend_id="docker-uuid",
+            config={"transport": "stdio", "command": "uvx"},
+        )
         await state.store.deactivate_server("docker")
         state.version_status = {
             "supported": False,
@@ -765,7 +798,13 @@ class TestMarketplaceVersionGating:
 
     @pytest.mark.anyio
     async def test_deactivate_still_works_when_update_required(self, client, state):
-        await state.store.install_server("docker", "Docker", {"transport": "stdio", "command": "uvx"})
+        await state.store.install_server(
+            "docker",
+            "Docker",
+            source="marketplace",
+            backend_id="docker-uuid",
+            config={"transport": "stdio", "command": "uvx"},
+        )
         state.version_status = {"update_required": True, "latest_version": "9.9.9"}
         resp = await client.post(
             "/api/marketplace/deactivate",
