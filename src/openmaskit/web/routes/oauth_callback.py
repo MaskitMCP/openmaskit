@@ -201,7 +201,14 @@ async def _finish_broker_install(
     try:
         config = _build_config_from_server_info(server_info)
         icon_url = server_info.get("icon_url")
-        await store.install_server(handle, server_info["name"], config, icon_url)
+        await store.install_server(
+            handle,
+            server_info["name"],
+            source="marketplace",
+            backend_id=server_uuid,
+            config=config,
+            icon_url=icon_url,
+        )
         await manager.add_target(handle, config)
         logger.info(f"Successfully installed and connected: {handle}")
         return RedirectResponse(
@@ -282,7 +289,18 @@ async def _finish_local_install(
             server_info = state_data.get("server_info") or {}
             name = server_info.get("name") or handle
             icon_url = state_data.get("icon_url")
-            await store.install_server(handle, name, config, icon_url)
+            # ``_finish_local_install`` only fires for marketplace BYO/DCR
+            # installs (the only callers of ``_begin_oauth_install`` live in
+            # ``marketplace.py``). The catalog UUID lands here via
+            # ``server_info["id"]``.
+            await store.install_server(
+                handle,
+                name,
+                source="marketplace",
+                backend_id=server_info.get("id"),
+                config=config,
+                icon_url=icon_url,
+            )
             await manager.add_target(handle, config)
             logger.info(f"Installed and connected {handle}")
         return RedirectResponse(

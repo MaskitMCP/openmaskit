@@ -12,6 +12,11 @@ from uuid import uuid4
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 
+from openmaskit.config_serde import (
+    VALID_TYPES,
+    dump_config,
+    load_runtime_config,
+)
 from openmaskit.oauth import discovery
 from openmaskit.oauth.install_flow import prepare_oauth_install
 from openmaskit.security import TokenEncryption, validate_server_id
@@ -122,12 +127,37 @@ def _require_supported(state) -> JSONResponse | None:
     return None
 
 
+def _stamp_types(user_values: dict, meta_declarations: dict | None) -> dict:
+    """Build the typed ``{KEY: {value, type}}`` map for env / headers.
+
+    For each user-supplied value, looks up its catalog declaration to pick the
+    declared type. Falls back to ``"secret"`` when the catalog doesn't declare
+    a type — conservative default so redaction never accidentally leaks an
+    untagged value.
+    """
+    declarations = meta_declarations or {}
+    out: dict[str, dict] = {}
+    for k, v in (user_values or {}).items():
+        declared = declarations.get(k)
+        type_ = "secret"
+        if isinstance(declared, dict):
+            t = declared.get("type", "secret")
+            if t in VALID_TYPES:
+                type_ = t
+        out[k] = {"value": v, "type": type_}
+    return out
+
+
 def _build_config_from_server_info(
     server_info: dict,
     user_env_vars: dict | None = None,
     user_args: dict | None = None
 ) -> dict:
     """Build upstream config from backend server info.
+
+    The shape carries typed ``env`` entries so the storage layer knows which
+    values are secret and the API can redact them precisely. Catalog UUID is
+    not included — it's stored as a separate column.
 
     Args:
         server_info: Server configuration from backend
@@ -139,7 +169,6 @@ def _build_config_from_server_info(
         config = {
             "transport": "http",
             "url": server_info["mcp_host"],
-            "backend_id": server_info.get("id"),  # Preserve for reauthorize/reconfigure
         }
         # Add OAuth config if the server requires OAuth
         # Token is already stored by oauth_callback, upstream will load it from file
@@ -156,10 +185,12 @@ def _build_config_from_server_info(
         # empty values. (Catalog meta.env values may be metadata dicts, not real
         # values, so we can't pass them through as-is.)
         if user_env_vars:
-            env = user_env_vars
+            env_values = user_env_vars
         else:
             raw_env = meta.get("env", {})
-            env = {k: (v if isinstance(v, str) else "") for k, v in raw_env.items()}
+            env_values = {
+                k: (v if isinstance(v, str) else "") for k, v in raw_env.items()
+            }
 
         # Process user_args into meta.user_args format
         processed_user_args = {}
@@ -179,8 +210,7 @@ def _build_config_from_server_info(
             "transport": "stdio",
             "command": meta.get("command", ""),
             "args": meta.get("args", []),
-            "env": env,
-            "backend_id": server_info.get("id"),  # Preserve for reconfigure
+            "env": _stamp_types(env_values, meta.get("env")),
         }
 
         if processed_user_args:
@@ -480,8 +510,7 @@ async def marketplace_install(request: Request):
         config = {
             "transport": "http",
             "url": resolved_url,
-            "headers": user_headers,
-            "backend_id": server_info.get("id"),
+            "headers": _stamp_types(user_headers, declared_headers),
         }
         return await _install_and_connect(store, manager, server_id, server_info, config)
 
@@ -569,15 +598,34 @@ async def _begin_oauth_install(
 async def _install_and_connect(store, manager, server_id, server_info, config) -> JSONResponse:
     """Persist a marketplace server and attempt to connect it. On connect failure,
     the server is left installed but deactivated so the user can retry from the UI.
+
+    ``config`` is the structured shape (typed env/headers). It's passed to
+    ``manager.add_target`` directly because runtime code reads from flat
+    ``{KEY: value}`` maps, and our structured shape contains string values
+    that read identically; the serde at the storage boundary handles
+    encryption.
     """
     icon_url = server_info.get("icon_url")
-    await store.install_server(server_id, server_info["name"], config, icon_url)
+    backend_id = server_info.get("id")
+    await store.install_server(
+        server_id,
+        server_info["name"],
+        source="marketplace",
+        backend_id=backend_id,
+        config=config,
+        icon_url=icon_url,
+    )
+
+    # manager.add_target reads env/headers as flat {KEY: value} maps; our
+    # structured shape uses {value, type} wrappers. Pass the flattened runtime
+    # view so connect_upstream sees what it expects.
+    runtime_config = load_runtime_config(dump_config(config))
 
     connected = False
     error_msg = None
     if manager:
         try:
-            await manager.add_target(server_id, config)
+            await manager.add_target(server_id, runtime_config)
             connected = True
             logger.info(f"Successfully connected marketplace server: {server_id}")
         except Exception as exc:
@@ -616,7 +664,13 @@ async def marketplace_reauthorize(request: Request):
     if not existing:
         return JSONResponse({"error": "Server not installed"}, status_code=404)
 
-    config = existing["config"]
+    try:
+        config = load_runtime_config(existing["config_json"])
+    except Exception as exc:
+        logger.exception(f"Cannot reauthorize {target_id}: config not loadable")
+        return JSONResponse(
+            {"error": f"Server config not loadable: {exc}"}, status_code=500
+        )
     oauth_cfg = config.get("oauth") or {}
     if not oauth_cfg:
         return JSONResponse(
@@ -629,7 +683,7 @@ async def marketplace_reauthorize(request: Request):
     if is_hosted_broker:
         if not backend_client:
             return JSONResponse({"error": "Backend not available"}, status_code=503)
-        backend_id = config.get("backend_id")
+        backend_id = existing["backend_id"]
         if not backend_id:
             return JSONResponse(
                 {"error": "Server missing backend_id; cannot reauthorize"},
@@ -776,7 +830,13 @@ async def marketplace_activate(request: Request):
     if server_id in state.targets:
         return JSONResponse({"error": "Server is already active"}, status_code=409)
 
-    config = existing["config"]
+    try:
+        config = load_runtime_config(existing["config_json"])
+    except Exception as exc:
+        logger.exception("Cannot activate %s: config not loadable", server_id)
+        return JSONResponse(
+            {"error": f"Server config not loadable: {exc}"}, status_code=500
+        )
     connected = False
     error_msg = None
 
@@ -821,17 +881,19 @@ async def reconfigure_target(request: Request):
     if not server:
         return JSONResponse({"error": "Server not found"}, status_code=404)
 
-    config = server["config"]
+    # Read the on-disk structured shape directly so the typed env/header
+    # wrappers and inline-encrypted secrets pass through to the re-dump
+    # unchanged. backend_id comes from the row's column, not the config.
+    stored_structured = json.loads(server["config_json"])
+    backend_id = server["backend_id"]
 
     # Get configurable_args schema (from backend if marketplace server)
     configurable_args = []
-    if backend_client and backend_client.enabled:
+    if backend_client and backend_client.enabled and backend_id:
         try:
-            backend_id = config.get("backend_id")
-            if backend_id:
-                server_info = await backend_client.get_server_info(backend_id)
-                if server_info:
-                    configurable_args = server_info.get("meta", {}).get("configurable_args", [])
+            server_info = await backend_client.get_server_info(backend_id)
+            if server_info:
+                configurable_args = server_info.get("meta", {}).get("configurable_args", [])
         except Exception as e:
             logger.warning(f"Failed to fetch configurable_args for {target_id}: {e}")
 
@@ -848,19 +910,16 @@ async def reconfigure_target(request: Request):
                     "arg_format": arg_def["arg_format"]
                 }
 
-    # Update config
-    if "meta" not in config:
-        config["meta"] = {}
-    config["meta"]["user_args"] = processed_user_args
+    # Update meta.user_args; the typed env/header wrappers stay intact.
+    stored_structured.setdefault("meta", {})["user_args"] = processed_user_args
+    await store.update_server_config(target_id, stored_structured)
 
-    # Save to DB
-    await store.update_server_config(target_id, config)
-
-    # Reconnect: disconnect then add_target with new config
+    # Reconnect with the runtime view (env/headers flattened, secrets decrypted).
+    runtime_config = load_runtime_config(json.dumps(stored_structured))
     try:
         if manager:
             await manager.remove_target(target_id)
-            await manager.add_target(target_id, config)
+            await manager.add_target(target_id, runtime_config)
         logger.info(f"Reconfigured and reconnected {target_id}")
         return JSONResponse({"success": True})
     except Exception as e:

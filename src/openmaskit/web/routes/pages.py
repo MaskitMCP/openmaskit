@@ -13,6 +13,11 @@ from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage, JSONRPCRequest
 
 from openmaskit import __version__
+from openmaskit.config_serde import load_display_config
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
@@ -58,6 +63,34 @@ async def api_config(request: Request):
     })
 
 
+def _display_config_for_record(record: dict | None) -> dict | None:
+    """Best-effort redacted display config for an mcp_servers row."""
+    if not record:
+        return None
+    try:
+        return load_display_config(record["config_json"])
+    except Exception:
+        logger.warning(
+            "Failed to parse config_json for %r; returning null config",
+            record.get("id"),
+            exc_info=True,
+        )
+        return None
+
+
+def _editable(name: str, record: dict | None, state) -> bool:
+    """A row is editable through the custom-target API only when it's not from
+    the config file AND was added as a custom target. Marketplace rows live on
+    their own (Marketplace tab) lifecycle; editing them through the dashboard
+    Edit modal would break their relationship with the catalog entry.
+    """
+    if name in state.config_target_ids:
+        return False
+    if record is None:
+        return False  # config-file-only target or unknown — not editable
+    return record.get("source") == "custom"
+
+
 async def api_targets(request: Request):
     state = request.app.state.proxy_state
     store = state.store
@@ -74,9 +107,6 @@ async def api_targets(request: Request):
         seen_ids.add(name)
         server_record = db_servers_map.get(name)
 
-        # A target is editable only if it's NOT from config file
-        editable = name not in state.config_target_ids
-
         targets.append({
             "name": name,
             "display_name": server_record["name"] if server_record else name,
@@ -86,15 +116,17 @@ async def api_targets(request: Request):
             "tool_count": len(ts.tool_schemas),
             "rule_count": len(ts.engine.rules),
             "mapper_count": len(ts.engine.mappers),
-            "editable": editable,
-            "config": server_record["config"] if server_record else None,
+            "editable": _editable(name, server_record, state),
+            "source": server_record["source"] if server_record else "config",
+            "backend_id": server_record.get("backend_id") if server_record else None,
+            "config": _display_config_for_record(server_record),
         })
 
     # Then, add inactive servers from database that aren't in state.targets.
     # We include any row not in state.targets, even if the DB still marks it
     # active — a row that's "active in DB but not connected" is an orphan
-    # (failed startup reconnect, undecryptable config, etc.) and the user
-    # needs to see it to act on it.
+    # (failed startup reconnect, malformed config, etc.) and the user needs
+    # to see it to act on it.
     for server in db_servers:
         if server["id"] not in seen_ids:
             targets.append({
@@ -106,8 +138,10 @@ async def api_targets(request: Request):
                 "tool_count": 0,
                 "rule_count": 0,
                 "mapper_count": 0,
-                "editable": server["id"] not in state.config_target_ids,
-                "config": server["config"],
+                "editable": _editable(server["id"], server, state),
+                "source": server["source"],
+                "backend_id": server.get("backend_id"),
+                "config": _display_config_for_record(server),
             })
 
     return JSONResponse({"targets": targets})

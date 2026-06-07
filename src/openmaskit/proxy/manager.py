@@ -12,6 +12,7 @@ from anyio.streams.memory import MemoryObjectSendStream
 
 from mcp.shared.message import SessionMessage
 
+from openmaskit.config_serde import load_runtime_config
 from openmaskit.container import stop_container
 from openmaskit.masking.engine import MaskingEngine
 from openmaskit.models import UpstreamHttpConfig, UpstreamStdioConfig
@@ -240,11 +241,22 @@ class TargetManager:
                             # Success! Reconnect the target
                             logger.info(f"Token refreshed, reconnecting {server_id}")
                             record = await self._store.get_server(server_id)
-                            config = record["config"] if record else None
+                            try:
+                                config = (
+                                    load_runtime_config(record["config_json"])
+                                    if record
+                                    else None
+                                )
+                            except Exception:
+                                logger.exception(
+                                    f"Cannot reconnect {server_id}: stored config "
+                                    f"not loadable; uninstall and re-add the server."
+                                )
+                                return
                             if config is None:
                                 logger.error(
-                                    f"Cannot reconnect {server_id}: stored config is "
-                                    f"undecryptable; uninstall and re-add the server."
+                                    f"Cannot reconnect {server_id}: no stored config; "
+                                    f"uninstall and re-add the server."
                                 )
                                 return
 

@@ -8,19 +8,12 @@ from pathlib import Path
 
 import aiosqlite
 
+from openmaskit.config_serde import dump_config, merge_update
 from openmaskit.masking.mappers import ResponseMapper
 from openmaskit.masking.rules import ArgumentGuardrail, ArgumentInjection, MaskingRule
-from openmaskit.security import TokenEncryption
 
 logger = logging.getLogger(__name__)
 
-
-class ConfigDecryptionError(RuntimeError):
-    """Raised when an mcp_servers config row cannot be decrypted.
-
-    Indicates either a corrupted blob or a key mismatch. The caller should
-    surface this — silently treating it as "no record" would hide the problem.
-    """
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS mappings (
@@ -66,7 +59,9 @@ CREATE TABLE IF NOT EXISTS hidden_tools (
 CREATE TABLE IF NOT EXISTS mcp_servers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    config_enc BLOB NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('marketplace', 'custom')),
+    backend_id TEXT,
+    config_json TEXT NOT NULL,
     active BOOLEAN NOT NULL DEFAULT 1,
     icon_url TEXT,
     installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -116,22 +111,6 @@ class MaskingStore:
         # not globally; two targets can independently hold "host_1" without
         # colliding.
         self._alias_counters: dict[str, dict[str, int]] = {}
-        # Server config columns are Fernet-encrypted at rest because they hold
-        # user-supplied credentials (stdio env vars, HTTP static headers, OAuth
-        # secrets). Same key file as OAuth token files.
-        self._encryption = TokenEncryption()
-
-    def _encrypt_config(self, config: dict) -> bytes:
-        return self._encryption.encrypt_bytes(json.dumps(config).encode("utf-8"))
-
-    def _decrypt_config(self, blob: bytes) -> dict:
-        try:
-            return json.loads(self._encryption.decrypt_bytes(blob).decode("utf-8"))
-        except Exception as exc:
-            raise ConfigDecryptionError(
-                "Failed to decrypt mcp_servers config blob — either the row is "
-                "corrupted or the encryption key has changed."
-            ) from exc
 
     @classmethod
     async def create(cls, path: str | Path) -> MaskingStore:
@@ -192,71 +171,7 @@ class MaskingStore:
             )
             await self._db.commit()
 
-        await self._migrate_mcp_servers_encryption()
         await self._migrate_mappings_pk()
-
-    async def _migrate_mcp_servers_encryption(self) -> None:
-        """Migrate mcp_servers.config (plaintext JSON TEXT) to config_enc (BLOB).
-
-        The on-disk plaintext column held user-supplied credentials (env vars,
-        OAuth secrets, and now HTTP headers). Encrypt them in place and drop
-        the plaintext column via the SQLite recreate-table dance.
-
-        Idempotent: a no-op once config_enc exists and config does not.
-        """
-        cursor = await self._db.execute("PRAGMA table_info(mcp_servers)")
-        cols = {row[1] for row in await cursor.fetchall()}
-        if "config" not in cols:
-            # Already migrated (or fresh install — _SCHEMA created the new table).
-            return
-
-        logger.info("Migrating mcp_servers.config → encrypted config_enc")
-
-        # Read every row's plaintext config first; we'll encrypt as we copy.
-        async with self._db.execute(
-            "SELECT id, name, config, active, icon_url, installed_at FROM mcp_servers"
-        ) as cur:
-            old_rows = await cur.fetchall()
-
-        # Recreate table dance: SQLite's ALTER TABLE DROP COLUMN is only
-        # available on 3.35+ and we don't want to assume that.
-        await self._db.executescript(
-            """
-            CREATE TABLE mcp_servers_new (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                config_enc BLOB NOT NULL,
-                active BOOLEAN NOT NULL DEFAULT 1,
-                icon_url TEXT,
-                installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-        for row in old_rows:
-            server_id, name, plaintext_config, active, icon_url, installed_at = row
-            try:
-                config = json.loads(plaintext_config) if plaintext_config else {}
-            except (TypeError, ValueError):
-                logger.warning(
-                    "mcp_servers row %s has invalid JSON config; storing empty dict",
-                    server_id,
-                )
-                config = {}
-            blob = self._encrypt_config(config)
-            await self._db.execute(
-                "INSERT INTO mcp_servers_new "
-                "(id, name, config_enc, active, icon_url, installed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (server_id, name, blob, active, icon_url, installed_at),
-            )
-
-        await self._db.execute("DROP TABLE mcp_servers")
-        await self._db.execute("ALTER TABLE mcp_servers_new RENAME TO mcp_servers")
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_mcp_servers_active ON mcp_servers(active)"
-        )
-        await self._db.commit()
-        logger.info("Migrated %d mcp_servers rows to encrypted storage", len(old_rows))
 
     async def _migrate_mappings_pk(self) -> None:
         """Rebuild ``mappings`` with PK ``(target_name, alias)``.
@@ -727,13 +642,42 @@ class MaskingStore:
         await self._db.commit()
         return cursor.rowcount > 0
 
-    # --- Marketplace Servers ---
+    # --- MCP Servers ---
+    #
+    # All marketplace and custom HTTP/stdio servers persist here. The schema
+    # carries source ('marketplace' | 'custom') and an optional backend_id
+    # (catalog UUID for marketplace rows) so editing/gating logic doesn't have
+    # to sniff for a backend_id inside the config dict to tell the two apart.
+    #
+    # On-disk shape: config_json is plaintext JSON with secrets inline-encrypted
+    # via config_serde — see openmaskit/config_serde.py for the boundary
+    # functions (dump_config / load_runtime_config / load_display_config /
+    # merge_update). Callers receive the raw config_json string and pick the
+    # right loader for their use case.
 
-    async def install_server(self, server_id: str, name: str, config: dict, icon_url: str | None = None) -> None:
-        blob = self._encrypt_config(config)
+    async def install_server(
+        self,
+        server_id: str,
+        name: str,
+        source: str,
+        backend_id: str | None,
+        config: dict,
+        icon_url: str | None = None,
+    ) -> None:
+        """Fresh install / reinstall — INSERT OR REPLACE.
+
+        Used both for first-time install and for ``_finish_local_install``
+        reauthorize-completion writes (full fresh config from the OAuth flow).
+        Use ``update_server`` when you want preserve-on-absence merge semantics.
+        """
+        if source not in ("marketplace", "custom"):
+            raise ValueError(f"Invalid source {source!r}")
+        config_json = dump_config(config)
         await self._db.execute(
-            "INSERT OR REPLACE INTO mcp_servers (id, name, config_enc, active, icon_url) VALUES (?, ?, ?, 1, ?)",
-            (server_id, name, blob, icon_url),
+            "INSERT OR REPLACE INTO mcp_servers "
+            "(id, name, source, backend_id, config_json, active, icon_url) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?)",
+            (server_id, name, source, backend_id, config_json, icon_url),
         )
         await self._db.commit()
 
@@ -752,32 +696,53 @@ class MaskingStore:
         return cursor.rowcount > 0
 
     async def get_all_servers(self) -> list[dict]:
-        """Get all servers (active AND inactive) from database.
+        """Get all servers (active AND inactive).
 
-        `config` is returned as a JSON string (not a dict) to preserve the
-        existing contract with /api/targets — the frontend does
-        `JSON.parse(target.config)` on the value.
+        Returns rows with raw ``config_json`` strings — callers pick
+        ``load_runtime_config`` or ``load_display_config`` from
+        ``openmaskit.config_serde``.
         """
-        query = "SELECT id, name, config_enc, active, icon_url FROM mcp_servers ORDER BY name"
+        query = (
+            "SELECT id, name, source, backend_id, config_json, active, icon_url "
+            "FROM mcp_servers ORDER BY name"
+        )
         async with self._db.execute(query) as cursor:
             rows = await cursor.fetchall()
-            out: list[dict] = []
-            for row in rows:
-                cfg = self._safe_decrypt_config(row[2], row[0])
-                out.append({
-                    "id": row[0],
-                    "name": row[1],
-                    "config": json.dumps(cfg) if cfg is not None else None,
-                    "active": bool(row[3]),
-                    "icon_url": row[4],
-                })
-            return out
+            return [
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "source": r[2],
+                    "backend_id": r[3],
+                    "config_json": r[4],
+                    "active": bool(r[5]),
+                    "icon_url": r[6],
+                }
+                for r in rows
+            ]
 
-    async def update_server(self, server_id: str, name: str, config: dict) -> bool:
-        blob = self._encrypt_config(config)
+    async def update_server(
+        self, server_id: str, name: str, incoming_config: dict
+    ) -> bool:
+        """Update a server's name + config with preserve-on-absence merge.
+
+        Secret fields the caller omitted, sent as empty, or sent as the
+        redaction sentinel are kept from storage (still encrypted). Used by
+        the Edit modal so users don't have to re-type every secret on every
+        edit. For full-replace writes (e.g. OAuth reauthorize completion),
+        call ``install_server`` instead.
+        """
+        async with self._db.execute(
+            "SELECT config_json FROM mcp_servers WHERE id = ?", (server_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return False
+        merged = merge_update(row[0], incoming_config)
+        config_json = dump_config(merged)
         cursor = await self._db.execute(
-            "UPDATE mcp_servers SET name = ?, config_enc = ? WHERE id = ?",
-            (name, blob, server_id),
+            "UPDATE mcp_servers SET name = ?, config_json = ? WHERE id = ?",
+            (name, config_json, server_id),
         )
         await self._db.commit()
         return cursor.rowcount > 0
@@ -790,10 +755,21 @@ class MaskingStore:
         return cursor.rowcount > 0
 
     async def get_installed_servers(self, active_only: bool = False) -> list[dict]:
+        """Get installed servers. Used by startup reconnect + marketplace
+        catalog enrichment.
+
+        Returns rows with raw ``config_json`` strings — see ``get_all_servers``.
+        """
         if active_only:
-            query = "SELECT id, name, config_enc, active, icon_url, installed_at FROM mcp_servers WHERE active = 1"
+            query = (
+                "SELECT id, name, source, backend_id, config_json, active, icon_url, installed_at "
+                "FROM mcp_servers WHERE active = 1"
+            )
         else:
-            query = "SELECT id, name, config_enc, active, icon_url, installed_at FROM mcp_servers"
+            query = (
+                "SELECT id, name, source, backend_id, config_json, active, icon_url, installed_at "
+                "FROM mcp_servers"
+            )
 
         async with self._db.execute(query) as cursor:
             rows = await cursor.fetchall()
@@ -801,17 +777,24 @@ class MaskingStore:
                 {
                     "id": r[0],
                     "name": r[1],
-                    "config": self._safe_decrypt_config(r[2], r[0]),
-                    "active": bool(r[3]),
-                    "icon_url": r[4],
-                    "installed_at": r[5],
+                    "source": r[2],
+                    "backend_id": r[3],
+                    "config_json": r[4],
+                    "active": bool(r[5]),
+                    "icon_url": r[6],
+                    "installed_at": r[7],
                 }
                 for r in rows
             ]
 
     async def get_server(self, server_id: str) -> dict | None:
+        """Get a single server row.
+
+        Returns the row with raw ``config_json`` — see ``get_all_servers``.
+        """
         async with self._db.execute(
-            "SELECT id, name, config_enc, active, installed_at FROM mcp_servers WHERE id = ?",
+            "SELECT id, name, source, backend_id, config_json, active, icon_url, installed_at "
+            "FROM mcp_servers WHERE id = ?",
             (server_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -820,36 +803,25 @@ class MaskingStore:
             return {
                 "id": row[0],
                 "name": row[1],
-                "config": self._safe_decrypt_config(row[2], row[0]),
-                "active": bool(row[3]),
-                "installed_at": row[4],
+                "source": row[2],
+                "backend_id": row[3],
+                "config_json": row[4],
+                "active": bool(row[5]),
+                "icon_url": row[6],
+                "installed_at": row[7],
             }
 
-    def _safe_decrypt_config(self, blob: bytes, server_id: str) -> dict | None:
-        """Decrypt ``config_enc`` for a row, returning ``None`` on failure.
+    async def update_server_config(self, server_id: str, config: dict) -> None:
+        """Replace a server's config verbatim (no merge).
 
-        A single undecryptable row used to raise out of the enclosing list
-        query, which made the entire Servers page error out after a Fernet
-        key change. Per-row None gives the dashboard a chance to render the
-        rest of the list and lets the user clean up the bad row.
+        For flows that build the full intended config server-side
+        (marketplace user_args reconfigure). Use ``update_server`` when
+        applying user edits that may omit unchanged secrets.
         """
-        try:
-            return self._decrypt_config(blob)
-        except ConfigDecryptionError as exc:
-            logger.warning(
-                "Failed to decrypt config for server %r: %s. "
-                "Listing as broken; uninstall to clean up.",
-                server_id,
-                exc,
-            )
-            return None
-
-    async def update_server_config(self, server_id: str, config: dict):
-        """Update the config JSON for a server."""
-        blob = self._encrypt_config(config)
+        config_json = dump_config(config)
         await self._db.execute(
-            "UPDATE mcp_servers SET config_enc = ? WHERE id = ?",
-            (blob, server_id),
+            "UPDATE mcp_servers SET config_json = ? WHERE id = ?",
+            (config_json, server_id),
         )
         await self._db.commit()
 

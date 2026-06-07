@@ -130,7 +130,7 @@
                                 </template>
 
                                 <!-- Re-authorize button for OAuth-using servers -->
-                                <template x-if="target.parsedConfig && target.parsedConfig.oauth">
+                                <template x-if="target.config && target.config.oauth">
                                     <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :aria-label="'Re-authorize ' + target.display_name" :disabled="target.reauthorizing">
                                         <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
@@ -221,7 +221,7 @@
                                     </button>
 
                                     <!-- Re-authorize button for OAuth-using servers -->
-                                    <template x-if="target.parsedConfig && target.parsedConfig.oauth">
+                                    <template x-if="target.config && target.config.oauth">
                                         <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :disabled="target.reauthorizing" aria-label="Re-authorize this server">
                                             <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
@@ -254,8 +254,8 @@
                                 <h3 class="tgt-card-name" x-text="target.display_name"></h3>
                             </div>
                             <div class="tgt-card-meta">
-                                <span class="tgt-meta-badge" x-text="target.config ? JSON.parse(target.config).transport : 'broken'"
-                                      :title="target.config ? '' : 'Config could not be decrypted — the Fernet key likely changed. Delete this server to clean up.'"></span>
+                                <span class="tgt-meta-badge" x-text="target.config ? target.config.transport : 'broken'"
+                                      :title="target.config ? '' : 'Config could not be parsed — the row may be corrupted. Delete this server to clean up.'"></span>
                             </div>
                         </div>
                     </div>
@@ -852,25 +852,16 @@ function targetsPage() {
             const res = await fetch('/api/targets');
             if (!res.ok) throw new Error('Failed to load targets');
             const data = await res.json();
-            // Initialize reactive state properties for each target. `config`
-            // arrives as a JSON string from the API; parse once into
-            // `parsedConfig` so x-if conditions can reach into it directly
-            // instead of every template forgetting to JSON.parse.
-            this.targets = data.targets.map(t => {
-                let parsedConfig = null;
-                if (t.config) {
-                    try { parsedConfig = JSON.parse(t.config); }
-                    catch { parsedConfig = null; }
-                }
-                return {
-                    ...t,
-                    parsedConfig,
-                    deleting: false,
-                    deactivating: false,
-                    activating: false,
-                    reauthorizing: false,
-                };
-            });
+            // `target.config` is a redacted dict — secret values arrive as
+            // ••••••••, env/headers as {value, type} wrappers. Templates can
+            // read `target.config.oauth` etc. directly; no JSON.parse needed.
+            this.targets = data.targets.map(t => ({
+                ...t,
+                deleting: false,
+                deactivating: false,
+                activating: false,
+                reauthorizing: false,
+            }));
 
             // Split into active and inactive
             this.activeTargets = this.targets.filter(t => t.active);
@@ -920,6 +911,33 @@ function targetsPage() {
                 }
                 const data = await res.json();
                 const config = data.config;
+                // env / headers arrive as { KEY: {value, type} } from the
+                // redacted display config. Map to form rows; for ``secret``
+                // type, the redacted value is "••••••••" — show an empty
+                // input with a "leave blank to keep existing" placeholder so
+                // submit can elect to keep the stored encrypted value.
+                const REDACTED = '••••••••';
+                const envRows = config.env
+                    ? Object.entries(config.env).map(([k, entry]) => ({
+                        key: k,
+                        value: (entry.type === 'secret' || entry.value === REDACTED) ? '' : entry.value,
+                        type: entry.type || 'secret',
+                    }))
+                    : [{ key: '', value: '', type: 'secret' }];
+                const headerRows = config.headers
+                    ? Object.entries(config.headers).map(([k, entry]) => ({
+                        key: k,
+                        value: (entry.type === 'secret' || entry.value === REDACTED) ? '' : entry.value,
+                        type: entry.type || 'secret',
+                        secret: (entry.type || 'secret') === 'secret',
+                    }))
+                    : [];
+                // oauth.client_secret arrives redacted; show empty with the
+                // same leave-blank-to-keep contract.
+                const oauthClientSecret = (config.oauth?.client_secret === REDACTED)
+                    ? ''
+                    : (config.oauth?.client_secret || '');
+
                 this.modal = {
                     visible: true,
                     mode: 'edit',
@@ -928,7 +946,7 @@ function targetsPage() {
                     transport: config.transport || 'stdio',
                     command: config.command || '',
                     argsText: (config.args || []).join(' '),
-                    env: config.env ? Object.entries(config.env).map(([k, v]) => ({ key: k, value: v })) : [{ key: '', value: '' }],
+                    env: envRows,
                     url: config.url || '',
                     oauthEnabled: !!(config.oauth || config.meta?.oauth),
                     oauthMode: config.meta?.oauth?.issuer ? 'dcr' : 'manual',
@@ -938,12 +956,14 @@ function targetsPage() {
                     scopes: config.meta?.oauth?.scopes || [],
                     registrationToken: config.meta?.oauth?.registration_token || '',
 
-                    // Manual fields
-                    oauth: config.oauth ? { client_id: config.oauth.client_id || '', client_secret: config.oauth.client_secret || '', scope: config.oauth.scope || '' } : { client_id: '', client_secret: '', scope: '' },
+                    // Manual fields. client_secret is empty on edit when stored —
+                    // leave blank to keep the existing encrypted value, type a
+                    // new one to rotate.
+                    oauth: config.oauth
+                        ? { client_id: config.oauth.client_id || '', client_secret: oauthClientSecret, scope: config.oauth.scope || '' }
+                        : { client_id: '', client_secret: '', scope: '' },
 
-                    headers: config.headers
-                        ? Object.entries(config.headers).map(([k, v]) => ({ key: k, value: v, secret: true }))
-                        : [],
+                    headers: headerRows,
 
                     // Discovery state
                     discovering: false,
@@ -1059,12 +1079,22 @@ function targetsPage() {
             this.modal.saving = true;
             this.modal.error = null;
 
+            // env / header entries are emitted as { KEY: {value, type} }.
+            // The backend serde reads the type to decide what to encrypt and
+            // what to redact on display. On an update, an entry whose type is
+            // ``secret`` and value is empty signals "keep the stored value";
+            // a non-empty value rotates the secret. For non-secret types,
+            // value is replaced verbatim.
             const payload = { name: this.modal.name, transport: this.modal.transport };
             if (this.modal.transport === 'stdio') {
                 payload.command = this.modal.command;
                 payload.args = this.modal.argsText.trim().split(/\s+/).filter(Boolean);
                 const envObj = {};
-                this.modal.env.forEach(e => { if (e.key.trim()) envObj[e.key.trim()] = e.value; });
+                this.modal.env.forEach(e => {
+                    const key = (e.key || '').trim();
+                    if (!key) return;
+                    envObj[key] = { value: e.value || '', type: e.type || 'secret' };
+                });
                 payload.env = envObj;
             } else {
                 payload.url = this.modal.url;
@@ -1086,8 +1116,18 @@ function targetsPage() {
                 const headersObj = {};
                 this.modal.headers.forEach(h => {
                     const key = (h.key || '').trim();
+                    if (!key) return;
+                    // Honour explicit type when set; default to 'secret' to
+                    // match the existing "secret: true" hint on rows.
+                    const type_ = h.type || (h.secret === false ? 'text' : 'secret');
+                    // On Add, skip rows whose value is empty for either type.
+                    // On Edit, we let empty secret values through so the
+                    // backend can preserve the stored value (leave-blank-to-
+                    // keep). For non-secrets, empty is treated as "remove".
                     const val = (h.value || '').trim();
-                    if (key && val) headersObj[key] = val;
+                    if (this.modal.mode === 'add' && !val) return;
+                    if (type_ !== 'secret' && !val) return;
+                    headersObj[key] = { value: val, type: type_ };
                 });
                 if (Object.keys(headersObj).length > 0) {
                     payload.headers = headersObj;

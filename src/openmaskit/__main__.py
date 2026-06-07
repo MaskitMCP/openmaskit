@@ -19,6 +19,7 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 from mcp.shared.message import SessionMessage
 
 from openmaskit.config import load_config
+from openmaskit.config_serde import load_runtime_config
 from openmaskit.masking.engine import MaskingEngine
 from openmaskit.masking.rules import ArgumentGuardrail, ArgumentInjection, MaskingRule
 from openmaskit.masking.store import MaskingStore
@@ -318,13 +319,17 @@ async def async_main():
         server_id = record["id"]
         if server_id in state.targets:
             continue
-        if record["config"] is None:
-            # Config blob couldn't be decrypted (Fernet key changed or row
-            # corrupted). Don't try to connect — the dashboard will show it
-            # as broken so the user can uninstall and re-add.
+        try:
+            runtime_config = load_runtime_config(record["config_json"])
+        except Exception:
+            # config_json is malformed, or inline-encrypted secrets can't be
+            # decrypted (Fernet key changed). Don't try to connect — the
+            # dashboard will show it as broken so the user can uninstall and
+            # re-add.
             logger.warning(
-                "Skipping startup reconnect for %s: config not decryptable",
+                "Skipping startup reconnect for %s: config not loadable",
                 server_id,
+                exc_info=True,
             )
             continue
 
@@ -346,7 +351,7 @@ async def async_main():
             traffic_buffer=traffic_buffer,
         )
         state.targets[server_id] = target_state
-        marketplace_configs[server_id] = record["config"]
+        marketplace_configs[server_id] = runtime_config
 
     shutdown_event = anyio.Event()
     _install_shutdown_noise_filter(shutdown_event)

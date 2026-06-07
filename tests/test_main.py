@@ -129,7 +129,13 @@ class TestStartup:
             "command": "echo",
             "args": ["test"],
         }
-        await store.install_server("test-server", "Test Server", server_config)
+        await store.install_server(
+            "test-server",
+            "Test Server",
+            source="marketplace",
+            backend_id="catalog-id",
+            config=server_config,
+        )
 
         # Would verify server loaded in startup
         # Placeholder

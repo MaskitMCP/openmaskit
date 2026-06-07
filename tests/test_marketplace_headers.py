@@ -276,15 +276,18 @@ class TestMarketplaceInstallHeaderAuth:
         assert resp.status_code == 201, resp.text
         record = await state.store.get_server("datadog")
         assert record is not None
-        assert record["config"]["transport"] == "http"
-        assert record["config"]["url"] == DATADOG_ENTRY["mcp_host"]
-        assert record["config"]["headers"] == {
+        assert record["source"] == "marketplace"
+        assert record["backend_id"] == "datadog-uuid"
+        from openmaskit.config_serde import load_runtime_config
+        cfg = load_runtime_config(record["config_json"])
+        assert cfg["transport"] == "http"
+        assert cfg["url"] == DATADOG_ENTRY["mcp_host"]
+        assert cfg["headers"] == {
             "DD-API-KEY": "secret-1",
             "DD-APPLICATION-KEY": "secret-2",
         }
-        assert record["config"]["backend_id"] == "datadog-uuid"
         # No OAuth block on a pure header-auth install.
-        assert "oauth" not in record["config"]
+        assert "oauth" not in cfg
 
     @pytest.mark.anyio
     async def test_install_strips_empty_header_values(self, client, state):
@@ -300,7 +303,8 @@ class TestMarketplaceInstallHeaderAuth:
         )
         assert resp.status_code == 201
         record = await state.store.get_server("anthropic-key")
-        assert record["config"]["headers"] == {"X-API-KEY": "abc"}
+        from openmaskit.config_serde import load_runtime_config
+        assert load_runtime_config(record["config_json"])["headers"] == {"X-API-KEY": "abc"}
 
     @pytest.mark.anyio
     async def test_install_missing_required_header_returns_400(self, client):
@@ -327,7 +331,8 @@ class TestMarketplaceInstallHeaderAuth:
         )
         assert resp.status_code == 201
         record = await state.store.get_server("anthropic-key")
-        assert record["config"]["headers"] == {"X-API-KEY": "only-required"}
+        from openmaskit.config_serde import load_runtime_config
+        assert load_runtime_config(record["config_json"])["headers"] == {"X-API-KEY": "only-required"}
 
     @pytest.mark.anyio
     async def test_install_propagates_cleaner_error(self, client):
@@ -370,12 +375,13 @@ class TestMarketplaceInstallHeaderAuth:
 
 class TestHeaderConfigEncryptionRoundTrip:
     @pytest.mark.anyio
-    async def test_persisted_headers_are_encrypted_and_round_trip(
+    async def test_persisted_header_secrets_are_encrypted_inline(
         self, client, state
     ):
-        """Cross-cutting with PR-2: header secrets land in the encrypted
-        config blob, not as plaintext, and the value survives a fresh store
-        open (i.e. decryption works on a cold reload).
+        """Catalog-declared ``secret`` header values land on disk inline-encrypted
+        as ``{"enc": "ENCRYPTED:..."}`` — never as plaintext. The runtime loader
+        decrypts them back to the original value, but the on-disk ``config_json``
+        column contains only the ciphertext.
         """
         await client.post(
             "/api/marketplace/install",
@@ -389,16 +395,19 @@ class TestHeaderConfigEncryptionRoundTrip:
             },
         )
 
-        # Read the raw blob directly: it must NOT contain the plaintext.
+        # Raw config_json must not leak the plaintext secret value, but header
+        # names (non-secret structure) are fine to be visible.
         async with state.store._db.execute(
-            "SELECT config_enc FROM mcp_servers WHERE id = ?", ("datadog",)
+            "SELECT config_json FROM mcp_servers WHERE id = ?", ("datadog",)
         ) as cur:
             row = await cur.fetchone()
         assert row is not None
-        blob = row[0]
-        assert b"ROUNDTRIP-SECRET-XYZ" not in blob
-        assert b"DD-API-KEY" not in blob
+        raw = row[0]
+        assert "ROUNDTRIP-SECRET-XYZ" not in raw
+        assert "DD-API-KEY" in raw  # header name is structural, not secret
+        assert "ENCRYPTED:" in raw
 
-        # The public surface still returns the plaintext dict.
+        # The runtime loader brings the plaintext back.
         record = await state.store.get_server("datadog")
-        assert record["config"]["headers"]["DD-API-KEY"] == "ROUNDTRIP-SECRET-XYZ"
+        from openmaskit.config_serde import load_runtime_config
+        assert load_runtime_config(record["config_json"])["headers"]["DD-API-KEY"] == "ROUNDTRIP-SECRET-XYZ"
