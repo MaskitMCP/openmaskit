@@ -4391,19 +4391,6 @@ code {
     transform: none;
 }
 
-/* View details button */
-.tgt-action-view {
-    background: transparent;
-    color: #9ca3af;
-    border-color: transparent;
-}
-
-.tgt-action-view:hover {
-    background: rgba(156, 163, 175, 0.1);
-    border-color: #6b7280;
-    color: #d1d5db;
-}
-
 /* Delete button - destructive action */
 .tgt-action-delete {
     background: transparent;
@@ -4421,61 +4408,6 @@ code {
 .tgt-action-delete:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-}
-
-/* Details modal styling */
-.modal-details {
-    max-width: 700px;
-}
-
-.modal-details .modal-body {
-    padding: 0;
-    max-height: 600px;
-    overflow: hidden;
-}
-
-/* Configuration preview block */
-.config-preview {
-    background: #1a1d23;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-}
-
-.config-preview pre {
-    margin: 0;
-    padding: 1.5rem;
-    font-family: var(--font-mono);
-    font-size: 0.8rem;
-    line-height: 1.6;
-    color: #e1e4e8;
-    overflow-x: auto;
-    overflow-y: auto;
-    max-height: 550px;
-    tab-size: 2;
-    white-space: pre;
-    word-wrap: normal;
-
-    /* Refined scrollbar for code preview */
-    scrollbar-width: thin;
-    scrollbar-color: rgba(45, 212, 191, 0.3) transparent;
-}
-
-.config-preview pre::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-.config-preview pre::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.config-preview pre::-webkit-scrollbar-thumb {
-    background: rgba(45, 212, 191, 0.2);
-    border-radius: 4px;
-}
-
-.config-preview pre::-webkit-scrollbar-thumb:hover {
-    background: rgba(45, 212, 191, 0.4);
 }
 
 /* Spinner for activate button */

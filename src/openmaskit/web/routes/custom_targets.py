@@ -265,8 +265,18 @@ async def custom_target_activate(request: Request):
             connected = True
             await store.activate_server(target_id)  # Update DB only if connection succeeds
         except Exception as exc:
-            logger.warning("Failed to activate custom target %s: %s", target_id, exc)
-            error_msg = str(exc)
+            # anyio wraps task-group failures in an ExceptionGroup whose
+            # str() is "unhandled errors in a TaskGroup (N sub-exception)" —
+            # useless on its own. Unwrap to the real cause and log a full
+            # traceback so misconfigured upstreams (dead OAuth tokens, bad
+            # URL, etc.) are diagnosable from the terminal.
+            if hasattr(exc, "exceptions") and exc.exceptions:
+                error_msg = str(exc.exceptions[0])
+            else:
+                error_msg = str(exc)
+            logger.exception(
+                "Failed to activate custom target %s: %s", target_id, error_msg
+            )
 
     result = {"ok": True, "connected": connected}
     if error_msg:

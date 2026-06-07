@@ -130,7 +130,7 @@
                                 </template>
 
                                 <!-- Re-authorize button for OAuth-using servers -->
-                                <template x-if="target.config && target.config.oauth">
+                                <template x-if="target.parsedConfig && target.parsedConfig.oauth">
                                     <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :aria-label="'Re-authorize ' + target.display_name" :disabled="target.reauthorizing">
                                         <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
@@ -221,7 +221,7 @@
                                     </button>
 
                                     <!-- Re-authorize button for OAuth-using servers -->
-                                    <template x-if="target.config && target.config.oauth">
+                                    <template x-if="target.parsedConfig && target.parsedConfig.oauth">
                                         <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :disabled="target.reauthorizing" aria-label="Re-authorize this server">
                                             <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
@@ -232,16 +232,6 @@
                                             </svg>
                                         </button>
                                     </template>
-
-                                    <!-- View details button -->
-                                    <button class="tgt-action-btn tgt-action-view"
-                                            @click="openDetailsModal(target)"
-                                            title="View details"
-                                            aria-label="View server configuration">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-                                        </svg>
-                                    </button>
 
                                     <!-- Delete button -->
                                     <button class="tgt-action-btn tgt-action-delete"
@@ -273,38 +263,6 @@
             </div>
         </div>
     </main>
-
-    <!-- Details Modal -->
-    <div x-show="detailsModal.visible"
-         @click.self="closeDetailsModal()"
-         class="modal-backdrop"
-         @keydown.escape.window="closeDetailsModal()"
-         x-transition:enter="modal-enter" x-transition:enter-start="modal-enter-from" x-transition:enter-end="modal-enter-to"
-         x-transition:leave="modal-leave" x-transition:leave-start="modal-leave-from" x-transition:leave-end="modal-leave-to"
-         style="display: none;">
-        <div class="modal modal-target modal-details" @click.outside="closeDetailsModal()">
-            <div class="modal-header-bar">
-                <h3>Server Configuration</h3>
-                <button class="modal-close-btn" @click="closeDetailsModal()" title="Close" aria-label="Close details modal">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-            </div>
-
-            <div class="modal-body">
-                <div class="config-preview">
-                    <pre x-text="detailsModal.server
-                        ? (detailsModal.server.config
-                            ? JSON.stringify(JSON.parse(detailsModal.server.config), null, 2)
-                            : 'Config could not be decrypted — the Fernet key likely changed. Delete this server to clean up.')
-                        : ''"></pre>
-                </div>
-            </div>
-
-            <div class="modal-footer">
-                <button @click="closeDetailsModal()" class="btn btn-secondary">Close</button>
-            </div>
-        </div>
-    </div>
 
     <!-- Add/Edit Modal -->
     <div x-show="modal.visible" class="modal-backdrop" @keydown.escape.window="closeModal()"
@@ -867,11 +825,6 @@ function targetsPage() {
             hasSeenWelcome: false,
         },
 
-        detailsModal: {
-            visible: false,
-            server: null,
-        },
-
         showToast(msg, type = 'success') {
             this.toasts.push({ id: Date.now(), msg, type });
         },
@@ -899,14 +852,25 @@ function targetsPage() {
             const res = await fetch('/api/targets');
             if (!res.ok) throw new Error('Failed to load targets');
             const data = await res.json();
-            // Initialize reactive state properties for each target
-            this.targets = data.targets.map(t => ({
-                ...t,
-                deleting: false,
-                deactivating: false,
-                activating: false,
-                reauthorizing: false,
-            }));
+            // Initialize reactive state properties for each target. `config`
+            // arrives as a JSON string from the API; parse once into
+            // `parsedConfig` so x-if conditions can reach into it directly
+            // instead of every template forgetting to JSON.parse.
+            this.targets = data.targets.map(t => {
+                let parsedConfig = null;
+                if (t.config) {
+                    try { parsedConfig = JSON.parse(t.config); }
+                    catch { parsedConfig = null; }
+                }
+                return {
+                    ...t,
+                    parsedConfig,
+                    deleting: false,
+                    deactivating: false,
+                    activating: false,
+                    reauthorizing: false,
+                };
+            });
 
             // Split into active and inactive
             this.activeTargets = this.targets.filter(t => t.active);
@@ -1282,16 +1246,6 @@ function targetsPage() {
             } finally {
                 target.reauthorizing = false;
             }
-        },
-
-        openDetailsModal(target) {
-            this.detailsModal.server = target;
-            this.detailsModal.visible = true;
-        },
-
-        closeDetailsModal() {
-            this.detailsModal.visible = false;
-            this.detailsModal.server = null;
         },
 
         // Onboarding methods
