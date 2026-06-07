@@ -127,7 +127,7 @@ Two SQLite databases:
 - `hidden_tools` — tools hidden per server (blocked from agent access)
 - `guardrails` — argument validation rules that block tool calls matching dangerous patterns
 - `injections` — argument injection rules that inject/override values before forwarding
-- `mcp_servers` — marketplace and custom servers (id, name, config JSON, active flag). Used for both marketplace installs and custom targets added via the UI
+- `mcp_servers` — marketplace and custom servers. Columns: `id`, `name`, `source` (`'marketplace' \| 'custom'`), `backend_id` (catalog UUID for marketplace, NULL for custom), `config_json` (TEXT, plaintext JSON with secret values inline-encrypted as `{"enc": "ENCRYPTED:..."}` Fernet ciphertext), `active`, `icon_url`, `installed_at`. `env` and `headers` entries are stored as `{value, type}` wrappers — only `type: "secret"` values are encrypted, the rest stay plaintext. Serde lives in `openmaskit/config_serde.py`: `dump_config` / `load_runtime_config` / `load_display_config` / `merge_update`. Callers receive raw `config_json` from the store and pick the right loader. Marketplace-vs-custom is a column lookup, not a heuristic on the config dict.
 
 **`~/.openmaskit/traffic.db`** (audit log, separate file by design):
 - `traffic` — one row per terminal-state tool call. Columns: `id`, `ts`, `target_name`, `tool_name`, `request_id`, `status`, `duration_ms`, `args_enc` (BLOB, Fernet), `response_enc` (BLOB, Fernet), `masked_args` (TEXT), `masked_resp` (TEXT). Indexed on `(target_name, id DESC)`.
@@ -158,7 +158,7 @@ Catalog entries that need a user-supplied identifier in the upstream URL (Supaba
 
 BYO and DCR installs both build a `transport: "http"` config with an `oauth` block (same shape as custom targets). Install-time OAuth (AS metadata discovery, optional DCR, persisting `client_info`, PKCE + state generation, and assembling the authorize URL) is owned by `oauth/install_flow.py:prepare_oauth_install`. The marketplace install handler calls it, stashes `{token_endpoint, client creds, PKCE verifier, code_verifier, redirect_uri, scope, resource, config, server_info}` in `app.state.oauth_states[state]`, and returns `{oauth_url}` to the FE for a same-tab redirect. The AS bounces back to `/oauth/callback/{handle}` on `:9473`, where `web/routes/oauth_callback.py` calls `oauth/code_exchange.py:exchange_code` to swap code for tokens, persists the tokens via `FileTokenStorage`, and calls `manager.add_target`. Runtime auth (refresh, adding bearer header) stays on the MCP SDK's `OAuthClientProvider` via `oauth/handler.py:create_oauth_provider`, which reads the `client_info` and tokens that install-time wrote.
 
-Hosted-broker installs are tagged in storage with the placeholder `config.oauth.client_id == "managed-by-backend"`; this is how `marketplace_reauthorize` distinguishes them from BYO/DCR. Hosted entries also preserve `config.backend_id` so reauthorize can ask the broker for a fresh authorize URL.
+Hosted-broker installs are tagged in storage with the placeholder `config.oauth.client_id == "managed-by-backend"`; this is how `marketplace_reauthorize` distinguishes them from BYO/DCR. Every marketplace row (broker, BYO, DCR) carries `backend_id` as a separate column on `mcp_servers` — reauthorize and reconfigure read it from there, not from the config dict.
 
 #### Re-authorize
 
@@ -169,7 +169,9 @@ Hosted-broker installs are tagged in storage with the placeholder `config.oauth.
 
 ### Custom targets (runtime)
 
-Users can add arbitrary MCP servers via the dashboard (Servers page → "Add Server"). These are also stored in the `mcp_servers` SQLite table and managed by `TargetManager`. Same hot-add/remove lifecycle as marketplace servers.
+Users can add arbitrary MCP servers via the dashboard (Servers page → "Add Server"). These are also stored in the `mcp_servers` SQLite table (with `source='custom'`, `backend_id=NULL`) and managed by `TargetManager`. Same hot-add/remove lifecycle as marketplace servers.
+
+The `/api/targets/custom/{id}/*` routes are gated by `_resolve_custom_target` in `web/routes/custom_targets.py`: requests targeting a marketplace-source row (or a config-file target) get a synchronous 403 before any DB write or connect attempt. Marketplace rows are managed only through `/api/marketplace/*`. The gate is the authoritative boundary; the dashboard hides the Edit button on marketplace cards as UX courtesy.
 
 ### TargetManager (`proxy/manager.py`)
 

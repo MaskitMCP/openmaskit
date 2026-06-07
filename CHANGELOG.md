@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-07
+
+### Changed
+- **Breaking: `mcp_servers` table reshape.** Drops the whole-blob Fernet `config_enc` column in favour of a plaintext `config_json` whose secret values are inline-encrypted as `{"enc": "ENCRYPTED:..."}` Fernet ciphertext. Adds `source` (`marketplace` | `custom`) and `backend_id` columns so the install origin is a fact on the row, not a heuristic on the config dict. Existing `~/.openmaskit/store.db` files from 0.5.0 or earlier won't load — remove and reinstall affected servers.
+- `env` and `headers` entries persist as `{value, type}` wrappers (`text` / `secret` / `path` / `number`). Only secret-typed values are encrypted on disk; the rest stay plaintext and inspectable.
+- Custom-target API routes (`GET/POST /api/targets/custom/{id}*`) now 403 marketplace-source rows synchronously, before any DB write or connect attempt. Marketplace rows are managed through `/api/marketplace/*` only.
+- BYO and DCR marketplace installs now correctly stamp `source="marketplace"` and `backend_id` on the row — previously they were indistinguishable from hand-rolled custom targets, which let the dashboard Edit button mutate them.
+- API responses redact `oauth.client_secret`, `oauth.registration_token`, and `env`/`header` secret values to `••••••••`. The Edit modal pre-fills password inputs empty with a leave-blank-to-keep-existing contract; `update_server` merges new values into stored on the backend.
+
+### Fixed
+- The Servers page's Re-authorize button was never rendering because the template read `target.config.oauth` on a JSON string. `target.config` is now a dict end-to-end.
+
+### Removed
+- The Server Configuration ("eye" icon) view-details modal on inactive cards. The Edit modal already covers the same info in a labeled, secrets-safe form.
+
 ## [0.5.0] - 2026-06-06
 
 ### Changed
@@ -114,7 +129,8 @@ open of an existing `store.db`.
 ### Changed
 - Env-var modal polish.
 
-[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.3.1...v0.4.0

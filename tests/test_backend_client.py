@@ -85,7 +85,7 @@ class TestBackendClientInit:
     async def test_disable_marketplace_env_var(self, monkeypatch, value):
         """OPENMASKIT_DISABLE_MARKETPLACE truthy values disable backend calls."""
         monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", value)
-        client = BackendClient(installation_id="x", openmaskit_version="0.5.0")
+        client = BackendClient(installation_id="x", openmaskit_version="0.6.0")
         assert client.enabled is False
         await client.close()
 
@@ -97,7 +97,7 @@ class TestBackendClientInit:
             monkeypatch.delenv("OPENMASKIT_DISABLE_MARKETPLACE", raising=False)
         else:
             monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", value)
-        client = BackendClient(installation_id="x", openmaskit_version="0.5.0")
+        client = BackendClient(installation_id="x", openmaskit_version="0.6.0")
         assert client.enabled is True
         await client.close()
 
@@ -108,7 +108,7 @@ class TestBackendClientInit:
         monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", "1")
         client = BackendClient(
             installation_id="x",
-            openmaskit_version="0.5.0",
+            openmaskit_version="0.6.0",
             marketplace_url="https://test-api.example.com",
         )
         # Intentionally do NOT register any respx route — if the client tries
@@ -124,7 +124,7 @@ class TestBackendClientInit:
         monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", "1")
         client = BackendClient(
             installation_id="x",
-            openmaskit_version="0.5.0",
+            openmaskit_version="0.6.0",
             marketplace_url="https://test-api.example.com",
         )
         result = await client.get_server_info("any-id")
@@ -138,7 +138,7 @@ class TestBackendClientInit:
         monkeypatch.setenv("OPENMASKIT_DISABLE_MARKETPLACE", "1")
         client = BackendClient(
             installation_id="x",
-            openmaskit_version="0.5.0",
+            openmaskit_version="0.6.0",
             marketplace_url="https://test-api.example.com",
         )
         result = await client.check_version()
@@ -396,7 +396,7 @@ class TestVersionCheck:
             "supported": False,
             "update_required": True,
             "update_available": True,
-            "latest_version": "0.5.0",
+            "latest_version": "0.6.1",
         }
         respx.get("https://test-api.example.com/api/version_check").mock(
             return_value=httpx.Response(200, json=payload)
