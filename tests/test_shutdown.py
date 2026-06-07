@@ -92,7 +92,6 @@ async def test_graceful_shutdown_sequence():
     # Mock servers
     mock_web = MagicMock(should_exit=False)
     mock_mcp = MagicMock(should_exit=False)
-    mock_callback = MagicMock(should_exit=False)
 
     # Mock task group (will be cancelled)
     mock_tg = MagicMock()
@@ -100,7 +99,7 @@ async def test_graceful_shutdown_sequence():
 
     # Run shutdown
     await _graceful_shutdown(
-        state, shutdown_event, mock_web, mock_mcp, mock_callback, mock_tg,
+        state, shutdown_event, mock_web, mock_mcp, mock_tg,
         drain_timeout=1.0, flush_timeout=1.0
     )
 
@@ -108,7 +107,6 @@ async def test_graceful_shutdown_sequence():
     # 1. Servers marked for exit
     assert mock_web.should_exit is True
     assert mock_mcp.should_exit is True
-    assert mock_callback.should_exit is True
 
     # 2. Shutdown event set
     assert shutdown_event.is_set()

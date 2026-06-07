@@ -46,6 +46,18 @@ _SCOPE_RE = re.compile(
 )
 
 
+def _log_issuer_mismatch(metadata_url: str, claimed: str | None, expected: str) -> None:
+    """Log a non-fatal RFC 8414 §3.3 mismatch for debugging visibility."""
+    if claimed and not issuer_matches(expected, claimed):
+        logger.info(
+            "AS metadata at %s declares issuer %r, fetched-from %r (RFC 8414 §3.3 "
+            "mismatch — accepting; the metadata URL is the authoritative source)",
+            metadata_url,
+            claimed,
+            expected,
+        )
+
+
 def issuer_matches(requested: str, claimed: str | None) -> bool:
     """RFC 8414 §3.3 issuer-identity check.
 
@@ -216,13 +228,15 @@ async def fetch_oauth_server_metadata(
             except Exception as e:
                 logger.debug(f"OAuth 2.0 AS metadata fetch failed at {oauth_url}: {e}")
                 continue
-            if not issuer_matches(issuer, candidate.get("issuer")):
-                logger.warning(
-                    f"AS metadata at {oauth_url} claims issuer "
-                    f"{candidate.get('issuer')!r}, expected {issuer!r} (RFC 8414 §3.3); "
-                    "skipping this candidate"
-                )
-                continue
+            # RFC 8414 §3.3 says the AS metadata's `issuer` MUST match the URL
+            # we fetched from. Real-world deployments (Slack: PRM points at
+            # `mcp.slack.com`, the AS metadata there declares
+            # `issuer: slack.com`) routinely violate this. The MCP SDK's
+            # `handle_auth_metadata_response` doesn't enforce the check;
+            # neither do we. We log a mismatch so it's visible in debugging
+            # but still trust the metadata at the URL the protected-resource
+            # metadata pointed us to.
+            _log_issuer_mismatch(oauth_url, candidate.get("issuer"), issuer)
             oauth_meta = candidate
             break
 
@@ -235,13 +249,7 @@ async def fetch_oauth_server_metadata(
             except Exception as e:
                 logger.debug(f"OIDC metadata fetch failed at {oidc_url}: {e}")
                 continue
-            if not issuer_matches(issuer, candidate.get("issuer")):
-                logger.warning(
-                    f"OIDC metadata at {oidc_url} claims issuer "
-                    f"{candidate.get('issuer')!r}, expected {issuer!r} (RFC 8414 §3.3); "
-                    "skipping this candidate"
-                )
-                continue
+            _log_issuer_mismatch(oidc_url, candidate.get("issuer"), issuer)
             oidc_meta = candidate
             break
 

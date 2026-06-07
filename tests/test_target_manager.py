@@ -35,7 +35,6 @@ def manager(state, store, tmp_path):
         state=state,
         store=store,
         store_path=str(tmp_path / "test.db"),
-        callback_server=None,
     )
 
 

@@ -357,9 +357,41 @@ class TestUrlTemplating:
     }
 
     @pytest_asyncio.fixture
-    async def supabase_client(self, state, mock_backend_client):
-        """Backend client whose get_server_info returns the templated Supabase entry."""
+    async def supabase_client(self, state, mock_backend_client, monkeypatch, tmp_path):
+        """Backend client whose get_server_info returns the templated Supabase entry.
+
+        Also stubs ``prepare_oauth_install`` so the install route exercises its
+        own URL-templating / discovery code without trying to actually contact
+        the authorization server or write client_info to disk.
+        """
         mock_backend_client.get_server_info = AsyncMock(return_value=self.SUPABASE_ENTRY)
+
+        from openmaskit.oauth.install_flow import InstallPrep
+        from openmaskit.web.routes import marketplace as marketplace_routes
+
+        async def fake_prepare(**kwargs):
+            return InstallPrep(
+                oauth_url="https://api.supabase.com/oauth/authorize?fake=1",
+                state="fake-state-token",
+                code_verifier="v",
+                token_endpoint="https://api.supabase.com/oauth/token",
+                client_id="dcr-client",
+                client_secret=None,
+                auth_method="none",
+                redirect_uri=f"http://test{kwargs['handle']}",
+                scope=kwargs.get("scope", ""),
+                resource=None,
+            )
+        monkeypatch.setattr(
+            marketplace_routes, "prepare_oauth_install", fake_prepare
+        )
+
+        # _begin_oauth_install reads manager._store_path to derive where to
+        # write client_info; a minimal stub is enough for these route-layer tests.
+        class _FakeManager:
+            _store_path = str(tmp_path / "store.db")
+        state.target_manager = _FakeManager()
+
         app = create_app(state, csrf_token="test-csrf-token")
         app.state.backend_client = mock_backend_client
         app.state.oauth_states = {}
@@ -372,22 +404,21 @@ class TestUrlTemplating:
                 "Origin": "http://127.0.0.1:9473",
             },
         ) as c:
-            yield c
+            yield c, app
 
     @pytest.mark.anyio
     async def test_install_resolves_url_with_params(self, supabase_client, state, monkeypatch):
-        """Resolved URL is mcp_host + ?urlencoded(params)."""
+        """Resolved URL (urlencoded params) is stashed in the OAuth state map."""
+        client, app = supabase_client
+
         async def fake_discover(url):
             return {
                 "issuer": "https://api.supabase.com",
                 "scopes": [{"scope": "projects:read", "required": False}],
-                "registration_endpoint": "https://api.supabase.com/oauth/register",
-                "authorization_endpoint": "https://api.supabase.com/oauth/authorize",
-                "token_endpoint": "https://api.supabase.com/oauth/token",
             }
         monkeypatch.setattr(discovery, "discover", fake_discover)
 
-        resp = await supabase_client.post(
+        resp = await client.post(
             "/api/marketplace/install",
             json={
                 "server_id": "supabase",
@@ -396,14 +427,19 @@ class TestUrlTemplating:
                 "selected_scopes": ["projects:read"],
             },
         )
-        assert resp.status_code == 201
-        record = await state.store.get_server("supabase")
-        assert record["config"]["url"] == "https://mcp.supabase.com/mcp?project_ref=abc123"
-        assert record["config"]["oauth"]["issuer"] == "https://api.supabase.com"
+        assert resp.status_code == 200
+        assert resp.json()["oauth_url"].startswith("https://")
+        # Server is NOT yet installed in DB — install_server runs in the OAuth callback.
+        assert await state.store.get_server("supabase") is None
+        # State map carries the resolved URL.
+        stashed = app.state.oauth_states["fake-state-token"]
+        assert stashed["config"]["url"] == "https://mcp.supabase.com/mcp?project_ref=abc123"
+        assert stashed["config"]["oauth"]["issuer"] == "https://api.supabase.com"
 
     @pytest.mark.anyio
     async def test_install_missing_required_param_fails(self, supabase_client):
-        resp = await supabase_client.post(
+        client, _ = supabase_client
+        resp = await client.post(
             "/api/marketplace/install",
             json={
                 "server_id": "supabase",
@@ -419,11 +455,13 @@ class TestUrlTemplating:
     async def test_install_unknown_param_rejected(self, supabase_client, monkeypatch):
         """Reject params not declared in the catalog so callers can't sneak
         extra query keys onto the upstream URL."""
+        client, _ = supabase_client
+
         async def fake_discover(url):
             return {"issuer": "https://api.supabase.com"}
         monkeypatch.setattr(discovery, "discover", fake_discover)
 
-        resp = await supabase_client.post(
+        resp = await client.post(
             "/api/marketplace/install",
             json={
                 "server_id": "supabase",
@@ -438,6 +476,7 @@ class TestUrlTemplating:
     @pytest.mark.anyio
     async def test_install_runs_discovery_when_no_issuer(self, supabase_client, state, monkeypatch):
         """DCR entry without a catalog-shipped issuer triggers install-time discovery."""
+        client, app = supabase_client
         captured: dict = {}
 
         async def fake_discover(url):
@@ -448,7 +487,7 @@ class TestUrlTemplating:
             }
         monkeypatch.setattr(discovery, "discover", fake_discover)
 
-        resp = await supabase_client.post(
+        resp = await client.post(
             "/api/marketplace/install",
             json={
                 "server_id": "supabase",
@@ -457,20 +496,22 @@ class TestUrlTemplating:
                 # No issuer in body — backend must discover.
             },
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         assert captured["url"] == "https://mcp.supabase.com/mcp?project_ref=xyz"
-        record = await state.store.get_server("supabase")
-        assert record["config"]["oauth"]["issuer"] == "https://api.supabase.com"
+        stashed = app.state.oauth_states["fake-state-token"]
+        assert stashed["config"]["oauth"]["issuer"] == "https://api.supabase.com"
         # Discovered scopes fall back when none selected.
-        assert record["config"]["oauth"]["scopes"] == ["organizations:read"]
+        assert stashed["config"]["oauth"]["scopes"] == ["organizations:read"]
 
     @pytest.mark.anyio
     async def test_install_discovery_failure_returns_400(self, supabase_client, monkeypatch):
+        client, _ = supabase_client
+
         async def fake_discover(url):
             return None
         monkeypatch.setattr(discovery, "discover", fake_discover)
 
-        resp = await supabase_client.post(
+        resp = await client.post(
             "/api/marketplace/install",
             json={
                 "server_id": "supabase",
@@ -484,11 +525,13 @@ class TestUrlTemplating:
     @pytest.mark.anyio
     async def test_url_encoded_special_chars(self, supabase_client, state, monkeypatch):
         """Values containing '&', '=', spaces, etc. are URL-encoded."""
+        client, app = supabase_client
+
         async def fake_discover(url):
             return {"issuer": "https://api.supabase.com"}
         monkeypatch.setattr(discovery, "discover", fake_discover)
 
-        resp = await supabase_client.post(
+        resp = await client.post(
             "/api/marketplace/install",
             json={
                 "server_id": "supabase",
@@ -497,9 +540,9 @@ class TestUrlTemplating:
                 "issuer": "https://api.supabase.com",  # skip discovery
             },
         )
-        assert resp.status_code == 201
-        record = await state.store.get_server("supabase")
-        url = record["config"]["url"]
+        assert resp.status_code == 200
+        stashed = app.state.oauth_states["fake-state-token"]
+        url = stashed["config"]["url"]
         # urlencode produces space → '+', '&' → '%26', '=' → '%3D'
         assert "a+b%26c%3Dd" in url
         assert "&" not in url.split("?", 1)[1]  # no raw '&' in query
@@ -509,6 +552,7 @@ class TestUrlTemplating:
         self, supabase_client, state, monkeypatch
     ):
         """If the install request supplies issuer, discovery is skipped."""
+        client, app = supabase_client
         called = {"count": 0}
 
         async def fake_discover(url):
@@ -516,7 +560,7 @@ class TestUrlTemplating:
             return None
         monkeypatch.setattr(discovery, "discover", fake_discover)
 
-        resp = await supabase_client.post(
+        resp = await client.post(
             "/api/marketplace/install",
             json={
                 "server_id": "supabase",
@@ -526,10 +570,10 @@ class TestUrlTemplating:
                 "selected_scopes": ["projects:read"],
             },
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 200
         assert called["count"] == 0
-        record = await state.store.get_server("supabase")
-        assert record["config"]["oauth"]["issuer"] == "https://api.supabase.com"
+        stashed = app.state.oauth_states["fake-state-token"]
+        assert stashed["config"]["oauth"]["issuer"] == "https://api.supabase.com"
 
 
 class TestResolveMcpUrl:

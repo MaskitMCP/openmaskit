@@ -292,7 +292,12 @@
 
                     <template x-if="!modal.byoScopesLoading && modal.availableScopes.length > 0">
                         <div class="modal-field">
-                            <span class="modal-label">Scopes</span>
+                            <div class="modal-scope-header">
+                                <span class="modal-label">Scopes</span>
+                                <button type="button" class="modal-scope-toggle-all"
+                                        @click="toggleAllScopes()"
+                                        x-text="allOptionalScopesSelected() ? 'Deselect all' : 'Select all'"></button>
+                            </div>
                             <p class="modal-hint">The provider will show these on its consent screen. Required scopes can't be unchecked.</p>
                             <div class="modal-scope-list">
                                 <template x-for="s in modal.availableScopes" :key="s.scope">
@@ -648,7 +653,7 @@ function marketplacePage() {
             availableScopes: [],        // [{scope, label, required, default}]
             selectedScopes: [],         // selected scope strings
             setupGuideUrl: null,
-            redirectUri: 'http://localhost:3131/callback',
+            redirectUri: '',
             mcpHost: null,
             // BYO state
             byo: { clientId: '', clientSecret: '', redirectCopied: false },
@@ -710,6 +715,11 @@ function marketplacePage() {
             this.modal.byoScopesLoading = false;
             this.modal.setupGuideUrl = server?.meta?.setup_guide_url || null;
             this.modal.mcpHost = server?.mcp_host || null;
+            // The per-server callback URL the user pastes into their OAuth app's
+            // authorized redirect URIs list. Lives on the dashboard at :9473;
+            // the OAuth flow lands here after the AS redirect.
+            const handle = server?.handle || server?.id || '';
+            this.modal.redirectUri = `${window.location.origin}/oauth/callback/${handle}`;
             this.modal.byo = { clientId: '', clientSecret: '', redirectCopied: false };
             this.modal.dcr = {
                 registrationToken: '',
@@ -824,6 +834,23 @@ function marketplacePage() {
                 this.runByoScopeDiscovery(server?.mcp_host);
             }
             return promise;
+        },
+
+        allOptionalScopesSelected() {
+            const optional = this.modal.availableScopes.filter(s => !s.required);
+            if (optional.length === 0) return false;
+            return optional.every(s => this.modal.selectedScopes.includes(s.scope));
+        },
+
+        toggleAllScopes() {
+            const required = this.modal.availableScopes.filter(s => s.required).map(s => s.scope);
+            if (this.allOptionalScopesSelected()) {
+                // Deselect everything except required (those stay locked-on).
+                this.modal.selectedScopes = [...required];
+            } else {
+                // Select everything.
+                this.modal.selectedScopes = this.modal.availableScopes.map(s => s.scope);
+            }
         },
 
         async runByoScopeDiscovery(mcpUrl) {
@@ -1253,12 +1280,13 @@ function marketplacePage() {
                 if (!res.ok) {
                     this.showToast(data.error || 'Install failed', 'error');
                     server.installing = false;
-                } else if (data.requires_oauth && data.oauth_url) {
-                    // Hosted-broker OAuth - redirect in same tab
+                } else if (data.oauth_url) {
+                    // OAuth flow (broker, BYO, or DCR) — same-tab redirect; the callback
+                    // route at /oauth/callback/{handle} finishes the install.
                     this.showToast('Redirecting to authorization...', 'info');
                     window.location.href = data.oauth_url;
                 } else {
-                    // BYO / DCR / non-OAuth: install completed (browser flow already finished)
+                    // Non-OAuth install completed inline.
                     server.installed = true;
                     server.active = true;
                     server.connected = data.connected;

@@ -42,27 +42,10 @@ class TestTargetManagerInit:
         assert manager._state is state
         assert manager._store is store
         assert manager._store_path == str(tmp_path / "store.db")
-        assert manager._callback_server is None
         assert manager._container_runtime is None
         assert manager._exit_stacks == {}
         assert manager._task_group is None
         assert manager._shutdown_event is None
-
-    @pytest.mark.anyio
-    async def test_init_with_callback_server(self, state, store, tmp_path):
-        """Initialize manager with callback server."""
-        from openmaskit.oauth.handler import OAuthCallbackServer
-
-        callback_server = OAuthCallbackServer(port=3131)
-
-        manager = TargetManager(
-            state=state,
-            store=store,
-            store_path=str(tmp_path / "store.db"),
-            callback_server=callback_server,
-        )
-
-        assert manager._callback_server is callback_server
 
     @pytest.mark.anyio
     async def test_init_with_container_runtime(self, state, store, tmp_path):
