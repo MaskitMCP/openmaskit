@@ -715,9 +715,6 @@ function toolDetail() {
                 if (!res.ok) { this.showToast(data.error || 'Failed to create mapper', 'error'); return; }
                 await this.loadMappers();
                 this.showToast('Mapper created');
-                if (data.id) {
-                    this.editingMapper = { id: data.id, pattern: path, alias_prefix: aliasPrefix };
-                }
             } catch (e) { this.showToast('Network error: ' + e.message, 'error'); }
         },
 
