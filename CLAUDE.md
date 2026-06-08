@@ -234,6 +234,7 @@ Marketplace routes:
 - `POST /api/marketplace/activate` — reactivate a previously installed server
 - `POST /api/marketplace/deactivate` — disconnect and deactivate
 - `POST /api/marketplace/{target_id}/reauthorize` — kick off a fresh OAuth flow for an installed server (BYO/DCR clears tokens and runs the flow inline; hosted-broker returns a fresh `oauth_url`)
+- `POST /api/marketplace/{target_id}/delete` — permanently remove a marketplace server. Disconnects via `TargetManager`, deletes the OAuth token file at `{store_dir}/oauth/{handle}.json` (full file — both tokens and `client_info`), and drops the row from `mcp_servers`. Gates on `source == 'marketplace'`.
 - `POST /api/install/check` — pre-install runtime-presence check for a stdio command. Body `{command}`; returns `{present, resolved_command, resolved_path}` or `{present: false, install_hint}`. Used by the install modal's "What will run on your machine" preview; `docker` defers to `container.py`'s runtime detection (and reports the substituted runtime in `resolved_command`).
 
 Custom target routes:
@@ -253,13 +254,12 @@ Server list routes:
 Servers can be in three states:
 1. **Active** — Connected and running, appears in "Active Servers" section
 2. **Inactive** — Disconnected but config retained in database, appears in "Inactive Servers" section, can be reactivated
-3. **Deleted** — Permanently removed from database (custom servers only)
+3. **Deleted** — Permanently removed from database (marketplace and custom; config-file targets are not deletable from the UI)
 
 The Servers page (`/`) shows both active and inactive servers in separate sections. Users can:
 - **Deactivate** any server (marketplace or custom) to temporarily disconnect it
 - **Activate** any inactive server to reconnect using stored configuration
-- **Delete** custom servers permanently (marketplace servers can only be deactivated)
-- **View details** of inactive servers to see their configuration
+- **Delete** any database-backed server (marketplace via `/api/marketplace/{id}/delete`, custom via `/api/targets/custom/{id}/delete`). Marketplace delete also wipes the OAuth token file at `{store_dir}/oauth/{handle}.json`. Each endpoint gates on the row's `source` column so a misrouted call can't cross the boundary.
 
 ### Container runtime compatibility
 
