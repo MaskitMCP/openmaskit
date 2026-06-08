@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from uuid import uuid4
 
+import anyio
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 
@@ -805,6 +806,58 @@ async def marketplace_deactivate(request: Request):
             logger.warning("Error removing target %s: %s", server_id, exc)
 
     await store.deactivate_server(server_id)
+    return JSONResponse({"ok": True})
+
+
+_MARKETPLACE_DELETE_DISCONNECT_TIMEOUT = 15
+
+
+async def marketplace_delete(request: Request):
+    """Permanently remove a marketplace-installed server.
+
+    Mirrors ``custom_target_delete`` but gates on ``source == 'marketplace'``
+    so a misrouted call from the FE can't wipe a custom row. Also deletes the
+    on-disk OAuth token file (tokens + client_info) — different from
+    reauthorize, which preserves ``client_info``.
+    """
+    state = request.app.state.proxy_state
+    store = state.store
+    manager = state.target_manager
+
+    target_id = request.path_params["target_id"]
+
+    existing = await store.get_server(target_id)
+    if not existing:
+        return JSONResponse({"error": "Server not installed"}, status_code=404)
+    if existing["source"] != "marketplace":
+        return JSONResponse(
+            {
+                "error": "This is not a marketplace server; "
+                "delete it from the Servers page.",
+            },
+            status_code=403,
+        )
+
+    if manager and target_id in state.targets:
+        try:
+            with anyio.fail_after(_MARKETPLACE_DELETE_DISCONNECT_TIMEOUT):
+                await manager.remove_target(target_id)
+        except TimeoutError:
+            logger.warning(
+                "Timed out disconnecting %s, forcing removal", target_id
+            )
+            state.targets.pop(target_id, None)
+        except Exception as exc:
+            logger.warning(
+                "Error disconnecting %s for delete: %s", target_id, exc
+            )
+            state.targets.pop(target_id, None)
+
+    if manager:
+        token_path = _oauth_token_path(manager, target_id)
+        token_path.unlink(missing_ok=True)
+
+    await store.uninstall_server(target_id)
     return JSONResponse({"ok": True})
 
 

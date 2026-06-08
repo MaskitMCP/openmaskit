@@ -54,6 +54,7 @@ def create_app(
     from openmaskit.web.routes.marketplace import (
         marketplace_activate,
         marketplace_deactivate,
+        marketplace_delete,
         marketplace_install,
         marketplace_list,
         marketplace_page,
@@ -99,6 +100,7 @@ def create_app(
         Route("/api/marketplace/deactivate", marketplace_deactivate, methods=["POST"]),
         Route("/api/marketplace/activate", marketplace_activate, methods=["POST"]),
         Route("/api/marketplace/{target_id}/reauthorize", marketplace_reauthorize, methods=["POST"]),
+        Route("/api/marketplace/{target_id}/delete", marketplace_delete, methods=["POST"]),
         Route("/api/targets/{target_id}/reconfigure", reconfigure_target, methods=["POST"]),
         Route("/oauth/callback/{handle}", oauth_callback, methods=["GET"]),
         Route("/api/oauth/discover", discover_oauth_metadata, methods=["POST"]),

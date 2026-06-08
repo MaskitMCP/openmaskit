@@ -682,6 +682,41 @@ class TestMarketplaceDeactivate:
         assert resp.status_code == 404
 
 
+class TestMarketplaceDelete:
+    @pytest.mark.anyio
+    async def test_delete_marketplace_server(self, client, state):
+        await state.store.install_server(
+            "slack",
+            "Slack",
+            source="marketplace",
+            backend_id="slack-uuid",
+            config={"transport": "stdio", "command": "uvx"},
+        )
+        resp = await client.post("/api/marketplace/slack/delete")
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert await state.store.get_server("slack") is None
+
+    @pytest.mark.anyio
+    async def test_delete_not_installed(self, client):
+        resp = await client.post("/api/marketplace/nonexistent/delete")
+        assert resp.status_code == 404
+
+    @pytest.mark.anyio
+    async def test_delete_rejects_custom_source(self, client, state):
+        await state.store.install_server(
+            "my-server",
+            "My Server",
+            source="custom",
+            backend_id=None,
+            config={"transport": "stdio", "command": "uvx"},
+        )
+        resp = await client.post("/api/marketplace/my-server/delete")
+        assert resp.status_code == 403
+        # Row stays intact — the gate ran before any state mutation.
+        assert await state.store.get_server("my-server") is not None
+
+
 class TestMarketplaceActivate:
     @pytest.mark.anyio
     async def test_activate_not_installed(self, client):
