@@ -16,6 +16,9 @@ coverage.json
 htmlcov/
 .pytest_cache/
 
+# Playwright MCP session artifacts (snapshots + console logs from browser-driving sessions)
+.playwright-mcp/
+
 # Mac related files
 .DS_Store
 */.DS_Store
