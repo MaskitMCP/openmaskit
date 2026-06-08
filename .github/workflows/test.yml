@@ -28,4 +28,8 @@ jobs:
         run: uv sync --frozen
 
       - name: Run tests
-        run: uv run pytest tests/ -v
+        # Skip the e2e suite — it lives in its own dependency group (pytest-playwright,
+        # Chromium, Postgres URI) and is intended to run locally / on a manual workflow.
+        # Without --ignore, pytest still tries to import tests/e2e/* during collection
+        # and fails on the playwright import even though the e2e marker would deselect them.
+        run: uv run pytest tests/ -v --ignore=tests/e2e
