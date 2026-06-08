@@ -27,6 +27,8 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
+from tests.e2e.conftest import E2E_BASE_URL
+
 pytestmark = pytest.mark.e2e
 
 
@@ -35,19 +37,8 @@ pytestmark = pytest.mark.e2e
 PG_HANDLE = "postgres"
 
 
-@pytest.fixture
-def page(openmaskit_server: str, page: Page) -> Page:
-    """Pre-navigate to the dashboard and dismiss the welcome modal once per test."""
-    page.set_default_timeout(15_000)
-    page.goto(openmaskit_server)
-    skip = page.get_by_role("button", name="Skip for now")
-    if skip.is_visible():
-        skip.click()
-    return page
-
-
 def _install_postgres(page: Page, pg_uri: str) -> None:
-    page.goto(f"{page.url.rstrip('/')}/marketplace")
+    page.goto(f"{E2E_BASE_URL}/marketplace")
     page.get_by_role("textbox", name=re.compile(r"Search servers", re.I)).fill("postgres")
     page.get_by_role("button", name="Install PostgreSQL").click()
     page.get_by_role("textbox", name="Database URI").fill(pg_uri)
@@ -57,7 +48,7 @@ def _install_postgres(page: Page, pg_uri: str) -> None:
 
 def _wait_for_tools_loaded(page: Page) -> None:
     """The proxy starts the upstream container lazily; tool schemas appear within a few seconds."""
-    page.goto(f"http://127.0.0.1:19473/targets/{PG_HANDLE}/tools")
+    page.goto(f"{E2E_BASE_URL}/targets/{PG_HANDLE}/tools")
     expect(page.get_by_role("heading", name="execute_sql")).to_be_visible(timeout=30_000)
     expect(page.get_by_role("heading", name="list_objects")).to_be_visible()
 
@@ -76,7 +67,9 @@ def _tree_leaf_with_key(page: Page, key: str):
     )
 
 
-def test_postgres_install_mask_and_guardrail(page: Page, pg_uri: str) -> None:
+def test_postgres_install_mask_and_guardrail(dashboard_page: Page, pg_uri: str) -> None:
+    page = dashboard_page
+
     # === Step 1: install Postgres from the marketplace ===
     _install_postgres(page, pg_uri)
 
@@ -87,7 +80,7 @@ def test_postgres_install_mask_and_guardrail(page: Page, pg_uri: str) -> None:
     expect(list_objects_card).to_have_class(re.compile(r"\btool-card-hidden\b"))
 
     # === Step 3+4: open execute_sql, run a select ===
-    page.goto(f"http://127.0.0.1:19473/targets/{PG_HANDLE}/tools/execute_sql")
+    page.goto(f"{E2E_BASE_URL}/targets/{PG_HANDLE}/tools/execute_sql")
     sql_input = page.get_by_role("textbox", name="sql string")
     call_button = page.get_by_role("button", name="Call", exact=True)
     sql_input.fill("select * from users;")
@@ -142,4 +135,4 @@ def test_postgres_install_mask_and_guardrail(page: Page, pg_uri: str) -> None:
     # === Step 9: try a DROP and confirm it's blocked ===
     sql_input.fill("drop table something;")
     call_button.click()
-    expect(page.get_by_text(re.compile(r"Blocked by guardrail", re.I))).to_be_visible(timeout=10_000)
+    expect(page.locator('pre[x-text="tryError"]')).to_contain_text("Blocked by guardrail", timeout=10_000)

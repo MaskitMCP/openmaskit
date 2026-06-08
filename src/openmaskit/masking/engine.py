@@ -272,6 +272,15 @@ class MaskingEngine:
         self._aliases_dirty = False
         return self._automaton
 
+    async def load_rules(self):
+        """Load masking rules from the store, replacing any in-memory rules.
+
+        Mirrors load_aliases / load_mappers / load_guardrails / load_injections —
+        used on target hot-add so rules persisted by prior sessions survive a
+        deactivate/activate cycle.
+        """
+        self._rules = await self._store.get_rules(target_name=self._target_name)
+
     async def load_mappers(self):
         """Load response mappers from store and compile patterns."""
         self._mappers = await self._store.get_mappers(target_name=self._target_name)

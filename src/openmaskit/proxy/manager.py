@@ -95,6 +95,7 @@ class TargetManager:
         if this raises.
         """
         engine = MaskingEngine([], self._store, target_name=server_id)
+        await engine.load_rules()
         await engine.load_aliases()
         await engine.load_mappers()
         await engine.load_guardrails()
