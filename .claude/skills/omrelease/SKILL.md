@@ -1,6 +1,6 @@
 ---
 name: omrelease
-description: Prep an OpenMaskit release — bumps the version across pyproject, tests, publish workflow, CHANGELOG, and uv.lock; verifies the test suite; commits on a prep branch; then reminds the user of the manual follow-ups (ASCII banner, Rust backend, smoke-test command).
+description: Prep an OpenMaskit release — bumps the version across pyproject, tests, publish workflow, CHANGELOG, and uv.lock; verifies the test suite; commits on a prep branch; reminds the user of the manual follow-ups (ASCII banner, Rust backend, smoke-test command); then drafts a user-facing release note in Markdown.
 ---
 
 # omrelease
@@ -138,6 +138,32 @@ Two non-obvious things in that command worth carrying forward:
 
 - `--index-strategy unsafe-best-match` is **required** because TestPyPI carries an ancient `aiosqlite==0.2.1` that doesn't satisfy our `>=0.20.0` constraint. uv's default "first index wins" strategy picks the TestPyPI version and never falls through to PyPI without this flag.
 - `--refresh` is needed because uvx caches resolved versions; without it you may smoke-test a stale build that happens to have the same name+version.
+
+### 9. Release note
+
+Print a draft release note as a single Markdown code block so the user can paste it into the GitHub release verbatim. Source material:
+
+- The `[<new>]` block you just wrote in `CHANGELOG.md`.
+- The commit list from step 1 (`git log v<prev>..HEAD --oneline`).
+- Anything from the conversation that flagged a user-visible decision (deprecation, migration step, UI change).
+
+#### Shape
+
+- **H2 heading** `## v<new> — <short tagline>` summarising the release in 3-6 words. The tagline names the *theme*, not the version.
+- **Breaking-change callout** at the top when applicable. Use a `> ⚠️ **Breaking change: <one-line summary>.**` block followed by the concrete migration step (e.g. `rm ~/.openmaskit/store.db`, `drop -p 3131:3131`, "update redirect URI to ...") . If nothing is breaking, omit.
+- **Body in prose paragraphs**, NOT bullet lists. One paragraph per theme. Each paragraph opens with a **bold lede** that names the theme, then 1-3 sentences explaining what changed, why, and what the user should do. Aim for 3-5 paragraphs total.
+- **"Heads up if …" callouts** for migration steps that only affect a subset of users (Docker users, BYO OAuth users, Rust backend, etc.). One short paragraph each, ledes are still bold.
+- **Closing link** to the full changelog on GitHub: `— Full changelog: https://github.com/MaskitMCP/openmaskit/blob/main/CHANGELOG.md`
+
+#### Editorial rules
+
+- **Drop internal-only refactors.** If a CHANGELOG line wouldn't affect a user's setup or behaviour, skip it in the release note. The CHANGELOG is the audit trail; the release note is the elevator pitch.
+- **No marketing language.** No "exciting", "powerful", "seamless". Verbs are concrete: *adds*, *drops*, *fixes*, *replaces*, *renames*.
+- **Lead with the why.** If a change defends against a real problem (e.g. tab stacking, lost secrets, monkey patch on SDK internals), the release note should say so in one short clause.
+- **No fake versioning.** Don't write "version 0.6.x line" or "since 0.4" — say what the change is, not when it landed.
+- **Date and authorship are implicit.** GitHub renders those above the release body; don't repeat them.
+
+Output the release note as a fenced ```markdown` block so the user can copy-paste it into the GitHub release editor with the formatting preserved.
 
 ## What this skill explicitly does NOT do
 
