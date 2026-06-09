@@ -18,6 +18,7 @@ htmlcov/
 
 # Playwright MCP session artifacts (snapshots + console logs from browser-driving sessions)
 .playwright-mcp/
+/*.png
 
 # Mac related files
 .DS_Store
