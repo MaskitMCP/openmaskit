@@ -1095,6 +1095,28 @@ code {
     user-select: text;
 }
 
+.alias-link {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px dashed var(--accent-dim, currentColor);
+    border-radius: 2px;
+    padding: 0 1px;
+    transition: background var(--transition-fast);
+}
+
+.alias-link:hover {
+    background: var(--accent-glow, rgba(88, 166, 255, 0.15));
+}
+
+tr:target {
+    animation: alias-target-flash 1.6s ease-out;
+}
+
+@keyframes alias-target-flash {
+    0%   { background: var(--accent-glow, rgba(88, 166, 255, 0.25)); }
+    100% { background: transparent; }
+}
+
 .detail-code {
     font-family: var(--font-mono);
     font-size: 0.75rem;
@@ -2213,6 +2235,7 @@ code {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
+    margin-left: auto;
     padding: 0.7rem 1.3rem;
     border-radius: var(--radius-md);
     border: 1px solid var(--teal-border);
