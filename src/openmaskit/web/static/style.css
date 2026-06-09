@@ -2558,13 +2558,20 @@ code {
     flex: 1;
     display: block;
     padding: 1.25rem 1.5rem;
+    color: inherit;
+}
+
+.tgt-card-link {
+    display: block;
     text-decoration: none;
     color: inherit;
-    cursor: pointer;
+    border-radius: var(--radius-sm);
+    margin: -0.25rem;
+    padding: 0.25rem;
     transition: background var(--transition-fast);
 }
 
-.tgt-card-main:hover {
+.tgt-card-link:hover {
     background: var(--bg-hover);
 }
 
@@ -2630,28 +2637,27 @@ code {
 
 .tgt-card-actions {
     display: flex;
-    gap: 0.3rem;
-    opacity: 0;
-    transition: opacity var(--transition-fast);
-}
-
-.tgt-card:hover .tgt-card-actions {
-    opacity: 1;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .tgt-action-btn {
-    width: 28px;
-    height: 28px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 1px solid transparent;
+    gap: 0.35rem;
+    height: 28px;
+    padding: 0 0.6rem;
+    border: 1px solid var(--border-subtle);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     border-radius: var(--radius-sm);
     cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
     transition: all var(--transition-fast);
+    white-space: nowrap;
 }
 
 .tgt-action-btn:hover {
@@ -2664,6 +2670,10 @@ code {
     color: var(--red);
     border-color: var(--red-border);
     background: var(--red-dim);
+}
+
+.tgt-action-label {
+    line-height: 1;
 }
 
 .tgt-card-name {
@@ -4519,31 +4529,9 @@ header h1::after {
 /* Previously hidden behind hover-only `.tgt-card-actions { opacity: 0 }`,
    which was inaccessible on touch devices. Reveal on focus-within and
    on touch (no hover) so the Activate button is always findable. */
-.tgt-card-inactive .tgt-card-actions {
-    opacity: 0.85;
-}
-
-.tgt-card-inactive:hover .tgt-card-actions,
-.tgt-card-inactive:focus-within .tgt-card-actions {
-    opacity: 1;
-}
-
 /* Stronger affordance for the activate button even at rest */
 .tgt-card-inactive .tgt-action-activate {
     box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25);
-}
-
-/* Active cards: also reveal actions on focus-within (keyboard nav) */
-.tgt-card:focus-within .tgt-card-actions {
-    opacity: 1;
-}
-
-/* On touch devices (no hover capability), keep all card actions visible */
-@media (hover: none) {
-    .tgt-card-actions,
-    .tgt-card-inactive .tgt-card-actions {
-        opacity: 1;
-    }
 }
 
 /* --- Traffic stream: bump readability of secondary text --- */
@@ -4652,12 +4640,8 @@ code {
     backdrop-filter: blur(8px);
 }
 
-/* --- Mobile (<= 768px): keep target action buttons reachable --- */
+/* --- Mobile (<= 768px) --- */
 @media (max-width: 768px) {
-    .tgt-card-actions {
-        opacity: 1;
-    }
-
     .tgt-card-meta {
         gap: 0.4rem;
     }

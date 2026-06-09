@@ -109,29 +109,31 @@
                 <template x-for="(target, idx) in activeTargets" :key="target.name">
                 <div class="tgt-card" :style="'animation-delay:' + (idx * 60) + 'ms'">
                     <div class="tgt-card-accent" :class="target.initialized ? 'tgt-accent-live' : 'tgt-accent-pending'"></div>
-                    <a :href="'/targets/' + encodeURIComponent(target.name) + '/tools'" class="tgt-card-main">
+                    <div class="tgt-card-main">
                         <div class="tgt-card-header">
                             <div class="tgt-status-indicator">
                                 <span class="tgt-dot" :class="target.initialized ? 'dot-live' : 'dot-pending'"></span>
                                 <span class="tgt-status-label" x-text="target.initialized ? 'Live' : 'Connecting'" :class="target.initialized ? 'label-live' : 'label-pending'"></span>
                             </div>
-                            <div class="tgt-card-actions" @click.prevent.stop>
-                                <button class="tgt-action-btn tgt-action-connect" @click="openIntegration(target)" title="Connect agent" aria-label="Connect agent to this server">
+                            <div class="tgt-card-actions">
+                                <button class="tgt-action-btn tgt-action-connect" @click="openIntegration(target)" :aria-label="'Connect agent to ' + target.display_name">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                                     </svg>
+                                    <span class="tgt-action-label">Connect</span>
                                 </button>
                                 <template x-if="target.editable">
-                                    <button class="tgt-action-btn" @click="openEditModal(target)" title="Edit" aria-label="Edit server configuration">
+                                    <button class="tgt-action-btn" @click="openEditModal(target)" :aria-label="'Edit ' + target.display_name + ' configuration'">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                                         </svg>
+                                        <span class="tgt-action-label">Edit</span>
                                     </button>
                                 </template>
 
                                 <!-- Re-authorize button for OAuth-using servers -->
                                 <template x-if="target.config && target.config.oauth">
-                                    <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :aria-label="'Re-authorize ' + target.display_name" :disabled="target.reauthorizing">
+                                    <button class="tgt-action-btn" @click="reauthorizeTarget(target)" :aria-label="'Re-authorize ' + target.display_name" :disabled="target.reauthorizing">
                                         <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
                                         </svg>
@@ -139,11 +141,12 @@
                                             <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
                                             <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
                                         </svg>
+                                        <span class="tgt-action-label">Re-authorize</span>
                                     </button>
                                 </template>
 
                                 <!-- Deactivate button for ALL servers -->
-                                <button class="tgt-action-btn" @click="deactivateTarget(target)" title="Deactivate" :aria-label="'Deactivate ' + target.display_name" :disabled="target.deactivating">
+                                <button class="tgt-action-btn" @click="deactivateTarget(target)" :aria-label="'Deactivate ' + target.display_name" :disabled="target.deactivating">
                                     <svg x-show="!target.deactivating" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
                                     </svg>
@@ -151,11 +154,12 @@
                                         <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
                                         <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
                                     </svg>
+                                    <span class="tgt-action-label">Deactivate</span>
                                 </button>
 
                                 <!-- Delete button: hidden only for config-file targets -->
                                 <template x-if="target.source !== 'config'">
-                                    <button class="tgt-action-btn tgt-action-danger" @click="deleteTarget(target)" title="Delete permanently" :aria-label="'Delete ' + target.display_name" :disabled="target.deleting">
+                                    <button class="tgt-action-btn tgt-action-danger" @click="deleteTarget(target)" :aria-label="'Delete ' + target.display_name" :disabled="target.deleting">
                                         <svg x-show="!target.deleting" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                                         </svg>
@@ -163,29 +167,32 @@
                                             <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
                                             <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
                                         </svg>
+                                        <span class="tgt-action-label">Delete</span>
                                     </button>
                                 </template>
                             </div>
                         </div>
-                        <div class="tgt-card-title">
-                            <img x-show="target.icon_url" :src="target.icon_url" :alt="target.display_name + ' icon'" width="32" height="32" class="tgt-card-icon">
-                            <h3 class="tgt-card-name" x-text="target.display_name"></h3>
-                        </div>
-                        <div class="tgt-card-meta">
-                            <span class="tgt-meta-badge">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                                <span x-text="target.tool_count + ' tools'"></span>
-                            </span>
-                            <span x-show="target.rule_count > 0" class="tgt-meta-badge tgt-badge-rules">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                <span x-text="target.rule_count + ' rules'"></span>
-                            </span>
-                            <span x-show="target.mapper_count > 0" class="tgt-meta-badge tgt-badge-mappers">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                                <span x-text="target.mapper_count + ' mappers'"></span>
-                            </span>
-                        </div>
-                    </a>
+                        <a :href="'/targets/' + encodeURIComponent(target.name) + '/tools'" class="tgt-card-link">
+                            <div class="tgt-card-title">
+                                <img x-show="target.icon_url" :src="target.icon_url" :alt="target.display_name + ' icon'" width="32" height="32" class="tgt-card-icon">
+                                <h3 class="tgt-card-name" x-text="target.display_name"></h3>
+                            </div>
+                            <div class="tgt-card-meta">
+                                <span class="tgt-meta-badge">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                    <span x-text="target.tool_count + ' tools'"></span>
+                                </span>
+                                <span x-show="target.rule_count > 0" class="tgt-meta-badge tgt-badge-rules">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    <span x-text="target.rule_count + ' rules'"></span>
+                                </span>
+                                <span x-show="target.mapper_count > 0" class="tgt-meta-badge tgt-badge-mappers">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                                    <span x-text="target.mapper_count + ' mappers'"></span>
+                                </span>
+                            </div>
+                        </a>
+                    </div>
                 </div>
             </template>
             </div>
@@ -204,13 +211,12 @@
                                     <span class="tgt-dot dot-inactive"></span>
                                     <span class="tgt-status-label label-inactive">Inactive</span>
                                 </div>
-                                <div class="tgt-card-actions" @click.prevent.stop>
+                                <div class="tgt-card-actions">
                                     <!-- Activate button -->
                                     <button class="tgt-action-btn tgt-action-activate"
                                             @click="activateTarget(target)"
-                                            title="Activate"
                                             :disabled="target.activating"
-                                            aria-label="Activate server">
+                                            :aria-label="'Activate ' + target.display_name">
                                         <svg x-show="!target.activating" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <polygon points="5 3 19 12 5 21 5 3"/>
                                         </svg>
@@ -218,11 +224,12 @@
                                             <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
                                             <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
                                         </svg>
+                                        <span class="tgt-action-label">Activate</span>
                                     </button>
 
                                     <!-- Re-authorize button for OAuth-using servers -->
                                     <template x-if="target.config && target.config.oauth">
-                                        <button class="tgt-action-btn" @click="reauthorizeTarget(target)" title="Re-authorize OAuth" :disabled="target.reauthorizing" aria-label="Re-authorize this server">
+                                        <button class="tgt-action-btn" @click="reauthorizeTarget(target)" :disabled="target.reauthorizing" :aria-label="'Re-authorize ' + target.display_name">
                                             <svg x-show="!target.reauthorizing" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                                 <path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
                                             </svg>
@@ -230,15 +237,15 @@
                                                 <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
                                                 <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
                                             </svg>
+                                            <span class="tgt-action-label">Re-authorize</span>
                                         </button>
                                     </template>
 
                                     <!-- Delete button -->
                                     <button class="tgt-action-btn tgt-action-delete"
                                             @click="deleteTarget(target)"
-                                            title="Delete permanently"
                                             :disabled="target.deleting"
-                                            aria-label="Delete server permanently">
+                                            :aria-label="'Delete ' + target.display_name">
                                         <svg x-show="!target.deleting" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                             <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                                         </svg>
@@ -246,6 +253,7 @@
                                             <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
                                             <path d="M12 2 A10 10 0 0 1 22 12" stroke-opacity="1"/>
                                         </svg>
+                                        <span class="tgt-action-label">Delete</span>
                                     </button>
                                 </div>
                             </div>
