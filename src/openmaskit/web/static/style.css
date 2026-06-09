@@ -684,7 +684,57 @@ code {
 }
 
 .tool-detail-header {
-    margin-bottom: 2rem;
+    margin-bottom: 1rem;
+}
+
+.tool-section-nav {
+    position: sticky;
+    top: 70px;
+    z-index: 50;
+    display: flex;
+    gap: 0;
+    margin: 0 0 1.5rem 0;
+    padding: 0 0.25rem;
+    background: rgba(13, 17, 23, 0.85);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    backdrop-filter: blur(12px);
+}
+
+.tool-section-nav a {
+    display: inline-block;
+    padding: 0.7rem 1rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.tool-section-nav a:hover {
+    color: var(--text-primary);
+}
+
+.tool-section-nav a.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+#section-try,
+#section-masking,
+#section-guardrails,
+#section-injections {
+    scroll-margin-top: 130px;
+}
+
+/* Tail padding so the last section can be scrolled to the top of the
+   viewport and the in-page nav can highlight each section in turn. */
+#section-injections {
+    margin-bottom: 60vh;
 }
 
 .tool-detail-header h2 {

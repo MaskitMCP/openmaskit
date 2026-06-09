@@ -33,8 +33,6 @@
             <span class="spinner"></span> Loading...
         </div>
 
-        <a :href="'/targets/' + encodeURIComponent(targetName) + '/tools'" class="back-link">&larr; Back to Tools</a>
-
         <div x-show="pageError" class="try-error" style="margin-bottom: 1rem;">
             <pre x-text="pageError"></pre>
         </div>
@@ -44,8 +42,15 @@
             <p class="tool-desc" x-text="tool ? (tool.description || '') : ''"></p>
         </div>
 
+        <nav class="tool-section-nav" x-init="initSectionObserver()">
+            <a href="#section-try" :class="{ active: activeSection === 'section-try' }">Try It Out</a>
+            <a href="#section-masking" :class="{ active: activeSection === 'section-masking' }">Masking</a>
+            <a href="#section-guardrails" :class="{ active: activeSection === 'section-guardrails' }">Guardrails</a>
+            <a href="#section-injections" :class="{ active: activeSection === 'section-injections' }">Injections</a>
+        </nav>
+
         <!-- Try It Out -->
-        <section class="panel">
+        <section id="section-try" class="panel">
             <h2>Try It Out</h2>
             <div x-show="!tool || !tool.inputSchema || Object.keys(tool.inputSchema.properties || {}).length === 0">
                 <p class="muted">This tool has no input parameters.</p>
@@ -134,7 +139,7 @@
         </section>
 
         <!-- Masking -->
-        <section class="panel">
+        <section id="section-masking" class="panel">
             <h2>
                 Masking
                 <button class="help-icon" @click="startTutorial(tryResult ? 'masking-with-result' : 'masking')"
@@ -291,7 +296,7 @@
         </section>
 
         <!-- Argument Guardrails -->
-        <section class="panel">
+        <section id="section-guardrails" class="panel">
             <h2>
                 Argument Guardrails
                 <button class="help-icon" onclick="startTutorial('guardrails')"
@@ -359,7 +364,7 @@
         </section>
 
         <!-- Argument Injections -->
-        <section class="panel">
+        <section id="section-injections" class="panel">
             <h2>
                 Argument Injections
                 <button class="help-icon" onclick="startTutorial('injections')"
@@ -441,6 +446,7 @@ function toolDetail() {
         targetName: '',
         toolName: '',
         tool: null,
+        activeSection: 'section-try',
         rules: [],
         mappers: [],
         tryArgs: {},
@@ -532,6 +538,38 @@ function toolDetail() {
             } finally {
                 this.pageLoading = false;
             }
+        },
+
+        initSectionObserver() {
+            const ids = ['section-try', 'section-masking', 'section-guardrails', 'section-injections'];
+            // Pick the section whose vertical center is nearest the viewport
+            // center. That tracks "what the user is currently looking at"
+            // smoothly at the top, in the middle, and at the bottom of the
+            // page — including the case where a short trailing section can
+            // never scroll its top under the sticky nav.
+            const update = () => {
+                // Reference point at ~35% of the viewport height — below the
+                // sticky header but above center, so the section whose start
+                // is near the top of the visible area wins over a section
+                // whose center happens to align with the viewport center.
+                const reference = window.innerHeight * 0.35;
+                let bestId = ids[0];
+                let bestDistance = Infinity;
+                for (const id of ids) {
+                    const el = document.getElementById(id);
+                    if (!el) continue;
+                    const r = el.getBoundingClientRect();
+                    const sectionCenter = (r.top + r.bottom) / 2;
+                    const distance = Math.abs(sectionCenter - reference);
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestId = id;
+                    }
+                }
+                this.activeSection = bestId;
+            };
+            window.addEventListener('scroll', update, { passive: true });
+            update();
         },
 
         apiBase() {
