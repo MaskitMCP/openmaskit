@@ -73,12 +73,12 @@ def test_custom_stdio_full_lifecycle(dashboard_page: Page) -> None:
     # Sanity: original email visible before any rule.
     expect(page.locator(".tree-value", has_text="alice@example.com")).to_be_visible()
 
-    # Mask via hover-to-Mask on the email leaf, save the draft rule.
+    # Mask via hover-to-Mask on the email leaf. The mapper is created in one
+    # shot — no draft / confirm step.
     email_leaf = page.locator(".tree-node").filter(
         has=page.locator(".tree-key", has_text="email:")
     ).first
     email_leaf.locator(".tree-action").click()
-    page.get_by_role("button", name="Save", exact=True).click()
 
     # Re-call and verify the email is aliased.
     call_button.click()

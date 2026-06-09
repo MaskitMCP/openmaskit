@@ -89,14 +89,11 @@ def test_postgres_install_mask_and_guardrail(dashboard_page: Page, pg_uri: str) 
     # Wait for at least one tree leaf to render.
     expect(page.locator(".tree-leaf").first).to_be_visible(timeout=30_000)
 
-    # === Step 5: click Mask on the email leaf, save the draft rule ===
+    # === Step 5: click Mask on the email leaf — mapper is created in one shot ===
     email_leaf = _tree_leaf_with_key(page, "email").first
     email_leaf.locator(".tree-action").click()
-    # Both email leaves in the tree should highlight as pending-mask once the
-    # draft rule (path = "email") is staged.
+    # Both email leaves in the tree highlight as pending-mask (path = "email").
     expect(page.locator(".tree-node-pending-mask")).to_have_count(2)
-    # Inline rule editor opens in the Active rules table.
-    page.get_by_role("button", name="Save", exact=True).click()
     active_rules = page.locator(".panel", has=page.get_by_role("heading", name="Masking", exact=False)).locator("table")
     expect(active_rules.locator("code", has_text="email")).to_be_visible()
 
