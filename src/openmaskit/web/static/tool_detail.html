@@ -49,9 +49,6 @@
             <h2>Try It Out</h2>
             <div x-show="!tool || !tool.inputSchema || Object.keys(tool.inputSchema.properties || {}).length === 0">
                 <p class="muted">This tool has no input parameters.</p>
-                <button class="btn-primary" @click="callTool()" :disabled="tryLoading">
-                    <span x-text="tryLoading ? 'Calling...' : 'Call'"></span>
-                </button>
             </div>
             <div x-show="tool && tool.inputSchema && Object.keys(tool.inputSchema.properties || {}).length > 0" class="try-form">
                 <template x-for="(prop, name) in (tool ? tool.inputSchema?.properties || {} : {})" :key="name">
@@ -75,11 +72,11 @@
                         ></textarea>
                     </label>
                 </template>
-                <div class="try-actions">
-                    <button class="btn-primary" @click="callTool()" :disabled="tryLoading">
-                        <span x-text="tryLoading ? 'Calling...' : 'Call'"></span>
-                    </button>
-                </div>
+            </div>
+            <div class="try-actions">
+                <button class="btn-primary" @click="callTool()" :disabled="tryLoading">
+                    <span x-text="tryLoading ? 'Calling...' : 'Call'"></span>
+                </button>
             </div>
             <div x-show="tryError" class="try-error">
                 <pre x-text="tryError"></pre>
@@ -179,9 +176,13 @@
                                     <template x-if="entry.type !== 'Strip'">
                                         <span>
                                             <span x-show="entry.kind === 'rule' && editingRule?.id !== entry.id" x-text="entry.alias_prefix"></span>
-                                            <input x-show="entry.kind === 'rule' && editingRule?.id === entry.id" type="text" class="edit-input" x-model="editingRule.alias_prefix" @keydown.enter="saveEditRule()" @keydown.escape="cancelEditRule()">
+                                            <template x-if="entry.kind === 'rule' && editingRule?.id === entry.id">
+                                                <input type="text" class="edit-input" x-model="editingRule.alias_prefix" @keydown.enter="saveEditRule()" @keydown.escape="cancelEditRule()">
+                                            </template>
                                             <span x-show="entry.kind === 'mapper' && editingMapper?.id !== entry.id" x-text="entry.alias_prefix"></span>
-                                            <input x-show="entry.kind === 'mapper' && editingMapper?.id === entry.id" type="text" class="edit-input" x-model="editingMapper.alias_prefix" @keydown.enter="saveEditMapper()" @keydown.escape="cancelEditMapper()">
+                                            <template x-if="entry.kind === 'mapper' && editingMapper?.id === entry.id">
+                                                <input type="text" class="edit-input" x-model="editingMapper.alias_prefix" @keydown.enter="saveEditMapper()" @keydown.escape="cancelEditMapper()">
+                                            </template>
                                         </span>
                                     </template>
                                 </td>

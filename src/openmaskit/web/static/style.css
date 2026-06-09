@@ -368,6 +368,9 @@ code {
     filter: blur(4px);
     transition: filter var(--transition-base);
     user-select: none;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .blur.revealed {
@@ -388,6 +391,8 @@ code {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .btn-reveal:hover {
