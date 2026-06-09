@@ -2611,6 +2611,7 @@ tr:target {
 
 .tgt-card {
     display: flex;
+    position: relative;
     animation: tgt-card-in 0.35s ease both;
     border-radius: var(--radius-lg);
     overflow: hidden;
@@ -2621,6 +2622,7 @@ tr:target {
 
 .tgt-card:hover {
     border-color: var(--border-default);
+    background: var(--bg-hover);
     box-shadow: var(--shadow-md), 0 0 24px rgba(88, 166, 255, 0.04);
 }
 
@@ -2661,14 +2663,14 @@ tr:target {
     display: block;
     text-decoration: none;
     color: inherit;
-    border-radius: var(--radius-sm);
-    margin: -0.25rem;
-    padding: 0.25rem;
-    transition: background var(--transition-fast);
 }
 
-.tgt-card-link:hover {
-    background: var(--bg-hover);
+/* Extend the clickable target so the whole card navigates, but actions still
+   get clicks because they sit in a higher stacking context (see below). */
+.tgt-card-link::after {
+    content: '';
+    position: absolute;
+    inset: 0;
 }
 
 .tgt-card-header {
@@ -2736,6 +2738,8 @@ tr:target {
     gap: 0.35rem;
     flex-wrap: wrap;
     justify-content: flex-end;
+    position: relative;
+    z-index: 1;
 }
 
 .tgt-action-btn {
@@ -4291,6 +4295,12 @@ tr:target {
     color: var(--teal);
     border-color: var(--teal-border);
     background: var(--teal-dim);
+}
+
+.tgt-action-warning:hover {
+    color: var(--orange);
+    border-color: var(--orange-border);
+    background: var(--orange-dim);
 }
 
 /* --- Selection Styling --- */
