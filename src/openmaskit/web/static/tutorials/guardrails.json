@@ -4,7 +4,7 @@
     "steps": [
         {
             "text": "Guardrails block dangerous operations before they reach your servers. Example: prevent 'DROP TABLE' commands or operations on production databases.",
-            "target": "section.panel:contains('Argument Guardrails')",
+            "target": "#section-guardrails",
             "position": "bottom"
         },
         {

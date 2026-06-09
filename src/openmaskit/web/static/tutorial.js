@@ -133,6 +133,7 @@ class Tutorial {
     showStep(index) {
         const step = this.steps[index];
         const popover = this.overlay.querySelector('.tutorial-popover');
+        this._scrolledForFit = false;
 
         // Update popover content
         popover.querySelector('.tutorial-popover-title').textContent = this.title;
@@ -325,136 +326,116 @@ class Tutorial {
         const popover = this.overlay.querySelector('.tutorial-popover');
 
         if (!targetSelector || position === 'center') {
-            // Center popover
             popover.style.position = 'fixed';
             popover.style.top = '50%';
             popover.style.left = '50%';
             popover.style.transform = 'translate(-50%, -50%)';
-
-            // Clear connector when centered
-            const connector = this.overlay.querySelector('.tutorial-connector');
-            connector.style.display = 'none';
+            this.overlay.querySelector('.tutorial-connector').style.display = 'none';
             return;
         }
 
-        // Support text-matching pseudo-selector (same as highlightElement)
-        let target;
-        const containsMatch = targetSelector.match(/^(.+):contains\(['"](.+)['"]\)$/);
-
-        if (containsMatch) {
-            const [, baseSelector, textContent] = containsMatch;
-            const candidates = document.querySelectorAll(baseSelector);
-            for (const candidate of candidates) {
-                if (candidate.textContent.includes(textContent)) {
-                    target = candidate;
-                    break;
-                }
-            }
-        } else {
-            target = document.querySelector(targetSelector);
-        }
-
+        const target = this._resolveTarget(targetSelector);
         if (!target) {
-            // Fallback to center if target not found
             this.positionPopover(null, 'center');
             return;
         }
 
-        const rect = target.getBoundingClientRect();
-        const popoverWidth = 440;
-        const popoverHeight = 300; // Increased estimate for safety
-        const gap = 55; // Increased gap to prevent overlap with highlighted elements
-        const margin = 10; // Margin from viewport edges
+        const margin = 10;
+        const gap = 24;
+        const stickyHeaderOffset = 60;
 
         popover.style.position = 'fixed';
         popover.style.transform = 'none';
 
-        let top, left;
-        let finalPosition = position;
+        // Measure the actual popover so the fit checks aren't off by 100+px.
+        const popoverRect = popover.getBoundingClientRect();
+        const pw = popoverRect.width || 440;
+        const ph = popoverRect.height || 280;
 
-        // Smart positioning: try requested position first, fallback if doesn't fit
-        switch (position) {
+        const rect = target.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+
+        const fits = {
+            bottom: rect.bottom + gap + ph <= vh - margin,
+            top: rect.top - gap - ph >= stickyHeaderOffset + margin,
+            right: rect.right + gap + pw <= vw - margin,
+            left: rect.left - gap - pw >= margin,
+        };
+
+        // Preferred position first, then opposite vertical/horizontal, then sides.
+        const chain = {
+            bottom: ['bottom', 'top', 'right', 'left'],
+            top: ['top', 'bottom', 'right', 'left'],
+            right: ['right', 'left', 'bottom', 'top'],
+            left: ['left', 'right', 'bottom', 'top'],
+        }[position] || ['bottom', 'top', 'right', 'left'];
+
+        const chosen = chain.find(c => fits[c]);
+
+        if (!chosen) {
+            // The target is taller than the viewport allows the popover to sit
+            // alongside (typical for full-width section panels). Try to scroll
+            // the target to the top once, then on retry pin the popover to the
+            // viewport's bottom-right corner — a deterministic placement that
+            // keeps the target's heading visible.
+            if (!this._scrolledForFit) {
+                this._scrolledForFit = true;
+                const targetTopInDoc = rect.top + window.scrollY;
+                window.scrollTo({
+                    top: Math.max(0, targetTopInDoc - stickyHeaderOffset - margin),
+                    behavior: 'smooth',
+                });
+                setTimeout(() => {
+                    if (this.overlay && this.steps[this.currentStep]?.target === targetSelector) {
+                        this.updatePositions();
+                    }
+                }, 350);
+                return;
+            }
+            popover.style.top = `${vh - ph - margin}px`;
+            popover.style.left = `${vw - pw - margin}px`;
+            setTimeout(() => this.drawConnector(), 50);
+            return;
+        }
+        this._scrolledForFit = false;
+
+        let top, left;
+        switch (chosen) {
             case 'bottom':
                 top = rect.bottom + gap;
-                // If popover would go below viewport, try above
-                if (top + popoverHeight > window.innerHeight - margin) {
-                    top = rect.top - popoverHeight - gap;
-                    finalPosition = 'top';
-                    // If still doesn't fit, center it vertically
-                    if (top < margin) {
-                        top = Math.max(margin, (window.innerHeight - popoverHeight) / 2);
-                        finalPosition = 'center-vertical';
-                    }
-                }
-                left = Math.max(margin, Math.min(rect.left, window.innerWidth - popoverWidth - margin));
+                left = clamp(rect.left, margin, vw - pw - margin);
                 break;
-
             case 'top':
-                top = rect.top - popoverHeight - gap;
-                // If popover would go above viewport, try below
-                if (top < margin) {
-                    top = rect.bottom + gap;
-                    finalPosition = 'bottom';
-                    // If still doesn't fit, center it vertically
-                    if (top + popoverHeight > window.innerHeight - margin) {
-                        top = Math.max(margin, (window.innerHeight - popoverHeight) / 2);
-                        finalPosition = 'center-vertical';
-                    }
-                }
-                left = Math.max(margin, Math.min(rect.left, window.innerWidth - popoverWidth - margin));
+                top = rect.top - ph - gap;
+                left = clamp(rect.left, margin, vw - pw - margin);
                 break;
-
             case 'right':
                 left = rect.right + gap;
-                // If popover would go off right edge, try left
-                if (left + popoverWidth > window.innerWidth - margin) {
-                    left = rect.left - popoverWidth - gap;
-                    finalPosition = 'left';
-                    // If still doesn't fit, center horizontally
-                    if (left < margin) {
-                        left = Math.max(margin, (window.innerWidth - popoverWidth) / 2);
-                    }
-                }
-                top = Math.max(margin, Math.min(rect.top, window.innerHeight - popoverHeight - margin));
+                top = clamp(rect.top, stickyHeaderOffset + margin, vh - ph - margin);
                 break;
-
             case 'left':
-                left = rect.left - popoverWidth - gap;
-                // If popover would go off left edge, try right
-                if (left < margin) {
-                    left = rect.right + gap;
-                    finalPosition = 'right';
-                    // If still doesn't fit, center horizontally
-                    if (left + popoverWidth > window.innerWidth - margin) {
-                        left = Math.max(margin, (window.innerWidth - popoverWidth) / 2);
-                    }
-                }
-                top = Math.max(margin, Math.min(rect.top, window.innerHeight - popoverHeight - margin));
+                left = rect.left - pw - gap;
+                top = clamp(rect.top, stickyHeaderOffset + margin, vh - ph - margin);
                 break;
-
-            default:
-                // Default to center
-                this.positionPopover(null, 'center');
-                return;
         }
 
         popover.style.top = `${top}px`;
         popover.style.left = `${left}px`;
 
-        // Scroll target into view if it's partially off-screen
-        if (rect.top < 0 || rect.bottom > window.innerHeight ||
-            rect.left < 0 || rect.right > window.innerWidth) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-            // Recalculate after scroll animation
-            setTimeout(() => {
-                if (this.overlay && this.steps[this.currentStep]?.target === targetSelector) {
-                    this.updatePositions();
-                }
-            }, 500);
-        }
-
-        // Draw connector line after positioning
         setTimeout(() => this.drawConnector(), 50);
+    }
+
+    _resolveTarget(targetSelector) {
+        const m = targetSelector.match(/^(.+):contains\(['"](.+)['"]\)$/);
+        if (m) {
+            for (const el of document.querySelectorAll(m[1])) {
+                if (el.textContent.includes(m[2])) return el;
+            }
+            return null;
+        }
+        return document.querySelector(targetSelector);
     }
 
     bindEvents() {

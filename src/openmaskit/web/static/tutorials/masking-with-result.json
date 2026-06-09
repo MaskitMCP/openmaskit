@@ -4,7 +4,7 @@
     "steps": [
         {
             "text": "Masking replaces sensitive values in tool responses with stable aliases. The AI sees the aliases; OpenMaskit swaps them back to real values when the agent sends them in a subsequent call.",
-            "target": "section.panel:contains('Masking')",
+            "target": "#section-masking",
             "position": "bottom"
         },
         {
