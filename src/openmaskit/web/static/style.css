@@ -1072,6 +1072,29 @@ code {
     margin: 0 0 0.5rem 0;
 }
 
+.detail-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.detail-section-header h4 {
+    margin: 0;
+}
+
+.detail-code-secret {
+    filter: blur(4px);
+    transition: filter var(--transition-base);
+    user-select: none;
+}
+
+.detail-code-secret.revealed {
+    filter: none;
+    user-select: text;
+}
+
 .detail-code {
     font-family: var(--font-mono);
     font-size: 0.75rem;
