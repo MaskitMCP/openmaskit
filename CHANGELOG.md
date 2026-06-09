@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-09
+
+### Added
+- `POST /api/marketplace/{target_id}/delete` permanently removes an installed marketplace server: disconnects via `TargetManager`, deletes the OAuth token file at `{store_dir}/oauth/{handle}.json` (tokens and `client_info`), and drops the row from `mcp_servers`. The Servers page Delete button uses it for marketplace cards.
+- Sticky in-page nav (Try it out / Masking / Guardrails / Injections) on the tool detail page with a center-distance scroll-spy, replacing the static Back-to-Tools link.
+- Traffic detail blurs unmasked args and the upstream response behind a Show toggle so glanceable inspection doesn't leak secrets. Aliases inside masked args / response render as clickable links that jump to the matching Mappings row.
+- E2E test scaffold (`tests/e2e`) with a Postgres flow. Skipped in the default `pytest tests/` run.
+
+### Changed
+- Servers cards: the whole card is now the click target into the tool list (previously only the inner title block). Buttons stay visible by default with text labels (Connect / Deactivate / Delete / Re-authorize / Edit) and uniform card hover. Deactivate picks up an orange hover treatment.
+
+### Fixed
+- Tutorial overlay no longer parks the popover on top of the highlighted component. Placement now measures the popover and falls back through preferred → opposite → side → scroll-and-corner-pin. Section selectors switched from text-`:contains()` (which mis-matched because Try It Out contained the word "Masking") to stable element IDs.
+- "Add Masking Rule" modal no longer carries stale state from the previous open.
+- Masking rules now reload from the store when a target is hot-added, so newly installed servers see existing rules immediately instead of after a restart.
+- Dashboard console errors (null `tags` on marketplace cards, null `editingRule` / `editingMapper` on tool detail) and the clipped Show button in the Mappings table.
+
 ## [0.6.0] - 2026-06-07
 
 ### Changed
@@ -129,7 +146,8 @@ open of an existing `store.db`.
 ### Changed
 - Env-var modal polish.
 
-[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/MaskitMCP/openmaskit/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/MaskitMCP/openmaskit/compare/v0.4.0...v0.4.1
